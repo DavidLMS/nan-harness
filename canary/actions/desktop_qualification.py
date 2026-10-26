@@ -1346,13 +1346,27 @@ def semantic_observations(directory, app):
             stages.update('tree-depth tree-nodes tree-name-limit tree-text-limit tree-window-limit tree-process-limit'.split())
             stages.update('clipboard-owner clipboard-allocation clipboard-lock clipboard-empty clipboard-set clipboard-close clipboard-guard-before clipboard-guard-after clipboard-deadline-before clipboard-deadline-after clipboard-open-deadline'.split())
             phase_fields = {'actionPhase', 'transportFailure'}
-            if (app != 'claude-desktop' or set(value) - {'providerObservation', 'guardRejection', 'rowShape', 'scopeShape', 'failureAuthority', 'failureScopeCounts', 'operationTiming', 'nativeAction', 'nativeStage', 'composerShape'} not in (fields, fields | phase_fields) or value['diagnosticsOnly'] is not True
+            if (app != 'claude-desktop' or set(value) - {'providerObservation', 'guardRejection', 'rowShape', 'scopeShape', 'failureAuthority', 'failureScopeCounts', 'operationTiming', 'nativeAction', 'nativeStage', 'composerShape', 'nativeWindowGuard'} not in (fields, fields | phase_fields) or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in stages
                     or any(type(value[key]) is not bool for key in flags)
                     or any(type(value[key]) is not int or not 0 <= value[key] <= 3 for key in counts)
                     or value['submittedTurns'] > value['inputVerifiedTurns']
                     or value['copiedResponses'] > value['submittedTurns'] + int(value['retryAttempted'])):
                 raise ValueError('invalid Claude native Chat observation')
+            if 'nativeWindowGuard' in value:
+                guard = value['nativeWindowGuard']
+                allowed = {
+                    'action': {'input', 'input-replace-owned', 'input-failure-owned', 'copy', 'retry-ready', 'retry', 'failure-details', 'failure-details-ready', 'failure-details-temporal', 'failure-details-ready-temporal', 'retry-ready-temporal', 'retry-temporal'},
+                    'site': {'entry', 'collect-before', 'collect-after'},
+                    'failure': {'unmeasured', 'foreground', 'application', 'focus', 'geometry', 'inventory', 'identity', 'layer', 'display', 'stack'},
+                    'focusStatus': {'unqueried', 'untrusted', 'query-error', 'focus-mismatch', 'not-standard', 'ready'},
+                    'queryStage': {'unqueried', 'app-create', 'app-timeout', 'focused-window', 'main-window', 'focused-element', 'input-timeout', 'input-window', 'element-type', 'pid', 'window-timeout', 'role', 'subrole', 'position', 'size', 'geometry'},
+                    'queryError': {'unqueried', 'failure', 'illegal-argument', 'invalid-element', 'cannot-complete', 'attribute-unsupported', 'not-implemented', 'api-disabled', 'no-value', 'other', 'empty-value', 'type-mismatch', 'owner-mismatch', 'geometry-invalid'},
+                }
+                if (mechanism != 'claude-native-chat' or type(guard) is not dict or set(guard) != set(allowed)
+                        or any(type(item) is not str or item not in allowed[key] for key, item in guard.items())):
+                    raise ValueError('invalid Claude native window guard')
+                record['nativeWindowGuard'] = dict(guard)
             if 'composerShape' in value:
                 shape = value['composerShape']
                 if (mechanism != 'claude-native-chat' or type(shape) is not dict

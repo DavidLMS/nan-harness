@@ -62,6 +62,8 @@ struct Facts {
     scope_shape: Option<crate::native::FailureScopeShape>,
     #[serde(skip_serializing_if = "Option::is_none")]
     composer_shape: Option<crate::native::ComposerShape>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    native_window_guard: Option<crate::native::WindowGuardObservation>,
     submitted_turns: u8,
     input_verified_turns: u8,
     copied_responses: u8,
@@ -83,6 +85,7 @@ impl Default for Facts {
             row_shape: None,
             scope_shape: None,
             composer_shape: None,
+            native_window_guard: None,
             submitted_turns: 0,
             input_verified_turns: 0,
             copied_responses: 0,
@@ -182,6 +185,7 @@ impl ClaudeNativeChatSession<'_> {
         self.facts.action_phase = Some(ChatActionPhase::BeforeGuard);
         self.facts.transport_failure = None;
         self.facts.guard_rejection = None;
+        self.facts.native_window_guard = None;
         if matches!(
             mode,
             "input" | "input-replace-owned" | "input-failure-owned"
@@ -221,6 +225,7 @@ impl ClaudeNativeChatSession<'_> {
         if let Some(shape) = receipt.composer_shape {
             self.facts.composer_shape = Some(shape);
         }
+        self.facts.native_window_guard = receipt.window_guard;
         self.facts.action_phase = Some(ChatActionPhase::Completed);
         Ok(stage)
     }

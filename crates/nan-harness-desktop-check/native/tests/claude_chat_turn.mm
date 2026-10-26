@@ -3,6 +3,7 @@
 #include <cassert>
 bool claude_owned_mac_window(std::uint64_t, pid_t, CGRect) { return false; }
 MacOwnedWindowState claude_mac_window_state(std::uint64_t, pid_t, CGRect) { return MacOwnedWindowState::Rejected; }
+MacWindowObservation claude_mac_window_observation() { return {}; }
 static Node fixture(int parent, const char* role, const char* label, const char* current = "") {
     return {nullptr, parent, role, label, current, CGRectZero, true};
 }
@@ -63,6 +64,7 @@ int main() {
         [] { return false; }, [] {}));
     assert(window_queries == 0);
     const MacWindowSafety safe{true,true,true,true,true,true,true};
+    assert(std::string(mac_window_rejection(safe)) == "unmeasured");
     assert(classify_mac_owned_window(MacFocusRead::ReadyHeld,safe)==MacOwnedWindowState::Ready);
     assert(classify_mac_owned_window(MacFocusRead::CannotComplete,safe)==MacOwnedWindowState::PendingFocus);
     assert(classify_mac_owned_window(MacFocusRead::Rejected,safe)==MacOwnedWindowState::Rejected);
@@ -79,6 +81,8 @@ int main() {
         }
         for (auto focus : {MacFocusRead::ReadyHeld, MacFocusRead::CannotComplete, MacFocusRead::Rejected})
             assert(classify_mac_owned_window(focus,unsafe)==MacOwnedWindowState::Rejected);
+        const char* reasons[] = {"foreground", "application", "identity", "geometry", "layer", "display", "stack"};
+        assert(std::string(mac_window_rejection(unsafe)) == reasons[missing]);
     }
     unsigned passive_reads=0, passive_pauses=0, actions=1;
     bool past_deadline=false;

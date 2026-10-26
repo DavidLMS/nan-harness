@@ -2765,6 +2765,29 @@ class QualificationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 q.semantic_observations(tmp, 'chatgpt-desktop')
 
+    def test_native_window_guard_is_closed_and_does_not_authorize_recovery(self):
+        guard = dict(action='copy', site='collect-after', failure='focus', focusStatus='query-error',
+                     queryStage='focused-element', queryError='no-value')
+        value = dict(schemaVersion=1, mechanism='claude-native-chat', diagnosticsOnly=True,
+                     stage='tree-window', submittedTurns=1, inputVerifiedTurns=1, copiedResponses=0,
+                     retryAttempted=False, clipboardCleared=True, nativeWindowGuard=guard)
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'window.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [value])
+            self.assertEqual(q.envelope('claude-desktop', 'macos', 'aarch64', 'a' * 40)['qualification'], 'unqualified')
+            for key in guard:
+                path.write_text(json.dumps({**value, 'nativeWindowGuard': {**guard, key: 'PRIVATE'}}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+            for changed in ({**guard, 'pid': 123}, {key: item for key, item in guard.items() if key != 'site'}):
+                path.write_text(json.dumps({**value, 'nativeWindowGuard': changed}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+            path.write_text(json.dumps({**value, 'mechanism': 'claude-windows-native-chat'}))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'claude-desktop')
+
     def test_native_composer_shape_is_bounded_and_cannot_qualify_a_probe(self):
         value = dict(schemaVersion=1, mechanism='claude-native-chat', diagnosticsOnly=True,
                      stage='composer-ambiguous', submittedTurns=2, inputVerifiedTurns=2, copiedResponses=2,

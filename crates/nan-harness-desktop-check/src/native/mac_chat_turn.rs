@@ -344,12 +344,128 @@ pub(crate) struct ChatTurnReceipt {
     pub(crate) row_shape: Option<FailureRowShape>,
     pub(crate) scope_shape: Option<FailureScopeShape>,
     pub(crate) composer_shape: Option<ComposerShape>,
+    pub(crate) window_guard: Option<WindowGuardObservation>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WindowGuardObservation {
+    action: &'static str,
+    site: &'static str,
+    failure: &'static str,
+    focus_status: &'static str,
+    query_stage: &'static str,
+    query_error: &'static str,
+}
+impl WindowGuardObservation {
+    fn parse(line: &str, mode: &str) -> Option<Self> {
+        fn label(value: &str, allowed: &[&'static str]) -> Option<&'static str> {
+            allowed.iter().copied().find(|allowed| *allowed == value)
+        }
+        let fields: Vec<_> = line.strip_prefix("window-guard ")?.split(' ').collect();
+        if fields.len() != 5 {
+            return None;
+        }
+        Some(Self {
+            action: label(
+                mode,
+                &[
+                    "input",
+                    "input-replace-owned",
+                    "input-failure-owned",
+                    "copy",
+                    "retry-ready",
+                    "retry",
+                    "failure-details",
+                    "failure-details-ready",
+                    "failure-details-temporal",
+                    "failure-details-ready-temporal",
+                    "retry-ready-temporal",
+                    "retry-temporal",
+                ],
+            )?,
+            site: label(fields[0], &["entry", "collect-before", "collect-after"])?,
+            failure: label(
+                fields[1],
+                &[
+                    "unmeasured",
+                    "foreground",
+                    "application",
+                    "focus",
+                    "geometry",
+                    "inventory",
+                    "identity",
+                    "layer",
+                    "display",
+                    "stack",
+                ],
+            )?,
+            focus_status: label(
+                fields[2],
+                &[
+                    "unqueried",
+                    "untrusted",
+                    "query-error",
+                    "focus-mismatch",
+                    "not-standard",
+                    "ready",
+                ],
+            )?,
+            query_stage: label(
+                fields[3],
+                &[
+                    "unqueried",
+                    "app-create",
+                    "app-timeout",
+                    "focused-window",
+                    "main-window",
+                    "focused-element",
+                    "input-timeout",
+                    "input-window",
+                    "element-type",
+                    "pid",
+                    "window-timeout",
+                    "role",
+                    "subrole",
+                    "position",
+                    "size",
+                    "geometry",
+                ],
+            )?,
+            query_error: label(
+                fields[4],
+                &[
+                    "unqueried",
+                    "failure",
+                    "illegal-argument",
+                    "invalid-element",
+                    "cannot-complete",
+                    "attribute-unsupported",
+                    "not-implemented",
+                    "api-disabled",
+                    "no-value",
+                    "other",
+                    "empty-value",
+                    "type-mismatch",
+                    "owner-mismatch",
+                    "geometry-invalid",
+                ],
+            )?,
+        })
+    }
+    fn split<'a>(output: &'a str, mode: &str) -> Option<(&'a str, Option<Self>)> {
+        let Some(index) = output.rfind("\nwindow-guard ") else {
+            return Some((output, None));
+        };
+        let observation = Self::parse(output[index + 1..].strip_suffix('\n')?, mode)?;
+        Some((&output[..=index], Some(observation)))
+    }
 }
 impl ChatTurnReceipt {
     pub(crate) fn parse(output: &str, mode: &str) -> Option<Self> {
         if output.len() > 4096 {
             return None;
         }
+        let (output, window_guard) = WindowGuardObservation::split(output, mode)?;
         let (first, remainder) = output.split_once('\n')?;
         let stage = ChatTurnStage::parse(&format!("{first}\n"))?;
         if remainder.is_empty() {
@@ -358,6 +474,7 @@ impl ChatTurnReceipt {
                 row_shape: None,
                 scope_shape: None,
                 composer_shape: None,
+                window_guard,
             });
         }
         if matches!(
@@ -369,6 +486,7 @@ impl ChatTurnReceipt {
                 row_shape: None,
                 scope_shape: None,
                 composer_shape: Some(ComposerShape::parse(remainder.strip_suffix('\n')?)?),
+                window_guard,
             });
         }
         if !matches!(
@@ -418,6 +536,7 @@ impl ChatTurnReceipt {
             stage,
             scope_shape,
             composer_shape: None,
+            window_guard,
             row_shape: Some(FailureRowShape {
                 source_version: "2.19675.0",
                 source_sha256: "87e6b710a540352fcd4f9a1f0f6a8f9f9b6377ca676fd99c3e4d8bc87653dceb",
@@ -510,6 +629,32 @@ pub(super) fn request(
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn window_guard_facts_are_closed_and_cannot_change_a_rejected_action() {
+        let line = "window-guard collect-after focus query-error focused-element no-value\n";
+        let receipt = ChatTurnReceipt::parse(&format!("turn tree-window\n{line}"), "copy").unwrap();
+        assert_eq!(receipt.stage, ChatTurnStage::TreeWindow);
+        assert_eq!(receipt.window_guard.unwrap().action, "copy");
+        assert_eq!(receipt.window_guard.unwrap().query_error, "no-value");
+        let with_counts = format!("turn tree-window\ncomposer 1 0 0\n{line}");
+        assert!(
+            ChatTurnReceipt::parse(&with_counts, "input")
+                .unwrap()
+                .composer_shape
+                .is_some()
+        );
+        for invalid in [
+            line.replace("focus ", "PRIVATE "),
+            line.replace("no-value", "no-value PRIVATE"),
+            line.replace("collect-after", "private-path"),
+            format!("{line}{line}"),
+        ] {
+            assert!(
+                ChatTurnReceipt::parse(&format!("turn tree-window\n{invalid}"), "copy").is_none()
+            );
+        }
+        assert!(ChatTurnReceipt::parse(&format!("turn tree-window\n{line}"), "PRIVATE").is_none());
+    }
     #[test]
     fn composer_counts_are_closed_and_do_not_grant_action_readiness() {
         let receipt = ChatTurnReceipt::parse(
