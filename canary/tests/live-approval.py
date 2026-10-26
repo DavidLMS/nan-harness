@@ -97,6 +97,19 @@ class LiveApproval(unittest.TestCase):
         desktop = jobs(WORKFLOWS / 'desktop-check.yml')
         self.assertFalse(condition(desktop['check'], ref='refs/heads/untrusted'))
 
+    def test_release_desktop_qualification_waits_for_the_same_single_review(self):
+        release = jobs(WORKFLOWS / 'release-gate.yml')
+        desktop = release['desktop']
+        self.assertIn('needs: [prepare, approve-live]', desktop)
+        self.assertIn('12 native Desktop cells', release['approve-live'])
+        self.assertTrue(condition(desktop))
+        for approval in ('failure', 'cancelled', 'skipped'):
+            self.assertFalse(condition(desktop, approval=approval))
+        self.assertFalse(condition(desktop, prerequisite='failure'))
+        self.assertFalse(condition(desktop, cancelled=True))
+        self.assertFalse(condition(desktop, ref='refs/heads/untrusted'))
+        self.assertTrue(condition(desktop, mode='deterministic', approval='skipped'))
+
 
 if __name__ == '__main__':
     unittest.main()
