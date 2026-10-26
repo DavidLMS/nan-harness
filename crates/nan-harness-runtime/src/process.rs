@@ -5,14 +5,17 @@ use nan_harness_core::{SecretError, SecretStore};
 use std::io;
 use std::process::ExitStatus;
 use std::process::Stdio;
-#[cfg(windows)]
-use std::time::Duration;
 use thiserror::Error;
 #[cfg(not(windows))]
 use tokio::process::Child;
 use tokio::process::Command;
 
 const INTERNAL_CANARY_USAGE_FILE: &str = "NAN_HARNESS_INTERNAL_CANARY_USAGE_FILE";
+
+#[cfg(windows)]
+mod windows;
+#[cfg(all(test, windows))]
+mod windows_job_tests;
 
 /// Starts the child process described by a prepared launch plan.
 ///
@@ -36,56 +39,50 @@ pub(crate) struct ManagedChild {
     #[cfg(not(windows))]
     inner: Child,
     #[cfg(windows)]
-    inner: Box<dyn process_wrap::tokio::ChildWrapper>,
+    inner: windows::WindowsChild,
 }
 
 impl ManagedChild {
+    pub(crate) fn take_stdout(&mut self) -> Option<tokio::process::ChildStdout> {
+        #[cfg(not(windows))]
+        {
+            self.inner.stdout.take()
+        }
+        #[cfg(windows)]
+        {
+            self.inner.stdout().take()
+        }
+    }
+    pub(crate) fn take_stdin(&mut self) -> Option<tokio::process::ChildStdin> {
+        #[cfg(not(windows))]
+        {
+            self.inner.stdin.take()
+        }
+        #[cfg(windows)]
+        {
+            self.inner.stdin().take()
+        }
+    }
     pub(crate) fn id(&self) -> Option<u32> {
         self.inner.id()
     }
 
     pub(crate) fn start_kill(&mut self) -> io::Result<()> {
-        #[cfg(not(windows))]
-        {
-            self.inner.start_kill()
-        }
-        #[cfg(windows)]
-        {
-            process_wrap::tokio::ChildWrapper::start_kill(&mut *self.inner)
-        }
+        self.inner.start_kill()
     }
 
     pub(crate) async fn kill(&mut self) -> io::Result<()> {
-        #[cfg(not(windows))]
-        {
-            self.inner.kill().await
-        }
-        #[cfg(windows)]
-        {
-            process_wrap::tokio::ChildWrapper::start_kill(&mut *self.inner)?;
-            process_wrap::tokio::ChildWrapper::wait(&mut *self.inner)
-                .await
-                .map(|_| ())
-        }
+        self.inner.kill().await
     }
 
     pub(crate) async fn wait(&mut self) -> io::Result<ExitStatus> {
-        #[cfg(not(windows))]
-        {
-            self.inner.wait().await
-        }
-        #[cfg(windows)]
-        {
-            // JobObjectChild::wait may wait in a blocking task while descendants drain. Polling
-            // keeps the supervisor's cancellation select cancellable during that interval.
-            loop {
-                if let Some(status) = process_wrap::tokio::ChildWrapper::try_wait(&mut *self.inner)?
-                {
-                    return Ok(status);
-                }
-                tokio::time::sleep(Duration::from_millis(5)).await;
-            }
-        }
+        self.inner.wait().await
+    }
+
+    /// Checks the retained Windows Job, including descendants whose parent has exited.
+    #[cfg(windows)]
+    pub(crate) async fn wait_for_descendants(&self) -> io::Result<()> {
+        self.inner.wait_for_descendants().await
     }
 }
 
@@ -96,7 +93,7 @@ impl From<Child> for ManagedChild {
     }
 }
 
-fn spawn_managed(command: Command) -> io::Result<ManagedChild> {
+pub(crate) fn spawn_managed(command: Command) -> io::Result<ManagedChild> {
     #[cfg(not(windows))]
     {
         let mut command = command;
@@ -106,13 +103,7 @@ fn spawn_managed(command: Command) -> io::Result<ManagedChild> {
     }
     #[cfg(windows)]
     {
-        use process_wrap::tokio::{CommandWrap, JobObject, KillOnDrop};
-
-        let inner = CommandWrap::from(command)
-            .wrap(KillOnDrop)
-            .wrap(JobObject)
-            .spawn()?;
-        Ok(ManagedChild { inner })
+        windows::WindowsChild::spawn(command).map(|inner| ManagedChild { inner })
     }
 }
 
@@ -237,7 +228,7 @@ impl HostedChild {
     }
 }
 
-fn prepare_command(
+pub(crate) fn prepare_command(
     plan: &LaunchPlan,
     prepared: &PreparedLaunch,
     secrets: &SecretStore,

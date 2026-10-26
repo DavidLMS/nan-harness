@@ -37,6 +37,7 @@ pub(crate) fn round_trip_probe(
     kind: HarnessKind,
     workspace: &Path,
     manifest: &ConformanceManifest,
+    available_tools: &BTreeSet<String>,
 ) -> Result<RoundTripProbe, ProbeSelectionError> {
     let read_path = workspace.join("read-target.txt");
     let read_path_string = read_path.to_string_lossy().into_owned();
@@ -96,8 +97,23 @@ pub(crate) fn round_trip_probe(
             let output_path = workspace.join("tool-output.txt");
             let output_path_literal = serde_json::to_string(&output_path.to_string_lossy())
                 .expect("Prime output path should serialize as a JSON string literal");
+            // Prime 0.10 renamed its Python tool without changing the code
+            // argument. Bind the fixture to exactly one advertised known tool.
+            let tool = match (
+                available_tools.contains("ipython"),
+                available_tools.contains("python_repl"),
+            ) {
+                (true, false) => "ipython",
+                (false, true) => "python_repl",
+                _ => {
+                    return Err(ProbeSelectionError {
+                        kind,
+                        tool: "prime-python-tool".to_owned(),
+                    });
+                }
+            };
             (
-                "ipython",
+                tool,
                 json!({
                     "code": format!(
                         "from pathlib import Path; output_path = Path({output_path_literal}); output_path.write_text('{ROUND_TRIP_MARKER}', encoding='utf-8'); output_path.read_text(encoding='utf-8')"

@@ -42,6 +42,16 @@ fn fixture() -> PathBuf {
         .join(format!("probe{}", std::env::consts::EXE_SUFFIX))
 }
 
+#[test]
+fn hermes_version_probe_contains_native_normalization_in_a_private_home() {
+    let output = super::run_hermes_version(&fixture(), &["hermes-version-home"]).unwrap();
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    let mut lines = text.lines();
+    assert_eq!(lines.next(), Some("Hermes Agent v0.22.5"));
+    assert!(!std::path::Path::new(lines.next().unwrap()).exists());
+}
+
 fn probe(arguments: &[&str], timeout: Duration, limit: usize) -> Result<Output, ProbeError> {
     let executable = fixture();
     let arguments: Vec<String> = arguments.iter().map(ToString::to_string).collect();

@@ -20,9 +20,13 @@ pub(crate) fn headless_arguments(
     run_kind: &RunKind,
     marker: &str,
     workspace: &Path,
+    hermes_stream_json: bool,
 ) -> Vec<OsString> {
     let prompt = headless_prompt(run_kind, marker);
     let mut arguments = headless_base_arguments(kind, run_kind, &prompt, workspace);
+    if kind == HarnessKind::Hermes && hermes_stream_json {
+        arguments.extend(["--format".into(), "stream-json".into()]);
+    }
     if kind == HarnessKind::ClaudeCode {
         append_claude_arguments(&mut arguments, run_kind);
     }
@@ -128,13 +132,14 @@ fn opencode_base_arguments(prompt: &str) -> Vec<OsString> {
 }
 
 fn hermes_base_arguments(prompt: &str) -> Vec<OsString> {
+    // The runner supplies an isolated home with only the staged NaN integration.
+    // Hermes safe mode disables provider plugins in its managed workers.
     vec![
         "chat".into(),
         "--query".into(),
         prompt.to_owned().into(),
         "--quiet".into(),
         "--yolo".into(),
-        "--safe-mode".into(),
         "--source".into(),
         "tool".into(),
         "--max-turns".into(),

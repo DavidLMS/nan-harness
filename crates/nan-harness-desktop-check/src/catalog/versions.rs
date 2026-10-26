@@ -321,19 +321,12 @@ fn runtime_image_header(path: &Path) -> diagnostic::RuntimeImageHeader {
     if pe[..4] != PE_SIGNATURE {
         return diagnostic::RuntimeImageHeader::InvalidHeader;
     }
-    classify_runtime_machine(u16::from_le_bytes([pe[4], pe[5]]), host_runtime_machine())
-}
-
-fn host_runtime_machine() -> Option<u16> {
-    #[cfg(all(windows, target_arch = "x86_64"))]
-    {
-        return Some(X64_MACHINE);
-    }
-    #[cfg(all(windows, target_arch = "aarch64"))]
-    {
-        return Some(ARM64_MACHINE);
-    }
-    None
+    let host_machine = match (cfg!(windows), std::env::consts::ARCH) {
+        (true, "x86_64") => Some(X64_MACHINE),
+        (true, "aarch64") => Some(ARM64_MACHINE),
+        _ => None,
+    };
+    classify_runtime_machine(u16::from_le_bytes([pe[4], pe[5]]), host_machine)
 }
 
 fn classify_runtime_machine(

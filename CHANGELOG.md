@@ -7,6 +7,23 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.25] - 2026-10-26
+
+### Fixed
+
+- Reap completed Windows harness Jobs without blocking after status polling,
+  and verify that their owned descendants have exited before confirming cleanup.
+- Reserve time for the Windows Claude post-action ownership checks within the
+  original deadline, and retain the native action stage in closed diagnostics.
+- Keep Hermes canonical-gateway conversations in a separate persistent NaN
+  profile, supervise its foreground gateway through cleanup, and preserve
+  continuation across fresh bridge endpoints without changing native user state.
+- Fix the ZCode source compatibility probe's exit sequence when the TUI retains
+  submitted input, and handle terminal EOF without skipping process-exit checks.
+- Update TLS certificate validation and bundled roots to address
+  RUSTSEC-2026-0382 and RUSTSEC-2026-0383.
+- Update Tokio to address the AsyncFd I/O safety advisory RUSTSEC-2026-0386.
+
 ## [0.1.24] - 2026-10-15
 
 ### Added
@@ -1030,7 +1047,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.24...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.25...HEAD
+[0.1.25]: https://github.com/DavidLMS/nan-harness/compare/v0.1.24...v0.1.25
 [0.1.24]: https://github.com/DavidLMS/nan-harness/compare/v0.1.23...v0.1.24
 [0.1.23]: https://github.com/DavidLMS/nan-harness/compare/v0.1.22...v0.1.23
 [0.1.22]: https://github.com/DavidLMS/nan-harness/compare/v0.1.21...v0.1.22

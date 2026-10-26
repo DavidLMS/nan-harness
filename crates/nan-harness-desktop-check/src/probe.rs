@@ -1503,7 +1503,7 @@ async fn finish_scenario(
     )?;
     record_restore(restore_detailed(spec).await, outcome.err(), diagnostic)?;
     record_absence(
-        Gui::ensure_absent(spec.kind),
+        Gui::ensure_absent_after_restore(spec.kind, gui),
         CleanupStage::AbsenceAfterRestore,
         outcome.err(),
         diagnostic,

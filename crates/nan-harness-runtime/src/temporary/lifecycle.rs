@@ -17,6 +17,7 @@ use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::ErrorKind;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
@@ -38,6 +39,8 @@ pub struct TemporaryWorkspace {
     paths: BTreeMap<String, PathBuf>,
     user_home: PathBuf,
     _scoped_files: Vec<LaunchScopedFileGuard>,
+    retain: AtomicBool,
+    uncertain: AtomicBool,
 }
 
 impl TemporaryWorkspace {
@@ -197,6 +200,8 @@ impl TemporaryWorkspace {
             paths,
             user_home,
             _scoped_files: scoped_files,
+            retain: AtomicBool::new(false),
+            uncertain: AtomicBool::new(false),
         })
     }
 
@@ -213,6 +218,33 @@ impl TemporaryWorkspace {
     #[must_use]
     pub(crate) fn user_home(&self) -> &Path {
         &self.user_home
+    }
+
+    pub(crate) fn retain(&self) {
+        self.retain.store(true, Ordering::Release);
+    }
+
+    pub(crate) fn mark_uncertain(&self) {
+        self.uncertain.store(true, Ordering::Release);
+        self.retain();
+    }
+
+    pub(crate) fn cleanup_uncertain(&self) -> bool {
+        self.uncertain.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn release(&self) {
+        if !self.cleanup_uncertain() {
+            self.retain.store(false, Ordering::Release);
+        }
+    }
+}
+
+impl Drop for TemporaryWorkspace {
+    fn drop(&mut self) {
+        if self.retain.load(Ordering::Acquire) {
+            self.root.disable_cleanup(true);
+        }
     }
 }
 

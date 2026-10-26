@@ -729,6 +729,7 @@ impl Visual {
         mode: &str,
         values: [&str; 3],
         deadline: Instant,
+        native_stage: &mut Option<crate::native::WindowsChatStage>,
         mut observe: impl FnMut(&'static str, Option<FailureCategory>, Option<GuardFailure>),
     ) -> Result<crate::native::WindowsChatReceipt, Reason> {
         let expected = self.window.borrow().clone();
@@ -748,17 +749,21 @@ impl Visual {
             })
         };
         guard("before-guard", &mut observe)?;
-        if Instant::now() >= deadline {
-            return Err(Reason::Timeout);
-        }
+        // The transport must leave time for the independent window post-guard
+        // and final profile check. All phases retain the caller's one deadline.
+        let transport_deadline = deadline
+            .checked_sub(Duration::from_secs(1))
+            .filter(|limit| *limit > Instant::now())
+            .ok_or(Reason::Timeout)?;
         observe("transport", None, None);
         let result = self
             .native
-            .claude_windows_chat_turn(&expected, mode, values, deadline)
+            .claude_windows_chat_turn(&expected, mode, values, transport_deadline)
             .map_err(|failure| {
                 observe("transport", Some(failure), None);
                 failure.reason()
             })?;
+        *native_stage = Some(result.stage);
         observe("post-guard", None, None);
         guard("post-guard", &mut observe)?;
         if Instant::now() >= deadline {

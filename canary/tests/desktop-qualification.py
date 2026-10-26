@@ -1643,7 +1643,7 @@ class QualificationTests(unittest.TestCase):
             value = dict(schemaVersion=1, mechanism='hermes-renderer-qualification',
                          retryRectInViewport=True, retryAncestorClipped=True,
                          retryPointerEventsNone=False, retryHitOwned=False, retryHitOwnedPoints=0, retryPointStable=False,
-                         retrySampleStatus="no-owned-point", retryReveal="onboarding-skipped", retryHitAncestor=False,
+                         retryScopeFailure="alert-changed", retrySampleStatus="no-owned-point", retryReveal="onboarding-skipped", retryHitAncestor=False,
                          retryHitSharesTurnPair=False, retryHitContainsComposer=False,
                          retryHitTarget='other', retryHitTag='div',
                          retryHitRegion='thread-viewport', className='PRIVATE', rectangle=[1, 2, 3, 4])
@@ -1651,13 +1651,14 @@ class QualificationTests(unittest.TestCase):
             public = q.semantic_observations(root, 'hermes-desktop')[0]
             self.assertTrue(public['retryAncestorClipped'])
             self.assertEqual(public['retryHitRegion'], 'thread-viewport')
+            self.assertEqual(public['retryScopeFailure'], 'alert-changed')
             self.assertNotIn('PRIVATE', str(public))
             self.assertNotIn('rectangle', public)
             for key, invalid in [('retryRectInViewport', 1), ('retryAncestorClipped', 'true'),
                                  ('retryPointerEventsNone', None), ('retryHitTag', 'custom-private-tag'),
                                  ('retryHitRegion', 'PRIVATE'), ('retryPointStable', 1),
                                  ('retryHitOwnedPoints', True), ('retryHitOwnedPoints', 10),
-                                 ('retryHitOwnedPoints', -1), ('retrySampleStatus', 'PRIVATE'), ('retryReveal', 'PRIVATE'),
+                                 ('retryHitOwnedPoints', -1), ('retrySampleStatus', 'PRIVATE'), ('retryScopeFailure', 'PRIVATE'), ('retryReveal', 'PRIVATE'),
                                  ('retryHitAncestor', 1), ('retryHitContainsComposer', None)]:
                 path.write_text(json.dumps({**value, key: invalid}))
                 with self.assertRaises(ValueError):
@@ -2686,10 +2687,11 @@ class QualificationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'action.json'
             for action in ('input-replace-owned', 'copy', 'retry-ready', 'retry', 'failure-details'):
-                item = {**value, 'nativeAction': action}
+                item = {**value, 'nativeAction': action, 'nativeStage': 'sent'}
                 path.write_text(json.dumps(item))
                 self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [item])
             for change in ({'nativeAction': 'PRIVATE'}, {'nativeAction': None},
+                           {'nativeStage': 'PRIVATE'}, {'nativeStage': None},
                            {'mechanism': 'claude-native-chat'}):
                 path.write_text(json.dumps({**item, **change}))
                 with self.assertRaises(ValueError):

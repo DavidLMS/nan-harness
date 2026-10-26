@@ -227,7 +227,23 @@ removal ownership remain reviewable in one plan. Reassess if another capability
 or independent behavior is added. This scoped exception does not waive tests
 or other quality requirements.
 
+`run_tool_round_trip` in
+`nan-harness-test-support/src/conformance/runner/scenarios.rs` has 102 lines.
+Keep provider lifecycle, the advertised native tool choice, filesystem effects
+and cleanup together as one compatibility contract. Reassess if an independent
+scenario phase is added. The scoped `expect` does not waive behavioral tests.
+
 ### Unsafe code exceptions
+
+Zed's redirected output drain in
+`nan-harness-cli/src/commands/zed_desktop/process/terminal.rs` uses a scoped
+`expect(deprecated)` for Tokio's `AsyncFd::new`. Tokio 1.53.3 deprecates its
+generic safe constructor in favor of unsafe registration. This call moves an
+owned `File` into `AsyncFd`, never exposes or replaces the descriptor, and only
+borrows it for reads; the descriptor stays valid until deregistration. Keep the
+workspace's unsafe ban. Reassess when Tokio offers a safe owned-descriptor API
+or the repository adopts an audited registration boundary. The exception covers
+this constructor only and does not ignore its advisory or waive lifecycle tests.
 
 `unsafe_code` is denied workspace-wide and every other crate forbids it again with an inner
 `#![forbid(unsafe_code)]`. One crate is the single, audited exception:

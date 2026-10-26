@@ -1,5 +1,6 @@
 use super::support::{assert_direct_secret, context, plan, without_search_block};
 use nan_harness_adapters::{HermesAdapter, hermes_command_provider_config};
+use nan_harness_core::HarnessAdapter as _;
 use nan_harness_core::HarnessKind;
 use nan_harness_core::MediaSelection;
 use nan_harness_core::launch_plan::{
@@ -67,6 +68,29 @@ fn hermes_loads_a_launch_scoped_nan_provider_without_hiding_user_state() {
     );
     assert!(plan.environment.remove.contains("OPENAI_BASE_URL"));
     assert_direct_secret(&plan, "NAN_API_KEY");
+}
+
+#[test]
+fn hermes_declares_its_owned_config_patch_and_blocks_profile_or_route_escape() {
+    let launch = plan(&HermesAdapter, &context(HarnessKind::Hermes, Vec::new()));
+    let patch = launch.configuration_overlays[0]
+        .files
+        .iter()
+        .find(|file| file.path == ".nanh-launch.yaml")
+        .unwrap();
+    assert_eq!(patch.policy, OverlayFilePolicy::Replace);
+    for argument in [
+        "--profile=other",
+        "-pother",
+        "--base-url=https://example.test",
+        "--api-key=synthetic",
+    ] {
+        assert!(
+            HermesAdapter
+                .plan(&context(HarnessKind::Hermes, vec![argument.into()]))
+                .is_err()
+        );
+    }
 }
 
 #[test]

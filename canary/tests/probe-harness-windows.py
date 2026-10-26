@@ -261,6 +261,31 @@ class WindowsProbeContracts(unittest.TestCase):
                 value = json.loads(marker.read_text(encoding="utf-8-sig"))
                 self.assertIn("conformance-schema-invalid", value["diagnostics"])
 
+    def test_real_pwsh_selects_the_native_hermes_machine_frontend(self):
+        pwsh = shutil.which("pwsh")
+        if not pwsh:
+            self.skipTest("pwsh unavailable; version selection deferred to Windows")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            producer = root / "conformance.ps1"
+            producer.write_text("if (($args -contains '--hermes-stream-json') -ne ($env:EXPECT_MACHINE -eq '1')) { exit 12 }\n"
+                                "Write-Output $env:FIXTURE_REPORT\nexit 0\n", encoding="utf-8")
+            for harness, version, modern in [("hermes", "0.21.0", False), ("hermes", "0.22.5", True),
+                                             ("hermes", "unknown", False), ("cline", "1.3.0", False)]:
+                with self.subTest(harness=harness, version=version):
+                    report = {"schemaVersion": 2, "harness": harness, "outcome": "passed", "durationMilliseconds": 0,
+                              "scenarios": [{"name": name, "status": "passed", "durationMilliseconds": 0,
+                                  "checks": [{"name": "contract", "status": "passed", "durationMilliseconds": 0}]}
+                                  for name in CELL.CONFORMANCE_SCENARIOS]}
+                    marker = root / "result.json"
+                    env = dict(os.environ, EXPECT_MACHINE=str(int(modern)), FIXTURE_REPORT=json.dumps(report),
+                               NAN_CANARY_PROBE_RESULT=str(marker))
+                    run = subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-File", str(PROBE),
+                        "-Harness", harness, "-Stage", "deterministic-contract", "-NanBinary", str(producer),
+                        "-Canary", str(producer), "-Version", version], env=env, capture_output=True, timeout=30)
+                    self.assertEqual(run.returncode, 0)
+                    self.assertEqual(json.loads(marker.read_text(encoding="utf-8-sig"))["status"], "passed")
+
     def test_doctor_and_conformance_use_real_closed_schemas(self):
         source = PROBE.read_text(encoding="utf-8")
         self.assertIn("'doctor' $Harness '--allow-unsupported' '--allow-untested' '--json'", source)
@@ -277,7 +302,8 @@ class WindowsProbeContracts(unittest.TestCase):
         self.assertIn("'inventoryFailureReasons'", source)
         self.assertIn("provider-shutdown-failed", source)
         self.assertIn("inventoryFailed", source)
-        self.assertIn("'conformance' '--nan-harness' $NanBinary '--harness' $Harness '--json'", source)
+        self.assertIn("@('conformance','--nan-harness',$NanBinary,'--harness',$Harness,'--json')", source)
+        self.assertIn("& $Canary @conformanceArguments", source)
         self.assertIn("Validate-Conformance $value $Harness", source)
         self.assertIn("diagnostics = @($diagnostics.ToArray())", source)
         self.assertIn("$value.exitCode", source)

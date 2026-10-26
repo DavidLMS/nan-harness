@@ -124,7 +124,7 @@ cat >"$setup_node_directory/node" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 test "${1:-}" = '-p' && test "${2:-}" = 'process.versions.node'
-printf '24.20.0\n'
+printf '24.22.1\n'
 EOF
 cat >"$legacy_node_directory/node" <<'EOF'
 #!/usr/bin/env bash
@@ -135,11 +135,11 @@ EOF
 cat >"$setup_node_directory/npm" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-test "$(node -p 'process.versions.node')" = '24.20.0'
+test "$(node -p 'process.versions.node')" = '24.22.1'
 printf '%s\n' "$*" >"$NPM_TEST_ARGS"
 EOF
 chmod 755 "$setup_node_directory/node" "$setup_node_directory/npm" "$legacy_node_directory/node"
-NAN_CANARY_HOSTED=1 NAN_CANARY_EXPECTED_NODE_VERSION=24.20.0 \
+NAN_CANARY_HOSTED=1 NAN_CANARY_EXPECTED_NODE_VERSION=24.22.1 \
 NAN_CANARY_LEGACY_PATHS="$legacy_node_directory" \
 NPM_TEST_ARGS="$temporary_directory/hosted-npm-args" \
 HOME="$temporary_directory/hosted-home" \

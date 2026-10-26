@@ -41,6 +41,7 @@ pub enum ConformanceError {
 pub struct PublishedConformanceRunner {
     nan_harness: PathBuf,
     harness: HarnessKind,
+    hermes_stream_json: bool,
 }
 
 impl PublishedConformanceRunner {
@@ -56,7 +57,15 @@ impl PublishedConformanceRunner {
         Self {
             nan_harness,
             harness,
+            hermes_stream_json: false,
         }
+    }
+
+    /// Select Hermes 0.22's native machine frontend instead of its console UI.
+    #[must_use]
+    pub fn with_hermes_stream_json(mut self, enabled: bool) -> Self {
+        self.hermes_stream_json = enabled;
+        self
     }
 
     /// Runs the deterministic published-release contracts.
@@ -71,11 +80,12 @@ impl PublishedConformanceRunner {
             ConformanceError::Registry(RegistryError::Missing(self.harness)),
         )?;
         let started = Instant::now();
-        let (inventory, observation, inventory_failure_reasons, inventory_process) =
+        let (inventory, observation, inventory_failure_reasons, inventory_process, available_tools) =
             scenarios::run_inventory(&self, registration).await;
         let scenarios = vec![
             inventory,
-            self.run_tool_contracts(registration).await,
+            self.run_tool_contracts(registration, &available_tools)
+                .await,
             scenarios::run_sentinel(&self, registration).await,
             scenarios::run_external_prerequisite(&self, registration).await,
         ];
@@ -108,8 +118,10 @@ impl PublishedConformanceRunner {
     async fn run_tool_contracts(
         &self,
         registration: HarnessRegistration,
+        available_tools: &std::collections::BTreeSet<String>,
     ) -> super::report::ConformanceScenario {
-        let mut scenario = scenarios::run_tool_round_trip(self, registration).await;
+        let mut scenario =
+            scenarios::run_tool_round_trip(self, registration, available_tools).await;
         if registration.kind == HarnessKind::MimoCode {
             let check = super::mimo::mimo_native_configuration_check(&self.nan_harness).await;
             if check.status != ConformanceStatus::Passed {
@@ -140,6 +152,7 @@ impl PublishedConformanceRunner {
             &kind,
             marker,
             workspace.path(),
+            self.hermes_stream_json,
         ));
         let home = workspace.path().join("home");
         fs::create_dir_all(&home).map_err(ConformanceError::Environment)?;

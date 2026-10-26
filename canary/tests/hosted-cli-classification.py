@@ -97,6 +97,68 @@ def scripted_conformance(reports):
 
 
 class ConformanceClassificationTests(unittest.TestCase):
+    def test_failed_scenarios_retain_closed_diagnostics_and_actual_attempts(self):
+        with self.assertRaises(cell.ConformanceFailure) as failure:
+            self.run_conformance(conformance_report(failed=("sentinel",)),
+                                 conformance_report(failed=("tool-round-trip",)))
+        self.assertEqual(failure.exception.code,
+                         "conformance-scenarios:tool-round-trip:exit-nonzero")
+        self.assertEqual(failure.exception.attempts, 2)
+
+    def test_invalid_report_and_timeout_have_distinct_private_safe_diagnostics(self):
+        for report, expected in ((None, "report-missing"),
+                                 ({"private": "PRIVATE_SENTINEL"}, "report-invalid"),
+                                 (cell.StageTimeout("PRIVATE_SENTINEL"), "process-timeout")):
+            with self.subTest(expected), self.assertRaises(cell.ConformanceFailure) as failure:
+                self.run_conformance(report)
+            self.assertEqual(failure.exception.code, "conformance-" + expected)
+            self.assertEqual(failure.exception.attempts, 1)
+            self.assertNotIn("PRIVATE_SENTINEL", str(failure.exception))
+
+    def test_missing_process_and_missing_report_are_distinct(self):
+        with self.assertRaises(cell.ConformanceFailure) as failure:
+            self.run_conformance(FileNotFoundError("PRIVATE_EXECUTABLE"))
+        self.assertEqual(failure.exception.code, "conformance-process-unavailable")
+
+    def test_source_checks_report_their_own_boundary_without_running_conformance(self):
+        for result, expected in ((1, "exit-nonzero"), (cell.StageTimeout("PRIVATE"), "timeout")):
+            with self.subTest(expected), tempfile.TemporaryDirectory() as temporary:
+                args = argparse.Namespace(directory=Path(temporary), harness="zcode", canary=Path("canary"), binary=Path("nanh"))
+                def command(*_args, **_kwargs):
+                    if isinstance(result, Exception):
+                        raise result
+                    return result
+                with patch.object(cell, "cell_environment", return_value={}), \
+                        patch.object(cell, "private_command", side_effect=command) as run, \
+                        self.assertRaises(cell.ConformanceFailure) as failure:
+                    cell.conformance(args, {})
+                self.assertEqual(run.call_count, 1)
+                self.assertEqual(failure.exception.code, "conformance-source-" + expected)
+                self.assertEqual(failure.exception.attempts, 1)
+
+    def test_cleanup_failure_cannot_be_relabelled_as_retryable_conformance(self):
+        with self.assertRaises(cell.CleanupError):
+            self.run_conformance(cell.CleanupError("unproven descendants"))
+
+    def test_source_marker_projects_only_known_substages_and_reasons(self):
+        for stage, reason, expected in (("probe-tui", "exit-nonzero", "probe-tui-exit-nonzero"),
+                                        ("probe-tui-exit", "exit-nonzero", "probe-tui-exit-exit-nonzero"),
+                                        ("PRIVATE_STAGE", "exit-nonzero", "exit-nonzero"),
+                                        ("probe-native", "PRIVATE_REASON", "exit-nonzero")):
+            with self.subTest(stage=stage, reason=reason), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                marker = root / "zcode-source-failure.json"
+                args = argparse.Namespace(directory=root, harness="zcode", canary=Path("canary"), binary=Path("nanh"))
+                def command(*_args, **_kwargs):
+                    marker.write_text(json.dumps({"stage":stage,"reason":reason,"private":"PRIVATE"}))
+                    return 1
+                with patch.object(cell, "cell_environment", return_value={}), \
+                        patch.object(cell, "private_command", side_effect=command), \
+                        self.assertRaises(cell.ConformanceFailure) as failure:
+                    cell.conformance(args, {})
+                self.assertEqual(failure.exception.code, "conformance-source-" + expected)
+                self.assertFalse(marker.exists())
+
     def run_conformance(self, *reports):
         with tempfile.TemporaryDirectory() as temporary:
             state = {"harness": {"id": "codex", "version": "1.0.0"}}
@@ -196,6 +258,14 @@ class LiveClassificationTests(unittest.TestCase):
 
 
 class RetainedReportTests(unittest.TestCase):
+    def test_unproven_conformance_keeps_its_diagnostic_without_claiming_mismatch(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            report, _checks = Cell(temporary, "conformance", checks=("install-and-diagnose",)).fail(
+                cell.ConformanceFailure("conformance-process-timeout", 2))
+        self.assertEqual(report["outcome"], "infrastructure-failure")
+        self.assertEqual(report["failure"]["code"], "conformance-process-timeout")
+        self.assertEqual(report["checks"][-1]["attempts"], 2)
+
     def test_typed_conformance_mismatch_is_failed_compatibility(self):
         with tempfile.TemporaryDirectory() as temporary:
             report, checks = Cell(temporary, "conformance", checks=("install-and-diagnose",)).fail(

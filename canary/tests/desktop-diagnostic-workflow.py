@@ -16,6 +16,23 @@ SYNTHETIC_WORKFLOW = (ROOT / ".github/workflows/desktop-check-sandbox-contracts.
 
 
 class DiagnosticWorkflowTests(unittest.TestCase):
+    def test_windows_custody_stops_before_tests_when_clippy_fails(self):
+        workflow = (ROOT / '.github/workflows/desktop-automation-feasibility.yml').read_text()
+        step = workflow.split('      - name: Verify retained Windows Codex profile custody without an application\n', 1)[1].split('      - name:', 1)[0]
+        self.assertIn('        shell: bash\n', step)
+        script = textwrap.dedent(step.split('        run: |\n', 1)[1])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cargo = root / 'cargo'
+            calls = root / 'calls'
+            cargo.write_text('#!/bin/sh\necho "$1" >> "$CALLS"\nif [ "$1" = clippy ]; then exit 42; fi\n')
+            cargo.chmod(0o755)
+            result = subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', script],
+                env={**os.environ, 'PATH':directory + os.pathsep + os.environ['PATH'], 'CALLS':str(calls)},
+                capture_output=True)
+            self.assertEqual(result.returncode, 42)
+            self.assertEqual(calls.read_text().splitlines(), ['clippy'])
+
     def test_full_qualification_reuses_current_campaign_on_the_same_commit(self):
         wrapper = (ROOT / '.github/workflows/desktop-check-qualification.yml').read_text()
         shared = (ROOT / '.github/workflows/desktop-automation-feasibility.yml').read_text()

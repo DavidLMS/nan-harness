@@ -18,8 +18,13 @@ SEMVER = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+\Z")
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 
 
+TUI_PHASES = frozenset({"startup", "model-ready", "model-persist", "model-notice",
+                        "provider-request", "answer", "clear-input", "exit"})
+CHECK_STAGES = frozenset({"probe-build", "probe-config", "probe-protocol", "probe-native",
+                          "probe-sessions", "probe-tui", "probe-integration"}) | {
+                              "probe-tui-" + phase for phase in TUI_PHASES}
 STAGES = frozenset({"git-init", "git-fetch", "git-checkout", "node-install", "pnpm-install",
-                    "runtime-verify", "dependencies", "build", "command-verify", "terminal-driver", "probe"})
+                    "runtime-verify", "dependencies", "build", "command-verify", "terminal-driver", "probe"}) | CHECK_STAGES
 
 
 class SourceFailure(ValueError):
@@ -28,6 +33,20 @@ class SourceFailure(ValueError):
     def __init__(self, stage, reason="exit-nonzero"):
         super().__init__("ZCode source stage failed")
         self.stage, self.reason = stage, reason
+
+
+def tui_failure_stage(raw):
+    for line in reversed(raw.splitlines()):
+        if not line.startswith(b"NAN_ZCODE_TUI_FAILURE="):
+            continue
+        try:
+            value = json.loads(line.removeprefix(b"NAN_ZCODE_TUI_FAILURE="))
+            if (type(value) is dict and set(value) == {"phase"}
+                    and type(value["phase"]) is str and value["phase"] in TUI_PHASES):
+                return "probe-tui-" + value["phase"]
+        except (ValueError, TypeError):
+            pass
+    return "probe-tui"
 
 
 def run(arguments, cwd, environment=None, stage="probe"):
@@ -46,6 +65,8 @@ def run(arguments, cwd, environment=None, stage="probe"):
             if len(raw) > 8 * 1024 * 1024:
                 raise SourceFailure(stage, "output-limit")
             if result.returncode:
+                if stage == "probe-tui":
+                    raise SourceFailure(tui_failure_stage(raw))
                 # Preserve only the known failure category, never package paths
                 # or child output from the private installation log.
                 rename_missing = (stage == "dependencies" and
@@ -152,14 +173,14 @@ def check(destination, binary):
     environment["PYTHONPATH"] = str(source / ".python-tools")
     output = destination / "zcode-contracts"
     output.mkdir(exist_ok=False)
-    run([node, probes / "build-probes.mjs", output], ROOT, environment)
+    run([node, probes / "build-probes.mjs", output], ROOT, environment, stage="probe-build")
     for script in ("config-probe.mjs", "protocol-probe.mjs"):
-        run([node, output / script], ROOT, environment)
-    run([sys.executable, probes / "native_probe.py", "--source", source, "--node", node], ROOT, environment)
+        run([node, output / script], ROOT, environment, stage="probe-" + script.split("-")[0])
+    run([sys.executable, probes / "native_probe.py", "--source", source, "--node", node], ROOT, environment, stage="probe-native")
     for case in ("sessions", "tui"):
         run([sys.executable, probes / "runtime_probe.py", "--source", source, "--node", node,
-             "--case", case], ROOT, environment)
-    run([sys.executable, probes / "integration_probe.py", "--binary", binary, "--source", source], ROOT, environment)
+             "--case", case], ROOT, environment, stage="probe-" + case)
+    run([sys.executable, probes / "integration_probe.py", "--binary", binary, "--source", source], ROOT, environment, stage="probe-integration")
 
 
 def main():

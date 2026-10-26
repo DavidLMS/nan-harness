@@ -16,7 +16,7 @@ const FORWARD_COMPATIBILITY_QUIPS: [fn(nan_harness_i18n::Locale) -> &'static str
     nan_harness_i18n::messages::personality_what_could_possibly_go_wrong_text,
 ];
 
-pub(super) fn parse_version(output: &str) -> Option<Version> {
+pub(crate) fn parse_version(output: &str) -> Option<Version> {
     output.split_whitespace().find_map(|token| {
         let candidate = token
             .rsplit_once('/')

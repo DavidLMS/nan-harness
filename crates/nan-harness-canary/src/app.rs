@@ -169,6 +169,8 @@ pub(crate) struct ConformanceArgs {
     pub(crate) harness: HarnessKind,
     #[arg(long)]
     pub(crate) json: bool,
+    #[arg(long, help = "Use the native Hermes 0.22+ machine frontend")]
+    pub(crate) hermes_stream_json: bool,
 }
 
 #[derive(Debug, Args)]

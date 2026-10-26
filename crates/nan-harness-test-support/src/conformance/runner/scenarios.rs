@@ -80,6 +80,7 @@ pub(super) async fn run_inventory(
     Option<ConformanceObservation>,
     Vec<InventoryFailureReason>,
     Option<super::super::report::InventoryProcessEvidence>,
+    BTreeSet<String>,
 ) {
     let started = Instant::now();
     progress_event("inventory", "scenario", "started", started);
@@ -89,6 +90,7 @@ pub(super) async fn run_inventory(
             None,
             Vec::new(),
             None,
+            BTreeSet::new(),
         );
     };
     let Ok(workspace) = ConformanceWorkspace::create() else {
@@ -97,6 +99,7 @@ pub(super) async fn run_inventory(
             None,
             Vec::new(),
             None,
+            BTreeSet::new(),
         );
     };
     let Ok(mut daemon) = PrimeDaemonGuard::for_harness(registration.kind, workspace.path()) else {
@@ -105,6 +108,7 @@ pub(super) async fn run_inventory(
             None,
             Vec::new(),
             None,
+            BTreeSet::new(),
         );
     };
     let Ok(provider) = ScriptedProvider::start(ProviderScenario::inventory(INVENTORY_MARKER)).await
@@ -115,6 +119,7 @@ pub(super) async fn run_inventory(
             None,
             vec![InventoryFailureReason::ProviderFailed],
             None,
+            BTreeSet::new(),
         );
     };
     progress_event("inventory", "process", "started", started);
@@ -234,6 +239,7 @@ pub(super) async fn run_inventory(
         observation,
         failure_reasons,
         process_evidence,
+        actual_inventory,
     )
 }
 
@@ -325,9 +331,14 @@ fn log_inventory_diagnostics(diagnostics: &InventoryDiagnostics<'_>) {
     );
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "keep provider, tool side effect and cleanup evidence in one ordered contract"
+)]
 pub(super) async fn run_tool_round_trip(
     runner: &PublishedConformanceRunner,
     registration: HarnessRegistration,
+    available_tools: &BTreeSet<String>,
 ) -> ConformanceScenario {
     let started = Instant::now();
     progress_event("tool-round-trip", "scenario", "started", started);
@@ -340,7 +351,12 @@ pub(super) async fn run_tool_round_trip(
     let Ok(mut daemon) = PrimeDaemonGuard::for_harness(registration.kind, workspace.path()) else {
         return failed_scenario("tool-round-trip", started);
     };
-    let Ok(probe) = round_trip_probe(registration.kind, workspace.path(), &manifest) else {
+    let Ok(probe) = round_trip_probe(
+        registration.kind,
+        workspace.path(),
+        &manifest,
+        available_tools,
+    ) else {
         let _ = daemon.cleanup().await;
         return failed_scenario("tool-round-trip", started);
     };

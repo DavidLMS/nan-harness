@@ -7,6 +7,7 @@ use thiserror::Error;
 pub(crate) async fn run(arguments: &ConformanceArgs) -> Result<(), ConformanceCommandError> {
     let report =
         match PublishedConformanceRunner::new(arguments.nan_harness.clone(), arguments.harness)
+            .with_hermes_stream_json(arguments.hermes_stream_json)
             .run()
             .await
         {

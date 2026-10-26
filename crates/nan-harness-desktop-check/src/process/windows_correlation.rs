@@ -109,6 +109,12 @@ pub(crate) fn record_profile_seal(value: &serde_json::Value) {
     super::windows_observation::record_value(value, "claude-windows-profile-seal");
 }
 
+/// Fixed preflight progress only; never a native message, path or identity.
+#[cfg(windows)]
+pub(crate) fn record_preflight_progress(value: &serde_json::Value) {
+    super::windows_observation::record_value(value, "windows-owned-cleanup-preflight-progress");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -146,10 +152,4 @@ mod tests {
         }
         assert!(!value.to_string().contains("created"));
     }
-}
-
-/// Fixed preflight progress only; never a native message, path or identity.
-#[cfg(windows)]
-pub(crate) fn record_preflight_progress(value: &serde_json::Value) {
-    super::windows_observation::record_value(value, "windows-owned-cleanup-preflight-progress");
 }

@@ -1,5 +1,6 @@
 """Bounded terminal transport for the real TUI probe, including Windows ConPTY."""
 
+import errno
 import os
 import select
 import subprocess
@@ -44,9 +45,18 @@ class Terminal:
         ready, _, _ = select.select([self.handle], [], [], 0.1)
         if not ready:
             return b""
-        return (
-            self.process.read(65536).encode("utf8") if self.windows else os.read(self.handle, 65536)
-        )
+        try:
+            return (
+                self.process.read(65536).encode("utf8") if self.windows else os.read(self.handle, 65536)
+            )
+        except EOFError:
+            return b""
+        except OSError as error:
+            # Linux PTYs report a closed slave as EIO; BSD returns empty bytes.
+            # EOF does not prove process exit: wait_exit still polls the owner.
+            if not self.windows and error.errno == errno.EIO:
+                return b""
+            raise
 
     def write(self, data):
         if self.windows:
@@ -57,7 +67,8 @@ class Terminal:
     def wait_exit(self, timeout=10):
         deadline = time.monotonic() + timeout
         while self.alive() and time.monotonic() < deadline:
-            self.read()
+            if not self.read():
+                time.sleep(0.01)
         assert not self.alive(), "TUI did not exit after Ctrl-C"
 
     def close(self):

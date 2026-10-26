@@ -58,12 +58,17 @@ mod tests {
     fn isolated_home_borrows_only_dependency_state_and_preserves_its_owner() {
         let source = tempfile::tempdir().unwrap();
         let target = tempfile::tempdir().unwrap();
-        for name in ["installs", "tools", "plugins", "sessions"] {
+        for name in [
+            "installs", "tools", "plugins", "sessions", "profiles", "cron", "logs",
+        ] {
             fs::create_dir(source.path().join(name)).unwrap();
             fs::write(source.path().join(name).join("fixture"), name).unwrap();
         }
         fs::write(source.path().join(".env"), "synthetic-secret").unwrap();
         fs::write(source.path().join("config.yaml"), "synthetic-settings").unwrap();
+        for name in ["gateway.lock", "gateway.pid", "gateway.json"] {
+            fs::write(source.path().join(name), "synthetic-user-gateway").unwrap();
+        }
         link_dependencies(source.path(), target.path()).unwrap();
         for name in ["installs", "tools"] {
             assert_eq!(

@@ -320,6 +320,22 @@ impl Gui {
         Self::absence_snapshot(kind, None, None, false, None)
     }
 
+    pub(crate) fn ensure_absent_after_restore(
+        kind: DesktopHarnessKind,
+        gui: Option<&Self>,
+    ) -> Result<(), AbsenceFailure> {
+        // Retain the prepared helper across restoration. Preparing another copy
+        // can consume the process-query budget before its first observation.
+        #[cfg(windows)]
+        let native = gui.map(|held| held.visual.absence_native());
+        #[cfg(not(windows))]
+        let native = {
+            let _ = gui;
+            None
+        };
+        Self::absence_snapshot(kind, None, native, false, None)
+    }
+
     pub(crate) fn ensure_absent_before_launch(
         kind: DesktopHarnessKind,
     ) -> Result<(), AbsenceFailure> {
@@ -375,17 +391,16 @@ impl Gui {
     ) -> Option<crate::native::OwnedCleanupHolder> {
         native
             .start_owned_cleanup_holder(launcher, expected, digest, deadline)
-            .map_err(|error| {
+            .inspect_err(|error| {
                 let stage = match error {
                     crate::native::FailureCategory::Timeout => "deadline",
                     crate::native::FailureCategory::InvalidInput => "request",
-                    crate::native::FailureCategory::Output => return error,
+                    crate::native::FailureCategory::Output => return,
                     _ => "transport",
                 };
                 crate::process::windows_correlation::record_preflight(&serde_json::json!({
                     "schemaVersion":1,"mechanism":"windows-owned-cleanup-preflight",
                     "diagnosticsOnly":true,"stage":stage}));
-                error
             })
             .ok()
     }
@@ -449,10 +464,10 @@ impl Gui {
                     wire.as_deref().map(String::as_str),
                     Instant::now() >= deadline,
                 );
-                let cleanup = holder.map_or_else(
-                    || crate::native::owned_cleanup_unavailable(),
-                    |held| held.cleanup(deadline),
-                );
+                let cleanup = holder
+                    .map_or_else(crate::native::owned_cleanup_unavailable, |held| {
+                        held.cleanup(deadline)
+                    });
                 crate::process::windows_correlation::record_cleanup(&cleanup);
             }
             let mut observed = false;
@@ -1317,7 +1332,7 @@ fn qualification_process_ownership(pid: u32, owner: u32) -> Option<Result<(), Ow
             match child.try_wait() {
                 Ok(Some(status)) if status.success() => break,
                 Ok(None) if Instant::now() < deadline => {
-                    std::thread::sleep(Duration::from_millis(10))
+                    std::thread::sleep(Duration::from_millis(10));
                 }
                 _ => {
                     let _ = child.kill();
@@ -1498,6 +1513,43 @@ fn unique_accessible_match(count: Result<usize, Reason>) -> Result<bool, Reason>
         Ok(1) => Ok(true),
         Ok(_) => Err(Reason::SelectorNotMatched),
         Err(reason) => Err(reason),
+    }
+}
+
+#[cfg(windows)]
+impl Gui {
+    fn record_claude_windows_uia(&self, directory: &std::path::Path) {
+        use std::io::Write as _;
+        if self.kind != DesktopHarnessKind::Claude || !claude_windows_ready::policy() {
+            return;
+        }
+        let Some(expected) = std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS") else {
+            return;
+        };
+        let Some(directory) = qualification_directory::canonical_directory(directory) else {
+            return;
+        };
+        if qualification_directory::canonical_directory(std::path::Path::new(&expected)).as_ref()
+            != Some(&directory)
+        {
+            return;
+        }
+        let Some(deadline) = self.initial_observation_deadline else {
+            return;
+        };
+        let deadline = deadline.min(Instant::now() + Duration::from_secs(3));
+        let value = self.visual.claude_uia_inventory_until(deadline);
+        let mut nonce = [0; 8];
+        if getrandom::fill(&mut nonce).is_err() {
+            return;
+        }
+        if let Ok(bytes) = serde_json::to_vec(&value)
+            && let Ok(mut file) = nan_harness_private_fs::open_private_new(
+                &directory.join(format!("claude-uia-{}.json", u64::from_le_bytes(nonce))),
+            )
+        {
+            let _ = file.write_all(&bytes).and_then(|()| file.sync_all());
+        }
     }
 }
 
@@ -2017,42 +2069,5 @@ mod tests {
             classify_process_groups(Ok(7), Ok(8)),
             Err(OwnershipFailure::DifferentGroup)
         );
-    }
-}
-
-#[cfg(windows)]
-impl Gui {
-    fn record_claude_windows_uia(&self, directory: &std::path::Path) {
-        use std::io::Write as _;
-        if self.kind != DesktopHarnessKind::Claude || !claude_windows_ready::policy() {
-            return;
-        }
-        let Some(expected) = std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS") else {
-            return;
-        };
-        let Some(directory) = qualification_directory::canonical_directory(directory) else {
-            return;
-        };
-        if qualification_directory::canonical_directory(std::path::Path::new(&expected)).as_ref()
-            != Some(&directory)
-        {
-            return;
-        }
-        let Some(deadline) = self.initial_observation_deadline else {
-            return;
-        };
-        let deadline = deadline.min(Instant::now() + Duration::from_secs(3));
-        let value = self.visual.claude_uia_inventory_until(deadline);
-        let mut nonce = [0; 8];
-        if getrandom::fill(&mut nonce).is_err() {
-            return;
-        }
-        if let Ok(bytes) = serde_json::to_vec(&value)
-            && let Ok(mut file) = nan_harness_private_fs::open_private_new(
-                &directory.join(format!("claude-uia-{}.json", u64::from_le_bytes(nonce))),
-            )
-        {
-            let _ = file.write_all(&bytes).and_then(|()| file.sync_all());
-        }
     }
 }

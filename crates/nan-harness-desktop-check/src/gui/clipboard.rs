@@ -26,9 +26,8 @@ mod transport {
     pub(super) fn run(input: Option<&str>) -> Result<Zeroizing<String>, Reason> {
         let started = Instant::now();
         #[cfg(windows)]
-        let native = crate::native::Native::new().map_err(|reason| {
+        let native = crate::native::Native::new().inspect_err(|_| {
             save_failure(input, "executable", started.elapsed());
-            reason
         })?;
         #[cfg(windows)]
         let executable = native.executable();
@@ -321,17 +320,17 @@ mod tests {
     #[test]
     #[ignore = "Requires an explicitly selected disposable GitHub-hosted Windows session"]
     fn hosted_native_clipboard_contract() {
-        assert_eq!(std::env::var("GITHUB_ACTIONS").as_deref(), Ok("true"));
-        assert_eq!(
-            std::env::var("RUNNER_ENVIRONMENT").as_deref(),
-            Ok("github-hosted")
-        );
         struct Clear;
         impl Drop for Clear {
             fn drop(&mut self) {
                 let _ = write("");
             }
         }
+        assert_eq!(std::env::var("GITHUB_ACTIONS").as_deref(), Ok("true"));
+        assert_eq!(
+            std::env::var("RUNNER_ENVIRONMENT").as_deref(),
+            Ok("github-hosted")
+        );
         let _clear = Clear;
         write("").unwrap();
         assert!(read().unwrap().is_empty());

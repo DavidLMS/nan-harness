@@ -45,10 +45,14 @@ struct ProviderObservation {
 #[derive(Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OperationTiming {
-    budget_ms: u128,
-    elapsed_ms: u128,
-    transport_remaining_ms: Option<u128>,
-    post_guard_remaining_ms: Option<u128>,
+    #[serde(rename = "budgetMs")]
+    budget: u128,
+    #[serde(rename = "elapsedMs")]
+    elapsed: u128,
+    #[serde(rename = "transportRemainingMs")]
+    transport_remaining: Option<u128>,
+    #[serde(rename = "postGuardRemainingMs")]
+    post_guard_remaining: Option<u128>,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -60,6 +64,8 @@ struct Facts {
     action_phase: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     native_action: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    native_stage: Option<WindowsChatStage>,
     transport_failure: Option<&'static str>,
     operation_timing: OperationTiming,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -82,6 +88,7 @@ impl Default for Facts {
             stage: WindowsChatStage::Request,
             action_phase: None,
             native_action: None,
+            native_stage: None,
             transport_failure: None,
             operation_timing: OperationTiming::default(),
             guard_rejection: None,
@@ -172,22 +179,25 @@ impl ClaudeWindowsChatSession<'_> {
         self.facts.native_action = Some(mode);
         let started = Instant::now();
         self.facts.operation_timing = OperationTiming {
-            budget_ms: deadline.saturating_duration_since(started).as_millis(),
+            budget: deadline.saturating_duration_since(started).as_millis(),
             ..OperationTiming::default()
         };
         self.facts.action_phase = Some("before-guard");
         self.facts.transport_failure = None;
         self.facts.guard_rejection = None;
+        self.facts.native_stage = None;
         let sentinel = Zeroizing::new(nonce()?);
         if !self.profile.verifies_owned(self.workspace, deadline) {
             return Err(Reason::IsolationUnavailable);
         }
         self.facts.action_phase = Some("transport");
         let facts = &mut self.facts;
+        let mut native_stage = None;
         let result = self.gui.visual.claude_windows_chat_turn_until(
             mode,
             [&self.prompt, marker, &sentinel],
             deadline,
+            &mut native_stage,
             |phase, failure, rejection| {
                 facts.action_phase = Some(phase);
                 let remaining = deadline
@@ -197,13 +207,13 @@ impl ClaudeWindowsChatSession<'_> {
                     "transport" => {
                         facts
                             .operation_timing
-                            .transport_remaining_ms
+                            .transport_remaining
                             .get_or_insert(remaining);
                     }
                     "post-guard" => {
                         facts
                             .operation_timing
-                            .post_guard_remaining_ms
+                            .post_guard_remaining
                             .get_or_insert(remaining);
                     }
                     _ => {}
@@ -222,7 +232,8 @@ impl ClaudeWindowsChatSession<'_> {
                 facts.guard_rejection = rejection.map(GuardRejection::from);
             },
         );
-        self.facts.operation_timing.elapsed_ms = started.elapsed().as_millis();
+        self.facts.native_stage = native_stage;
+        self.facts.operation_timing.elapsed = started.elapsed().as_millis();
         let stage = match result {
             Ok(receipt) => {
                 if let Some(mut counts) = receipt.failure_scope {
@@ -441,6 +452,15 @@ mod tests {
         assert_eq!(value["mechanism"], "claude-windows-native-chat");
         assert_eq!(value["submittedTurns"], 0);
         assert_eq!(value["copiedResponses"], 0);
+        assert_eq!(
+            value["operationTiming"],
+            serde_json::json!({
+                "budgetMs": 0,
+                "elapsedMs": 0,
+                "transportRemainingMs": null,
+                "postGuardRemainingMs": null,
+            })
+        );
         assert!(value.get("prompt").is_none());
         assert!(value.get("workspace").is_none());
         assert!(value.get("guardRejection").is_none());

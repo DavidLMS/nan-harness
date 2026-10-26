@@ -6,7 +6,7 @@ const source = fs.readFileSync(`${__dirname}/endpoint-ownership.cjs`, 'utf8');
 const proof = source.slice(source.indexOf('function saveWindowsProof('), source.indexOf('return { ownedEndpoint'));
 function trial(listing, parents, failure = false, details = false) {
   let calls = 0;
-  const context = { owner: '20', port: '43210', process: { platform: 'darwin' }, require(name) {
+  const context = { owner: '20', port: '43210', Date: {now: () => 1000}, process: { platform: 'darwin' }, require(name) {
     assert.equal(name, 'node:child_process');
     return { execFileSync(command, args, options) {
       calls++;
@@ -115,7 +115,7 @@ console.log('Native macOS endpoint ownership: guarded cases passed');
 
 for (const result of ['true', 'false', 'true\n', 'private unexpected value']) {
   let calls = 0;
-  const context = { process: { platform: 'win32' }, owner: '20', port: '43210', __dirname: '/owned',
+  const context = { Date: {now: () => 1000}, process: { platform: 'win32' }, owner: '20', port: '43210', __dirname: '/owned',
     require(name) {
       assert.equal(name, 'node:child_process');
       return { execFileSync(command, args, options) {
@@ -140,7 +140,7 @@ for (const result of ['true', 'false', 'true\n', 'private unexpected value']) {
 console.log('Native Windows proof transport: guarded cases passed');
 
 for (const result of ['true', 'true\n', 'query-failed']) {
-  const context = { process: { platform: 'win32', env: { GITHUB_ACTIONS: 'true',
+  const context = { Date: {now: () => 1000}, process: { platform: 'win32', env: { GITHUB_ACTIONS: 'true',
     RUNNER_ENVIRONMENT: 'github-hosted', FEASIBILITY_WINDOWS_PROOF_PYTHON: 'C:\\owned\\python.exe' } },
     owner: '20', port: '43210', __dirname: 'C:/owned', require(name) {
       assert.equal(name, 'node:child_process');

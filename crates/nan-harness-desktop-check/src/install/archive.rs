@@ -127,10 +127,11 @@ fn extract_tar(reader: impl Read, root: &Path) -> Result<(), InstallError> {
             }
             let mut output = open_private_new(&target)?;
             std::io::copy(&mut entry, &mut output)?;
-            executable_mode(
-                &target,
-                entry.header().mode().map_err(|_| InstallError::Archive)?,
-            )?;
+            let mode = entry.header().mode().map_err(|_| InstallError::Archive)?;
+            #[cfg(unix)]
+            executable_mode(&target, mode)?;
+            #[cfg(not(unix))]
+            let _ = mode;
         } else if entry_type.is_symlink() {
             let link = extensions.link(&entry)?;
             validate_link(&relative, &link)?;
@@ -192,21 +193,17 @@ pub(super) fn validate_link(relative: &Path, link: &Path) -> Result<(), InstallE
     Ok(())
 }
 
+#[cfg(unix)]
 pub(super) fn executable_mode(path: &Path, source_mode: u32) -> Result<(), InstallError> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        fs::set_permissions(
-            path,
-            fs::Permissions::from_mode(if source_mode & 0o111 != 0 {
-                0o700
-            } else {
-                0o600
-            }),
-        )?;
-    }
-    #[cfg(not(unix))]
-    let _ = (path, source_mode);
+    use std::os::unix::fs::PermissionsExt as _;
+    fs::set_permissions(
+        path,
+        fs::Permissions::from_mode(if source_mode & 0o111 != 0 {
+            0o700
+        } else {
+            0o600
+        }),
+    )?;
     Ok(())
 }
 

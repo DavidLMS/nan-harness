@@ -112,6 +112,11 @@ workflow reports failure after publishing independent successes when any work
 remains pending. Reports and the per-harness summary are retained for 30 days;
 raw child output and credentials are never uploaded.
 
+Failed deterministic checks retain closed source, process, report or scenario
+diagnostics and the actual attempt count. These observations remain retryable
+infrastructure blocks until a typed compatibility mismatch is proved; matching
+fingerprints alone do not establish a shared root cause across platforms.
+
 Manual dispatch defaults to `verification_only=true`. Set `force=true` to
 reverify current versions, including those already certified. A verification-only
 run generates candidates without remote writes, including during backup recovery.

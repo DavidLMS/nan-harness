@@ -3,3 +3,4 @@ harness = "prime-agent"
 profile = "Print mode Prime IPython tool"
 last_verified_version = "0.9.3"
 inventory = ["ipython"]
+optional_inventory = ["python_repl"]

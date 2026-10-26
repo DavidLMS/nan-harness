@@ -1,4 +1,5 @@
 use super::RuntimeError;
+use super::hermes::HermesGateway;
 use super::report::Completion;
 use crate::prepared::PreparedLaunch;
 use crate::process::{ManagedChild, spawn_child};
@@ -14,6 +15,70 @@ pub(super) struct BridgeExecution {
     pub(super) completion: Completion,
     pub(super) diagnostics: Vec<BridgeDiagnostic>,
     pub(super) provider_usage: ProviderUsageSnapshot,
+}
+
+struct RunningHarness {
+    child: ManagedChild,
+    gateway: Option<HermesGateway>,
+}
+
+struct BridgeObservation {
+    receiver: tokio::sync::mpsc::UnboundedReceiver<BridgeDiagnostic>,
+    diagnostics: Vec<BridgeDiagnostic>,
+    joined: bool,
+}
+
+impl RunningHarness {
+    async fn start(
+        plan: &LaunchPlan,
+        prepared: &PreparedLaunch,
+        secrets: &SecretStore,
+        cancellation: &CancellationToken,
+    ) -> Result<Option<Self>, RuntimeError> {
+        if cancellation.signal().is_some() {
+            return Ok(None);
+        }
+        let mut gateway = match HermesGateway::start(plan, prepared, secrets, cancellation).await {
+            Ok(gateway) => gateway,
+            Err(_error) if cancellation.signal().is_some() && !prepared.cleanup_uncertain() => {
+                return Ok(None);
+            }
+            Err(error) => return Err(error),
+        };
+        let child = match &gateway {
+            Some(gateway) => gateway.spawn_frontend(plan, prepared, secrets),
+            None => spawn_child(plan, prepared, secrets).map_err(Into::into),
+        };
+        match child {
+            Ok(child) => Ok(Some(Self { child, gateway })),
+            Err(error) => {
+                if let Some(gateway) = &mut gateway {
+                    gateway.stop(plan, prepared, secrets).await?;
+                }
+                Err(error)
+            }
+        }
+    }
+
+    async fn finish(
+        &mut self,
+        plan: &LaunchPlan,
+        prepared: &PreparedLaunch,
+        secrets: &SecretStore,
+    ) -> Result<(), RuntimeError> {
+        let client = kill_and_reap(&mut self.child).await;
+        if client.is_err() {
+            prepared.retain_workspace();
+        }
+        let authority = match &mut self.gateway {
+            Some(gateway) => gateway.stop(plan, prepared, secrets).await,
+            None => Ok(()),
+        };
+        if client.is_err() || authority.is_err() {
+            prepared.retain_workspace();
+        }
+        client.and(authority)
+    }
 }
 
 pub(super) async fn run_bridged_child(
@@ -43,74 +108,111 @@ pub(super) async fn run_bridged_child(
     } else {
         None
     };
-    let mut child = match spawn_child(plan, prepared, secrets) {
-        Ok(child) => child,
+    let mut child = match RunningHarness::start(plan, prepared, secrets, cancellation).await {
+        Ok(Some(child)) => child,
+        Ok(None) => {
+            bridge.shutdown();
+            bridge.wait().await?;
+            return Ok(BridgeExecution {
+                completion: Completion::Cancelled(cancellation.cancelled().await),
+                diagnostics: Vec::new(),
+                provider_usage: bridge.usage(),
+            });
+        }
         Err(error) => {
             bridge.shutdown();
             bridge.wait().await?;
-            return Err(RuntimeError::Process(error));
+            return Err(error);
         }
     };
 
-    let mut diagnostics = Vec::new();
+    let mut observation = BridgeObservation {
+        receiver: bridge.take_diagnostics(),
+        diagnostics: Vec::new(),
+        joined: false,
+    };
     #[cfg(windows)]
     let search_acquisition = None;
     #[cfg(not(windows))]
     let search_acquisition = search_supervisor.map(|supervisor| {
         Box::pin(async move { supervisor.acquire().await.ok().flatten() }) as BoxFuture<'static, _>
     });
-    let completion = supervise_pair(
+    let execution = supervise_pair(
         &mut child,
         bridge,
         plan,
         cancellation,
-        &mut diagnostics,
+        &mut observation,
         search_acquisition,
     )
-    .await?;
+    .await;
+    let cleanup = child.finish(plan, prepared, secrets).await;
+    bridge.shutdown();
+    let bridge_cleanup = if observation.joined {
+        Ok(())
+    } else {
+        bridge.wait().await
+    };
+    drain_bridge_diagnostics(&mut observation.receiver, &mut observation.diagnostics);
+    cleanup?;
+    bridge_cleanup?;
+    let completion = execution?;
     let provider_usage = bridge.usage();
     Ok(BridgeExecution {
         completion,
-        diagnostics,
+        diagnostics: observation.diagnostics,
         provider_usage,
     })
 }
 
 async fn supervise_pair(
-    child: &mut ManagedChild,
+    harness: &mut RunningHarness,
     bridge: &mut RunningBridge,
     plan: &LaunchPlan,
     cancellation: &CancellationToken,
-    bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
+    observation: &mut BridgeObservation,
     mut search_acquisition: Option<
         BoxFuture<'static, Option<crate::search_supervisor::SearchLease>>,
     >,
 ) -> Result<Completion, RuntimeError> {
     let mut search_lease = None;
-    let mut diagnostics_rx = bridge.take_diagnostics();
+    let BridgeObservation {
+        receiver: diagnostics_rx,
+        diagnostics: bridge_diagnostics,
+        joined,
+    } = observation;
+    let RunningHarness { child, gateway } = harness;
     loop {
         tokio::select! {
             status = child.wait() => {
                 let status = status.map_err(RuntimeError::WaitForProcess)?;
-                bridge.shutdown();
-                bridge.wait().await?;
-                drain_bridge_diagnostics(&mut diagnostics_rx, bridge_diagnostics);
+                drain_bridge_diagnostics(diagnostics_rx, bridge_diagnostics);
                 return Ok(Completion::Exited(status));
             }
             signal = cancellation.cancelled() => {
                 terminate_child(child, plan, signal, cancellation).await?;
-                bridge.shutdown();
-                bridge.wait().await?;
-                drain_bridge_diagnostics(&mut diagnostics_rx, bridge_diagnostics);
+                drain_bridge_diagnostics(diagnostics_rx, bridge_diagnostics);
                 return Ok(Completion::Cancelled(signal));
             }
             bridge_result = bridge.wait() => {
+                *joined = true;
                 let bridge_error = bridge_result.err();
                 terminate_child(child, plan, SignalKind::Terminate, cancellation).await?;
                 return match bridge_error {
                     Some(error) => Err(RuntimeError::Bridge(error)),
                     None => Err(RuntimeError::BridgeExited),
                 };
+            }
+            status = async {
+                match gateway {
+                    Some(gateway) => gateway.wait().await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                status.map_err(RuntimeError::WaitForProcess)?;
+                return Err(crate::process::ProcessError::Spawn(std::io::Error::other(
+                    "NH-HERMES-GATEWAY-EXIT",
+                )).into());
             }
             lease = async {
                 match search_acquisition.as_mut() {
@@ -128,6 +230,33 @@ async fn supervise_pair(
             }
         }
     }
+}
+
+pub(super) async fn run_plain_child(
+    plan: &LaunchPlan,
+    prepared: &PreparedLaunch,
+    secrets: &SecretStore,
+    cancellation: &CancellationToken,
+) -> Result<Completion, RuntimeError> {
+    let Some(mut harness) = RunningHarness::start(plan, prepared, secrets, cancellation).await?
+    else {
+        return Ok(Completion::Cancelled(cancellation.cancelled().await));
+    };
+    let execution = tokio::select! {
+        result = wait_for_child(&mut harness.child, plan, cancellation) => result,
+        status = async {
+            match &mut harness.gateway {
+                Some(gateway) => gateway.wait().await,
+                None => std::future::pending().await,
+            }
+        } => {
+            status.map_err(RuntimeError::WaitForProcess).and_then(|_| Err(
+                crate::process::ProcessError::Spawn(std::io::Error::other("NH-HERMES-GATEWAY-EXIT")).into(),
+            ))
+        }
+    };
+    harness.finish(plan, prepared, secrets).await?;
+    execution
 }
 
 fn drain_bridge_diagnostics(
@@ -199,11 +328,18 @@ async fn kill_and_reap(child: &mut ManagedChild) -> Result<(), RuntimeError> {
 }
 
 async fn reap_child(child: &mut ManagedChild) -> Result<(), RuntimeError> {
-    match child.wait().await {
-        Ok(_) => Ok(()),
-        Err(error) if is_process_gone_error(&error) => Ok(()),
-        Err(error) => Err(RuntimeError::WaitForProcess(error)),
-    }
+    reap_result(child.wait().await)?;
+    #[cfg(windows)]
+    tokio::time::timeout(Duration::from_secs(5), child.wait_for_descendants())
+        .await
+        .map_err(|_| {
+            RuntimeError::WaitForProcess(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "owned child descendants did not drain",
+            ))
+        })?
+        .map_err(RuntimeError::WaitForProcess)?;
+    Ok(())
 }
 
 fn is_process_gone_error(error: &std::io::Error) -> bool {

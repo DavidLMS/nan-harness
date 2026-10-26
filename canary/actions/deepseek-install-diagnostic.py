@@ -33,9 +33,9 @@ def run(root):
            else node.parent.parent / "lib/node_modules/npm/bin/npm-cli.js")
     if not npm.is_file():
         raise RuntimeError("npm runtime unavailable")
-    if subprocess.check_output([node, "-p", "process.versions.node"], text=True).strip() != "24.20.0":
+    if subprocess.check_output([node, "-p", "process.versions.node"], text=True).strip() != "24.22.1":
         raise RuntimeError("unexpected Node runtime")
-    report = {"node": "24.20.0", "version": VERSION}
+    report = {"node": "24.22.1", "version": VERSION}
     for variant in ("original", "corrected"):
         directory = root / variant
         ensure_private_directory(directory)

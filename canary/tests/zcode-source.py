@@ -80,6 +80,16 @@ class SourceContracts(unittest.TestCase):
         self.assertEqual(caught.exception.reason, "exit-nonzero")
         self.assertNotIn("private", str(caught.exception))
 
+    def test_tui_failure_projection_accepts_only_probe_owned_closed_phases(self):
+        for phase in source.TUI_PHASES:
+            marker = b'NAN_ZCODE_TUI_FAILURE=' + json.dumps({'phase': phase}).encode()
+            self.assertEqual(source.tui_failure_stage(marker), 'probe-tui-' + phase)
+        for value in ({'phase': 'PRIVATE'}, {'phase': []}, {'phase': 'exit', 'private': 'value'}):
+            self.assertEqual(source.tui_failure_stage(
+                b'NAN_ZCODE_TUI_FAILURE=' + json.dumps(value).encode()), 'probe-tui')
+        self.assertEqual(source.tui_failure_stage(b'PRIVATE output'), 'probe-tui')
+        self.assertEqual(source.tui_failure_stage(b'NAN_ZCODE_TUI_FAILURE=not json'), 'probe-tui')
+
     def test_bad_identity_never_starts_an_installer(self):
         for version, ref in (('latest', 'a' * 40), ('0.16.9', 'main'),
                              ('../0.16.9', 'a' * 40)):
@@ -154,6 +164,9 @@ class SourceContracts(unittest.TestCase):
             source.check(root, root / 'nanh')
             calls = run.call_args_list
             self.assertEqual(len(calls), 7)
+            self.assertEqual([call.kwargs['stage'] for call in calls],
+                             ['probe-build', 'probe-config', 'probe-protocol', 'probe-native',
+                              'probe-sessions', 'probe-tui', 'probe-integration'])
             commands = [[str(arg) for arg in call.args[0]] for call in calls]
             self.assertEqual([command[-1] for command in commands[4:6]], ['sessions', 'tui'])
             self.assertIn('integration_probe.py', ' '.join(commands[-1]))

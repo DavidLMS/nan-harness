@@ -34,7 +34,25 @@ impl ProbeChild {
         arguments: &[&str],
         directory: Option<&Path>,
     ) -> io::Result<Self> {
+        Self::spawn_command(command_for_executable(executable, arguments), directory)
+    }
+
+    pub(super) fn spawn_hermes(
+        executable: &Path,
+        arguments: &[&str],
+        home: &Path,
+    ) -> io::Result<Self> {
         let mut command = command_for_executable(executable, arguments);
+        command
+            .env("HERMES_HOME", home)
+            .env("HERMES_PROFILE", "default")
+            .env("PYTHONDONTWRITEBYTECODE", "1")
+            .env_remove("NAN_API_KEY")
+            .env_remove(nan_harness_core::launch_plan::MEDIA_CREDENTIAL_ENVIRONMENT);
+        Self::spawn_command(command, None)
+    }
+
+    fn spawn_command(mut command: Command, directory: Option<&Path>) -> io::Result<Self> {
         if let Some(directory) = directory {
             command.current_dir(directory);
         }

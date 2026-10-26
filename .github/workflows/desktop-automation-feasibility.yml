@@ -345,6 +345,7 @@ jobs:
         run: cargo test --locked -p nan-harness-desktop-check --lib probe::codex_linux_profile
       - name: Verify retained Windows Codex profile custody without an application
         if: runner.os == 'Windows' && matrix.app == 'chatgpt-desktop'
+        shell: bash
         run: |
           cargo clippy --locked -p nan-harness-desktop-check --all-features --all-targets -- -D warnings
           cargo test --locked -p nan-harness-desktop-check --lib probe::codex_windows_profile
@@ -385,6 +386,8 @@ jobs:
           cargo test --locked -p nan-harness-cli --features desktop-qualification --lib commands::claude_desktop::qualification_mcp::tests
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --locked -p nan-harness-desktop-check --lib native::windows_chat_turn::tests
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked -p nan-harness-desktop-check --lib gui::claude_windows_chat::tests
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify bounded Windows UIA receipt protocol without an application
         if: runner.os == 'Windows' && matrix.app == 'claude-desktop'

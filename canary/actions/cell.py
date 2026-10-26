@@ -58,6 +58,7 @@ if os.name == "nt":
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from selection import CLI_HARNESSES, PLATFORMS as HOSTED_PLATFORMS, resolve_model
+from hermes_diagnostics import DIAGNOSTIC_CODES, safe_frames
 
 HARNESSES = CLI_HARNESSES
 SEMVER = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?\Z")
@@ -85,6 +86,15 @@ class CleanupError(RuntimeError):
 
 class StageTimeout(RuntimeError):
     """A stage limit says nothing about compatibility; it remains retryable."""
+
+
+class ConformanceFailure(RuntimeError):
+    """Closed conformance observations; never proof of a compatibility mismatch."""
+
+    def __init__(self, code, attempts):
+        super().__init__("conformance did not produce positive contract evidence")
+        self.code = code
+        self.attempts = attempts
 
 
 class CompatibilityMismatch(RuntimeError):
@@ -132,6 +142,10 @@ INSTALL_FAILURE_CODES = {
 }
 ZCODE_INSTALL_STAGES = frozenset({"git-init", "git-fetch", "git-checkout", "node-install", "pnpm-install",
                                   "runtime-verify", "dependencies", "build", "command-verify", "terminal-driver"})
+ZCODE_CONFORMANCE_STAGES = frozenset({"probe-build", "probe-config", "probe-protocol", "probe-native",
+                                     "probe-sessions", "probe-tui", "probe-integration"}) | {
+    "probe-tui-" + phase for phase in ("startup", "model-ready", "model-persist", "model-notice",
+                                      "provider-request", "answer", "clear-input", "exit")}
 INSTALL_FAILURE_CODES.update("zcode-source-" + stage for stage in ZCODE_INSTALL_STAGES)
 INSTALL_FAILURE_CODES.add("zcode-source-dependencies-rename-missing")
 WINDOWS_INSTALL_CATEGORIES = frozenset({
@@ -1046,6 +1060,79 @@ def gentle_probe(args, *, live=False):
     return 1
 
 
+HERMES_PROFILE_CHECKS = ["native-state-preserved", "same-session-resume", "bridge-route-rotation",
+                         "reasoning-effort", "reasoning-disabled", "reasoning-toggle",
+                         "gateway-cleanup", "automation-isolated"]
+HERMES_PROFILE_PHASES = frozenset({"history-create", "history-created-state", "history-resume", "history-resumed-state", "reasoning-effort",
+                                  "reasoning-disabled", "reasoning-toggle", "native-state", "cleanup", "fixture-cleanup"})
+HERMES_PROFILE_DIAGNOSTICS = {
+    "NH-HERMES-" + name: name.lower()
+    for name in ("LAUNCHER", "PROFILE", "READINESS", "HISTORY", "CLEANUP", "FIXTURE-REMOVE", "GATEWAY-EXIT", "GATEWAY-DRAIN",
+                 "SUPERVISOR", "SUPERVISOR-IMPORT", "SUPERVISOR-IO", "SUPERVISOR-CONTRACT", "SUPERVISOR-INTERNAL")
+}
+HERMES_PROFILE_DIAGNOSTICS.update({"NH-DISCOVERY-00" + str(index): "discovery-00" + str(index) for index in range(1, 8)})
+HERMES_PROFILE_DIAGNOSTICS.update({"NH-HERMES-READINESS-" + reason.upper(): "readiness-" + reason
+    for reason in ("control-absent", "control-access", "control-timeout", "control-protocol", "identity-pid",
+                   "identity-home", "identity-supervisor", "runtime-protocol", "runtime-profile", "runtime-authority",
+                   "runtime-endpoint", "runtime-state")})
+HERMES_PROFILE_DIAGNOSTICS.update({code: code.removeprefix("NH-HERMES-").lower() for code in DIAGNOSTIC_CODES})
+HERMES_PROFILE_DIAGNOSTICS.update({"NH-HERMES-FRONTEND-EXIT-" + str(code): "frontend-exit-" + str(code)
+                                  for code in (1, 2, 125)})
+
+
+class HermesConformanceFailure(ConformanceFailure):
+    """Retain all closed causes even when cleanup owns the primary failure code."""
+    def __init__(self, code, diagnostics, cleanup, frames=None):
+        super().__init__(code, 1)
+        self.diagnostics = tuple(code for code in HERMES_PROFILE_DIAGNOSTICS if code in diagnostics)
+        self.cleanup = cleanup if isinstance(cleanup, str) and cleanup in {"proven", "unproven"} else "unknown"
+        self.frames = safe_frames(frames)
+
+
+def hermes_profile_probe(args, environment):
+    report = args.directory / "hermes-profile-private.json"
+    report.unlink(missing_ok=True)
+    executable = shutil.which("hermes", path=environment["PATH"])
+    if executable is None:
+        raise ConformanceFailure("conformance-hermes-unavailable", 1)
+    try:
+        status = private_command([
+            sys.executable, "-B", str(ROOT / "canary/hermes/check.py"), "--nanh", str(args.binary),
+            "--hermes", executable, "--output", str(report),
+        ], args.directory, timeout=900, environment=environment, allow_failure=True)
+        # Failure receipts can include bounded, closed source-position samples.
+        if report.stat().st_size > 16 * 1024:
+            raise ValueError()
+        result = json.loads(report.read_bytes())
+        if (status == 0 and isinstance(result, dict) and type(result.get("schemaVersion")) is int
+                and result == {"schemaVersion": 1, "status": "passed", "checks": HERMES_PROFILE_CHECKS}):
+            return
+        if (isinstance(result, dict) and type(result.get("schemaVersion")) is int and result.get("schemaVersion") == 1 and result.get("status") == "failed"
+                and result.get("phase") in HERMES_PROFILE_PHASES):
+            phase = "cleanup" if result.get("cleanup") == "unproven" else result["phase"]
+            diagnostics = result.get("diagnostics", [])
+            if isinstance(diagnostics, list):
+                phase += next(("-" + suffix for code, suffix in HERMES_PROFILE_DIAGNOSTICS.items() if code in diagnostics), "")
+            else:
+                diagnostics = []
+            raise HermesConformanceFailure("conformance-hermes-" + phase + "-exit-nonzero", diagnostics,
+                                           result.get("cleanup"), result.get("frames"))
+        raise ValueError()
+    except StageTimeout:
+        raise ConformanceFailure("conformance-hermes-timeout", 1) from None
+    except OSError:
+        raise ConformanceFailure("conformance-hermes-unavailable", 1) from None
+    except (ValueError, TypeError, AttributeError):
+        raise ConformanceFailure("conformance-hermes-report-invalid", 1) from None
+    finally:
+        report.unlink(missing_ok=True)
+
+
+def hermes_machine_frontend(version):
+    parsed = re.search(r"\b(\d+)\.(\d+)\.(\d+)\b", str(version))
+    return bool(parsed and tuple(map(int, parsed.groups())) >= (0, 22, 0))
+
+
 def conformance(args, state):
     """Deterministic conformance only certifies success; its failures stay blocked.
 
@@ -1058,17 +1145,56 @@ def conformance(args, state):
         return gentle_probe(args)
     report = args.directory / "conformance-private.json"
     environment = cell_environment(args.directory)
+    hermes_stream_json = args.harness == "hermes" and hermes_machine_frontend(state.get("harness", {}).get("version", ""))
+    if hermes_stream_json:
+        hermes_profile_probe(args, environment)
     if args.harness == "zcode":
-        private_command([sys.executable, str(ROOT / "canary/guest/zcode-source.py"), "check",
-                         "--directory", str(args.directory), "--binary", str(args.binary)],
-                        args.directory, timeout=1200, environment=environment)
+        marker = args.directory / "zcode-source-failure.json"
+        marker.unlink(missing_ok=True)
+        try:
+            status = private_command([sys.executable, str(ROOT / "canary/guest/zcode-source.py"), "check",
+                                      "--directory", str(args.directory), "--binary", str(args.binary)],
+                                     args.directory, timeout=1200, environment=environment,
+                                     allow_failure=True)
+        except StageTimeout:
+            raise ConformanceFailure("conformance-source-timeout", 1) from None
+        except OSError:
+            raise ConformanceFailure("conformance-source-unavailable", 1) from None
+        if status:
+            code = "conformance-source-exit-nonzero"
+            try:
+                if marker.stat().st_size <= 4096:
+                    details = json.loads(marker.read_bytes())
+                    stage, reason = details.get("stage"), details.get("reason")
+                    if (stage in ZCODE_CONFORMANCE_STAGES
+                            and reason in {"exit-nonzero", "stage-timeout", "tool-missing", "output-limit"}):
+                        code = f"conformance-source-{stage}-{reason}"
+            except (OSError, ValueError, AttributeError, TypeError):
+                pass
+            finally:
+                marker.unlink(missing_ok=True)
+            raise ConformanceFailure(code, 1)
     for attempt in range(1, CONFORMANCE_ATTEMPTS + 1):
         try:
-            private_command([str(args.canary), "conformance", "--nan-harness", str(args.binary),
-                             "--harness", args.harness, "--json"], args.directory, output=report,
-                            allow_failure=True, environment=environment)
+            try:
+                command = [str(args.canary), "conformance", "--nan-harness", str(args.binary),
+                           "--harness", args.harness, "--json"]
+                if hermes_stream_json:
+                    command.append("--hermes-stream-json")
+                status = private_command(command, args.directory, output=report,
+                                         allow_failure=True, environment=environment)
+            except OSError:
+                raise ConformanceFailure("conformance-process-unavailable", attempt) from None
             result = json.loads(report.read_bytes())
             failed = conformance_result(result, args.harness)
+        except StageTimeout:
+            raise ConformanceFailure("conformance-process-timeout", attempt) from None
+        except FileNotFoundError:
+            raise ConformanceFailure("conformance-report-missing", attempt) from None
+        except (ValueError, TypeError, KeyError):
+            raise ConformanceFailure("conformance-report-invalid", attempt) from None
+        except OSError:
+            raise ConformanceFailure("conformance-process-unavailable", attempt) from None
         finally:
             report.unlink(missing_ok=True)
         if not failed:
@@ -1078,7 +1204,11 @@ def conformance(args, state):
                 state["observations"] = [{"kind": "inventory-drift",
                                           "fingerprint": hashlib.sha256(identity.encode()).hexdigest()}]
             return attempt
-    raise RuntimeError("conformance did not produce positive contract evidence")
+    # Names have passed the exhaustive scenario validator. Do not include checks,
+    # report text or exception messages, which can contain private child output.
+    scenarios = "+".join(name for name in CONFORMANCE_SCENARIOS if name in failed)
+    termination = "signal" if status < 0 else "exit-nonzero" if status else "exit-zero"
+    raise ConformanceFailure(f"conformance-scenarios:{scenarios}:{termination}", attempt)
 
 
 def probe_result(path):
@@ -1126,6 +1256,9 @@ def live(args, _state):
     if args.harness == "gentle-shell":
         return gentle_probe(args, live=True)
     environment = cell_environment(args.directory)
+    environment.pop("NAN_CANARY_HERMES_STREAM_JSON", None)
+    if args.harness == "hermes" and hermes_machine_frontend(getattr(args, "harness_version", "")):
+        environment["NAN_CANARY_HERMES_STREAM_JSON"] = "1"
     environment["NAN_CANARY_NAN_COMMAND"] = str(args.binary)
     environment["NAN_CANARY_MODEL"] = args.model
     environment["NAN_CANARY_MEDIA_MODE"] = getattr(args, "trigger", "manual")
@@ -1183,7 +1316,7 @@ def initial_state(args):
         raise RuntimeError("requested hosted identity does not match the native runner")
     node = subprocess.run(["node", "-p", "process.versions.node"], check=True,
                           capture_output=True, timeout=10).stdout.decode().strip()
-    if node != "24.20.0":
+    if node != "24.22.1":
         raise RuntimeError("hosted Node runtime does not match the pinned version")
     tier = {"release": "release-gate", "weekly": "live-extended",
             "daily": "deterministic", "manual": "deterministic"}[args.trigger]
@@ -1295,6 +1428,13 @@ def failed_report(args, mismatch=None):
     summary = "Hosted check did not complete successfully."
     if isinstance(mismatch, InstallFailure):
         code = mismatch.code
+    if isinstance(mismatch, ConformanceFailure) and args.stage == "conformance":
+        code = mismatch.code
+        if isinstance(mismatch, HermesConformanceFailure):
+            summary = "Hermes fixture cleanup observation: " + mismatch.cleanup + ". Closed diagnostics: " \
+                + (", ".join(mismatch.diagnostics) or "none") + "."
+            if mismatch.frames:
+                summary += " Source positions: " + json.dumps(mismatch.frames, separators=(",", ":")) + "."
     if isinstance(mismatch, ProbeFailure):
         code = (PROBE_DIAGNOSTIC_CODES.get(mismatch.diagnostic)
                 if args.harness == "aider" and mismatch.stage == "completion-marker"
@@ -1312,9 +1452,11 @@ def failed_report(args, mismatch=None):
     elapsed = (datetime.datetime.fromisoformat(state["completedAt"].replace("Z", "+00:00"))
                - datetime.datetime.fromisoformat(state["startedAt"].replace("Z", "+00:00")))
     total = max(state["durationMilliseconds"], int(elapsed.total_seconds() * 1000))
+    attempts = (mismatch.attempts if isinstance(mismatch, ConformanceFailure)
+                else CONFORMANCE_ATTEMPTS if code and args.stage == "conformance" else 1)
     state["checks"].append({"name": phase, "status": "failed",
                             "durationMilliseconds": total - state["durationMilliseconds"],
-                            "attempts": CONFORMANCE_ATTEMPTS if code and args.stage == "conformance" else 1})
+                            "attempts": attempts})
     state["durationMilliseconds"] = total
     state["outcome"] = "infrastructure-failure" if failure_class == "infrastructure" else "failed"
     if args.stage == "live" or any(check["name"] == "live-tool" for check in state["checks"]):
