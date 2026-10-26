@@ -4,9 +4,11 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import queue
 import subprocess
 import sys
 import tempfile
+import threading
 from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -331,6 +333,61 @@ class Qualification(unittest.TestCase):
 
 
 class PrivateFiles(unittest.TestCase):
+    def test_native_owner_stdin_is_eof_while_host_lifetime_remains_open(self):
+        script = """
+import importlib.util, os, sys, threading, types
+os.environ.pop('NAN_HARNESS_HERMES_DIAGNOSTICS', None)
+os.environ['NAN_HARNESS_HERMES_MANAGED_HOME'] = os.getcwd()
+spec = importlib.util.spec_from_file_location('owner_fixture', sys.argv[1])
+runtime = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(runtime)
+stopped = threading.Event()
+gateway, status = types.ModuleType('gateway'), types.ModuleType('gateway.status')
+def stop(pid):
+    assert pid == os.getpid()
+    stopped.set()
+    return True
+status.write_planned_stop_marker = stop
+sys.modules.update({'gateway': gateway, 'gateway.status': status})
+def native(*_args, **_kwargs):
+    assert not sys.stdin.isatty()
+    assert sys.stdin.buffer.read(1) == b''
+    if os.name == 'nt':
+        import ctypes, _winapi
+        # DLL initialization can probe the OS standard handle, not the CRT fd.
+        info = ctypes.create_string_buffer(128)
+        ctypes.windll.kernel32.GetFileInformationByHandle(
+            ctypes.c_void_p(_winapi.GetStdHandle(-10)), info)
+    print('native-ready', flush=True)
+    assert stopped.wait(5)
+runtime.runpy.run_module = native
+runtime.owner()
+print('host-stopped', flush=True)
+"""
+        child = subprocess.Popen([sys.executable, "-c", script, runtime.__file__],
+                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                 stderr=subprocess.DEVNULL, text=True)
+        lines = queue.Queue()
+        def read():
+            for line in child.stdout:
+                lines.put(line.strip())
+        reader = threading.Thread(target=read, daemon=True)
+        reader.start()
+        try:
+            self.assertEqual(lines.get(timeout=5), "native-ready")
+            self.assertIsNone(child.poll())
+            child.stdin.close()
+            self.assertEqual(lines.get(timeout=5), "host-stopped")
+            self.assertEqual(child.wait(timeout=5), 0)
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait()
+            reader.join(timeout=5)
+            child.stdout.close()
+            if not child.stdin.closed:
+                child.stdin.close()
+
     def test_readiness_preserves_closed_control_and_runtime_failure_categories(self):
         gateway = ModuleType("hermes_cli.gateway_runtime")
         discovery = ModuleType("hermes_cli.gateway_runtime_discovery")

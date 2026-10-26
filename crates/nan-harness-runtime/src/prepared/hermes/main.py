@@ -17,8 +17,7 @@ READINESS_EXIT_CODES = {reason: 90 + index for index, reason in enumerate((
     "identity-pid", "identity-home", "identity-supervisor", "runtime-protocol",
     "runtime-profile", "runtime-authority", "runtime-endpoint", "runtime-state",
 ))}
-# Cold Windows SDK activation can exceed the former 60-second readiness budget.
-READINESS_TIMEOUT_SECONDS = 90 if os.name == "nt" else 60
+READINESS_TIMEOUT_SECONDS = 60
 
 
 class ReadinessFailure(RuntimeError):
@@ -160,11 +159,22 @@ async def refresh(home, pid, arguments):
 
 
 def owner():
+    # A pending synchronous read on Windows stdin can block DLL initialization
+    # that probes that same pipe. Keep host lifetime separate from native stdin.
+    lifetime = os.fdopen(os.dup(sys.stdin.fileno()), "rb", buffering=0)
+    native_input, native_writer = os.pipe()
+    os.close(native_writer)
+    try:
+        os.dup2(native_input, sys.stdin.fileno())
+    finally:
+        os.close(native_input)
+
     def watch_host():
         # Rust is the only writer. EOF also covers a crashed host. Native marker
         # shutdown is cooperative on Windows, unlike TerminateProcess/SIGTERM.
-        while sys.stdin.buffer.read(1):
-            pass
+        with lifetime:
+            while lifetime.read(1):
+                pass
         from frame_diagnostics import readiness_state
         readiness_state(Path(os.environ["NAN_HARNESS_HERMES_MANAGED_HOME"]), "host-closed")
         from gateway.status import write_planned_stop_marker
