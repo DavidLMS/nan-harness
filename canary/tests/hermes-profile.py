@@ -34,6 +34,24 @@ spec.loader.exec_module(frame_diagnostics)
 
 
 class Qualification(unittest.TestCase):
+    def test_fixture_removal_failure_still_writes_a_closed_failure_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "receipt.json"
+            args = SimpleNamespace(output=output, nanh=Path("synthetic-nanh"), hermes=Path("synthetic-hermes"))
+            observer = SimpleNamespace(finish=lambda _launches: True)
+            with patch.dict(os.environ, {"HERMES_HOME": str(Path(directory) / "absent-native")}), \
+                    patch.object(native, "Gateways", return_value=observer), \
+                    patch.object(native, "private_command", side_effect=RuntimeError()), \
+                    patch.object(native.shutil, "rmtree", side_effect=PermissionError()):
+                self.assertEqual(native.run(args), 1)
+            result = json.loads(output.read_text())
+            self.assertEqual(result["status"], "failed")
+            self.assertEqual(result["phase"], "fixture-cleanup")
+            self.assertEqual(result["cleanup"], "proven")
+            self.assertEqual(result["checks"], [])
+            self.assertEqual(result["diagnostics"], ["NH-HERMES-FIXTURE-REMOVE"])
+            self.assertNotIn(directory, output.read_text())
+
     def test_readiness_failure_survives_missing_control_and_cleanup_context(self):
         from hermes_diagnostics import managed_namespace_diagnostics
         with tempfile.TemporaryDirectory() as directory:
@@ -350,6 +368,32 @@ class Qualification(unittest.TestCase):
 
 
 class PrivateFiles(unittest.TestCase):
+    def test_session_reader_releases_its_database_handle_before_fixture_removal(self):
+        from contextlib import closing
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory)
+            database = config / "hermes-profiles/owned/state.db"
+            database.parent.mkdir(parents=True)
+            connect = native.sqlite3.connect
+            with closing(connect(database)) as setup:
+                setup.execute("CREATE TABLE sessions(id TEXT, title TEXT)")
+                setup.execute("INSERT INTO sessions VALUES('owned', 'nanh history proof')")
+                setup.commit()
+            readers = []
+            def capture(*args, **kwargs):
+                connection = connect(*args, **kwargs)
+                readers.append(connection)
+                return connection
+            try:
+                with patch.object(native.sqlite3, "connect", side_effect=capture):
+                    self.assertEqual(native.session_ids(config), ["owned"])
+                with self.assertRaises(native.sqlite3.ProgrammingError):
+                    readers[0].execute("SELECT 1")
+                database.unlink()
+            finally:
+                for connection in readers:
+                    connection.close()
+
     def test_native_actions_retain_the_original_lazy_tool_policy(self):
         with tempfile.TemporaryDirectory() as directory:
             for original in (None, "0", "1"):

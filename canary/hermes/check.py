@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Native private-profile continuation and routing against synthetic providers."""
 import argparse
+from contextlib import closing
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -97,7 +98,7 @@ def session_ids(config):
     files = list(config.glob("hermes-profiles/*/state.db"))
     if len(files) != 1:
         raise RuntimeError()
-    with sqlite3.connect(files[0].resolve().as_uri() + "?mode=ro", uri=True) as database:
+    with closing(sqlite3.connect(files[0].resolve().as_uri() + "?mode=ro", uri=True)) as database:
         return [row[0] for row in database.execute("SELECT id FROM sessions WHERE title=?", ("nanh history proof",))]
 
 
@@ -147,6 +148,7 @@ def run(args):
     checks = []
     diagnostics = []
     frames = []
+    removed = False
 
     def launch(server, prompt, *, reasoning=None, model="qwen3.6", continuation=False):
         nonlocal launches
@@ -230,8 +232,13 @@ def run(args):
             server.server_close()
         if gone:
             checks.append("gateway-cleanup")
-            shutil.rmtree(root)
-    success = set(checks) == set(CHECKS)
+            try:
+                shutil.rmtree(root)
+                removed = True
+            except OSError:
+                phase = "fixture-cleanup"
+                diagnostics.append("NH-HERMES-FIXTURE-REMOVE")
+    success = set(checks) == set(CHECKS) and removed
     result = {"schemaVersion": 1, "status": "passed" if success else "failed", "checks": CHECKS if success else [],
               **({} if success else {"phase": phase, "cleanup": "proven" if gone else "unproven",
                                     "diagnostics": list(dict.fromkeys(diagnostics)), "frames": frames})}

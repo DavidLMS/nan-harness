@@ -1064,10 +1064,10 @@ HERMES_PROFILE_CHECKS = ["native-state-preserved", "same-session-resume", "bridg
                          "reasoning-effort", "reasoning-disabled", "reasoning-toggle",
                          "gateway-cleanup", "automation-isolated"]
 HERMES_PROFILE_PHASES = frozenset({"history-create", "history-created-state", "history-resume", "history-resumed-state", "reasoning-effort",
-                                  "reasoning-disabled", "reasoning-toggle", "native-state", "cleanup"})
+                                  "reasoning-disabled", "reasoning-toggle", "native-state", "cleanup", "fixture-cleanup"})
 HERMES_PROFILE_DIAGNOSTICS = {
     "NH-HERMES-" + name: name.lower()
-    for name in ("LAUNCHER", "PROFILE", "READINESS", "HISTORY", "CLEANUP", "GATEWAY-EXIT", "GATEWAY-DRAIN",
+    for name in ("LAUNCHER", "PROFILE", "READINESS", "HISTORY", "CLEANUP", "FIXTURE-REMOVE", "GATEWAY-EXIT", "GATEWAY-DRAIN",
                  "SUPERVISOR", "SUPERVISOR-IMPORT", "SUPERVISOR-IO", "SUPERVISOR-CONTRACT", "SUPERVISOR-INTERNAL")
 }
 HERMES_PROFILE_DIAGNOSTICS.update({"NH-DISCOVERY-00" + str(index): "discovery-00" + str(index) for index in range(1, 8)})
