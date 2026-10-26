@@ -9,11 +9,31 @@ import sys
 import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from codex_release import CODEX_PROJECT_RELEASES, CODEX_PROJECT_VERSIONS
+from codex_release import CODEX_PROJECT_RELEASES, CODEX_PROJECT_VERSIONS, CODEX_WINDOWS_RELEASE_URL
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'canary/actions'))
 from cell import ensure_private_directory, write_json
 from desktop_suite import read_frozen_manifest
+
+DOWNLOAD_FAILURES = {
+    22: 'inspected-desktop-download-http',
+    23: 'inspected-desktop-download-local-io',
+    28: 'inspected-desktop-download-timeout',
+    63: 'inspected-desktop-download-size-limit',
+}
+FREEZE_FAILURES = frozenset({
+    *DOWNLOAD_FAILURES.values(), 'inspected-desktop-download-unavailable',
+    'inspected-desktop-cache-invalid', 'inspected-desktop-artifact-mismatch',
+    'disposable-hosted-runner-required',
+})
+
+
+def failure_code(error):
+    if isinstance(error, ValueError) and str(error) in FREEZE_FAILURES:
+        return str(error)
+    if isinstance(error, OSError):
+        return 'inspected-desktop-freeze-local-io'
+    return 'inspected-desktop-freeze-manifest'
 
 
 def manifest(platform):
@@ -26,8 +46,9 @@ def manifest(platform):
         url = f'{base}ChatGPT-darwin-arm64-{version}.zip'
         channel, package, staged, installer = f'sparkle:{base}appcast.xml', 'zip', True, 'checker'
     else:
-        url = f'{base}ChatGPT-x64.msix'
-        channel, package, staged, installer = f'official-latest:{url}', 'msix', True, 'external'
+        url = CODEX_WINDOWS_RELEASE_URL
+        channel = f'official-latest:{base}ChatGPT-x64.msix'
+        package, staged, installer = 'msix', True, 'external'
     entry = dict(status='frozen', app='chatgpt-desktop', version=version,
                  channel=channel, url=url, format=package,
                  digest='sha256:' + CODEX_PROJECT_RELEASES[platform][0],
@@ -67,11 +88,17 @@ def claude_manifest(platform):
 
 
 def download(url, output):
-    subprocess.run(['curl', '--fail', '--silent', '--show-error', '--location',
-                    '--proto', '=https', '--proto-redir', '=https',
-                    '--max-time', '180', '--max-filesize', str(1024 * 1024 * 1024),
-                    '--output', str(output), url], check=True, timeout=190,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        subprocess.run(['curl', '--fail', '--silent', '--show-error', '--location',
+                        '--proto', '=https', '--proto-redir', '=https',
+                        '--max-time', '180', '--max-filesize', str(1024 * 1024 * 1024),
+                        '--output', str(output), url], check=True, timeout=190,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except subprocess.CalledProcessError as error:
+        raise ValueError(DOWNLOAD_FAILURES.get(error.returncode,
+                         'inspected-desktop-download-unavailable')) from None
+    except subprocess.TimeoutExpired:
+        raise ValueError('inspected-desktop-download-timeout') from None
 
 
 def stage(entry, directory, fetch=download):
@@ -126,5 +153,5 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except (ValueError, OSError, subprocess.SubprocessError):
-        raise SystemExit('inspected-desktop-freeze-failed') from None
+    except (ValueError, OSError, subprocess.SubprocessError) as error:
+        raise SystemExit(failure_code(error)) from None

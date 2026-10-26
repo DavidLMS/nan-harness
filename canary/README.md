@@ -422,11 +422,15 @@ commit, verifies the signed `SHA256SUMS` and six canonical assets, and runs
 52 unique CLI cells: 18 Linux ARM64, 18 macOS ARM64 and 16 Windows x64.
 Prime Agent and FX are explicitly unavailable on Windows and are not counted
 as passes. The workflow checks out only immutable `GITHUB_SHA` trusted-branch
-code and never executes tag-controlled workflow code. `NAN_API_KEY` is exposed
-only to live cells through the protected `canary-live` environment. The
-`release-publication` environment must be configured with protection rules
-before enabling publication; this documentation does not configure or assert
-that environment.
+code and never executes tag-controlled workflow code. One `canary-live` approval gates the complete live matrix. Its review job
+checks out no code and does not materialize the provider credential. Live
+workers obtain `NAN_API_KEY` from the separate `canary-live-workers` environment,
+restricted to `main`, only after the approval succeeds. Testing jobs use
+`deployment: false` to avoid deployment-history noise. Keep the legacy
+`canary-live` reviewers and credentials protected for old workflow refs/reruns;
+provision the workers key directly through trusted secret settings. The separate
+`release-publication` environment retains its own required review before
+publication. This documentation does not configure these environments.
 
 The default `verification_only=true` mode is safe for testing and produces
 verification evidence without publishing. Publication is allowed only for a

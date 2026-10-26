@@ -68,16 +68,26 @@ jobs:
           python3 -c 'import json; value=json.load(open("matrix.json")); print("has_cells=" + str(bool(value["cells"])).lower())' >> "$GITHUB_OUTPUT"
           python3 -c 'import json; value=json.load(open("matrix.json")); print("\n".join("{} / {}: skipped ({})".format(item["system"], item["harness"], item["reason"]) for item in value["skipped"]))' >> "$GITHUB_STEP_SUMMARY"
 
-  cli:
+  approve-live:
+    name: Approve the selected live CLI cells
     needs: select
-    if: needs.select.outputs.has_cells == 'true'
+    if: inputs.mode == 'live' && github.ref == 'refs/heads/main' && needs.select.outputs.has_cells == 'true'
+    uses: ./.github/workflows/live-check-approval.yml
+    with:
+      subject: Verify selected CLI cells at ${{ needs.select.outputs.source_ref }} using model ${{ needs.select.outputs.model }}.
+
+  cli:
+    needs: [select, approve-live]
+    if: ${{ always() && !cancelled() && needs.select.result == 'success' && needs.select.outputs.has_cells == 'true' && (inputs.mode != 'live' || (github.ref == 'refs/heads/main' && needs.approve-live.result == 'success')) }}
     strategy:
       fail-fast: false
       max-parallel: 3
       matrix: ${{ fromJSON(needs.select.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
-    environment: ${{ matrix.mode == 'live' && 'canary-live' || '' }}
+    environment:
+      name: ${{ matrix.mode == 'live' && 'canary-live-workers' || '' }}
+      deployment: false
     defaults:
       run:
         shell: bash

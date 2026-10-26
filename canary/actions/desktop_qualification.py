@@ -1342,17 +1342,39 @@ def semantic_observations(directory, app):
             counts = {'submittedTurns', 'inputVerifiedTurns', 'copiedResponses'}
             flags = {'retryAttempted', 'clipboardCleared'}
             fields = counts | flags | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'stage'}
-            stages = set('request window tree tree-query tree-duplicate tree-type tree-limit tree-pid tree-focus tree-window mode composer composer-send-pending focus input-focus-guard input-focus-setting input-focused-identity input-replace-select-key input-prompt-before-guard input-prompt-clipboard input-prompt-after-guard input-paste-key input-readback-before-guard input-sentinel-clipboard input-sentinel-after-guard input-readback-select-key input-readback-select-guard input-readback-copy-key input-collapse-guard input-collapse-key input-mismatch input-initial-unavailable input-initial-nonempty input-clipboard-mismatch input-value-mismatch control scope scope-anchor-absent scope-heading-absent scope-assistant-heading-absent scope-marker-heading-absent scope-anchor-ambiguous scope-control-absent scope-control-ambiguous scope-heading-ambiguous scope-prompt-absent scope-prompt-mismatch deadline action-uncertain response-mismatch sent copied retry-ready failure-details-ready failure-details-opened retried completed deadline-window deadline-tree deadline-focus deadline-input deadline-input-paste deadline-input-readback deadline-press deadline-copy deadline-retry-ready deadline-retry'.split())
+            stages = set('request window tree tree-query tree-duplicate tree-type tree-limit tree-pid tree-focus tree-window mode composer composer-ambiguous composer-send-pending focus input-focus-guard input-focus-setting input-focused-identity input-replace-select-key input-prompt-before-guard input-prompt-clipboard input-prompt-after-guard input-paste-key input-readback-before-guard input-sentinel-clipboard input-sentinel-after-guard input-readback-select-key input-readback-select-guard input-readback-copy-key input-collapse-guard input-collapse-key input-mismatch input-initial-unavailable input-initial-nonempty input-clipboard-mismatch input-value-mismatch control scope scope-anchor-absent scope-heading-absent scope-assistant-heading-absent scope-marker-heading-absent scope-anchor-ambiguous scope-control-absent scope-control-ambiguous scope-heading-ambiguous scope-prompt-absent scope-prompt-mismatch deadline action-uncertain response-mismatch sent copied retry-ready failure-details-ready failure-details-opened retried completed deadline-window deadline-tree deadline-focus deadline-input deadline-input-paste deadline-input-readback deadline-press deadline-copy deadline-retry-ready deadline-retry'.split())
             stages.update('tree-depth tree-nodes tree-name-limit tree-text-limit tree-window-limit tree-process-limit'.split())
             stages.update('clipboard-owner clipboard-allocation clipboard-lock clipboard-empty clipboard-set clipboard-close clipboard-guard-before clipboard-guard-after clipboard-deadline-before clipboard-deadline-after clipboard-open-deadline'.split())
             phase_fields = {'actionPhase', 'transportFailure'}
-            if (app != 'claude-desktop' or set(value) - {'providerObservation', 'guardRejection', 'rowShape', 'scopeShape', 'failureAuthority', 'failureScopeCounts', 'operationTiming', 'nativeAction', 'nativeStage'} not in (fields, fields | phase_fields) or value['diagnosticsOnly'] is not True
+            if (app != 'claude-desktop' or set(value) - {'providerObservation', 'guardRejection', 'rowShape', 'scopeShape', 'failureAuthority', 'failureScopeCounts', 'operationTiming', 'nativeAction', 'nativeStage', 'nativeProgress', 'composerShape', 'nativeWindowGuard'} not in (fields, fields | phase_fields) or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in stages
                     or any(type(value[key]) is not bool for key in flags)
                     or any(type(value[key]) is not int or not 0 <= value[key] <= 3 for key in counts)
                     or value['submittedTurns'] > value['inputVerifiedTurns']
                     or value['copiedResponses'] > value['submittedTurns'] + int(value['retryAttempted'])):
                 raise ValueError('invalid Claude native Chat observation')
+            if 'nativeWindowGuard' in value:
+                guard = value['nativeWindowGuard']
+                allowed = {
+                    'action': {'input', 'input-replace-owned', 'input-failure-owned', 'copy', 'retry-ready', 'retry', 'failure-details', 'failure-details-ready', 'failure-details-temporal', 'failure-details-ready-temporal', 'retry-ready-temporal', 'retry-temporal'},
+                    'site': {'entry', 'collect-before', 'collect-after'},
+                    'failure': {'unmeasured', 'foreground', 'application', 'focus', 'geometry', 'inventory', 'identity', 'layer', 'display', 'stack'},
+                    'focusStatus': {'unqueried', 'untrusted', 'query-error', 'focus-mismatch', 'not-standard', 'ready'},
+                    'queryStage': {'unqueried', 'app-create', 'app-timeout', 'focused-window', 'main-window', 'focused-element', 'input-timeout', 'input-window', 'element-type', 'pid', 'window-timeout', 'role', 'subrole', 'position', 'size', 'geometry'},
+                    'queryError': {'unqueried', 'failure', 'illegal-argument', 'invalid-element', 'cannot-complete', 'attribute-unsupported', 'not-implemented', 'api-disabled', 'no-value', 'other', 'empty-value', 'type-mismatch', 'owner-mismatch', 'geometry-invalid'},
+                }
+                if (mechanism != 'claude-native-chat' or type(guard) is not dict or set(guard) != set(allowed)
+                        or any(type(item) is not str or item not in allowed[key] for key, item in guard.items())):
+                    raise ValueError('invalid Claude native window guard')
+                record['nativeWindowGuard'] = dict(guard)
+            if 'composerShape' in value:
+                shape = value['composerShape']
+                if (mechanism != 'claude-native-chat' or type(shape) is not dict
+                        or set(shape) != {'editors', 'startTasks', 'sendMessages'}
+                        or any(type(count) is not int or not 0 <= count <= 1024 for count in shape.values())
+                        or sum(shape.values()) > 1024):
+                    raise ValueError('invalid Claude composer shape')
+                record['composerShape'] = dict(shape)
             if 'nativeAction' in value:
                 action = value['nativeAction']
                 if (mechanism != 'claude-windows-native-chat' or type(action) is not str
@@ -1361,9 +1383,15 @@ def semantic_observations(directory, app):
                 record['nativeAction'] = action
             if 'nativeStage' in value:
                 stage = value['nativeStage']
-                if mechanism != 'claude-windows-native-chat' or type(stage) is not str or stage not in stages:
+                if mechanism not in {'claude-native-chat', 'claude-windows-native-chat'} or type(stage) is not str or stage not in stages:
                     raise ValueError('invalid Claude native receipt stage')
                 record['nativeStage'] = stage
+            if 'nativeProgress' in value:
+                progress = value['nativeProgress']
+                if (mechanism != 'claude-windows-native-chat' or type(progress) is not str
+                        or progress not in {'setup', 'tree', 'composer', 'action', 'target', 'focus', 'select', 'paste', 'pasted', 'readback', 'copy', 'copied', 'send', 'submit', 'invoke', 'finish'}):
+                    raise ValueError('invalid Claude native progress diagnostic')
+                record['nativeProgress'] = progress
             if 'operationTiming' in value:
                 timing = value['operationTiming']
                 required = {'budgetMs', 'elapsedMs'}

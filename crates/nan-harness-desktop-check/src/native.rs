@@ -27,10 +27,13 @@ pub(crate) use image::prepare_ocr_image;
 #[cfg(any(target_os = "macos", test))]
 pub(crate) use mac_chat::ChatPressStage;
 #[cfg(target_os = "macos")]
+pub(crate) use mac_chat_turn::transport_deadline as claude_chat_transport_deadline;
+#[cfg(target_os = "macos")]
 pub(crate) use mac_chat_turn::{CHAT_TURN_MAX_MILLIS, ChatActionPhase, failure_label};
 #[cfg(target_os = "macos")]
 pub(crate) use mac_chat_turn::{
-    ChatTurnReceipt, ChatTurnStage, FailureRowShape, FailureScopeShape,
+    ChatTurnReceipt, ChatTurnStage, ComposerShape, FailureRowShape, FailureScopeShape,
+    WindowGuardObservation,
 };
 pub(crate) use ocr::Page;
 pub(crate) use process::FailureCategory;
@@ -447,6 +450,7 @@ impl Native {
         mode: &str,
         values: [&str; 3],
         deadline: std::time::Instant,
+        progress: &mut Option<&'static str>,
     ) -> Result<WindowsChatReceipt, FailureCategory> {
         if std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
             || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
@@ -456,7 +460,8 @@ impl Native {
         {
             return Err(FailureCategory::InvalidInput);
         }
-        let output = process::windows_chat::run(&self.executable, window, mode, values, deadline)?;
+        let output =
+            process::windows_chat::run(&self.executable, window, mode, values, deadline, progress)?;
         WindowsChatReceipt::parse(&output, mode).ok_or(FailureCategory::Output)
     }
 

@@ -46,7 +46,7 @@ grep -Fq 'ref: ${{ needs.select.outputs.source_ref }}' <<<"$cli"
 grep -Fq -- '--source-kind branch --source-sha "$SOURCE_SHA"' <<<"$cli"
 grep -Fq -- '--package nan-harness-cli --bin nan-harness' <<<"$cli"
 grep -Fq -- '--package nan-harness-canary --bin nan-harness-canary' <<<"$cli"
-grep -Fq 'environment: ${{ matrix.mode' <<<"$cli"
+grep -Fq 'name: ${{ matrix.mode' <<<"$cli"
 grep -Fq 'permissions:' "$gate"
 grep -Fq 'contents: read' "$gate"
 if grep -Fq 'publication.py' "$gate"; then

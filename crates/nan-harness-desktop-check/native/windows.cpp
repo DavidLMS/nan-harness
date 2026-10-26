@@ -586,41 +586,53 @@ bool claude_owned_mac_window(std::uint64_t id, pid_t pid, CGRect bounds) {
 }
 // Read-only classification for passive composer settling. Existing bool callers
 // keep their original proof. Pending never authorizes an action.
+static thread_local MacWindowObservation mac_window_observation;
+MacWindowObservation claude_mac_window_observation() { return mac_window_observation; }
 MacOwnedWindowState claude_mac_window_state(std::uint64_t id, pid_t pid, CGRect expected) {
+    mac_window_observation = {};
+    const auto rejected = [](const char* failure) {
+        mac_window_observation.failure = failure;
+        return MacOwnedWindowState::Rejected;
+    };
     const auto foreground = [&] { return [[[NSWorkspace sharedWorkspace] frontmostApplication] processIdentifier] == pid; };
     auto application = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
     MacWindowSafety safety{foreground(), application && application.active && !application.hidden
         && application.finishedLaunching, false, false, false, false, false};
-    if (!safety.foreground_same || !safety.application_ready) return MacOwnedWindowState::Rejected;
+    if (!safety.foreground_same || !safety.application_ready) return rejected(mac_window_rejection(safety));
     AxFocus focus;
     read_ax_focus(pid, focus);
+    mac_window_observation.focus_status = focus.status;
+    mac_window_observation.query_stage = focus.query_stage ? focus.query_stage : "unqueried";
+    mac_window_observation.query_error = focus.query_error ? focus.query_error : "unqueried";
     MacFocusRead read = MacFocusRead::Rejected;
     if (std::string(focus.status) == "ready" && CGRectEqualToRect(expected, focus.bounds))
         read = MacFocusRead::ReadyHeld;
     else if (std::string(focus.status) == "query-error" && focus.query_error
         && std::string(focus.query_error) == "cannot-complete") read = MacFocusRead::CannotComplete;
-    if (read == MacFocusRead::Rejected) return MacOwnedWindowState::Rejected;
+    if (read == MacFocusRead::Rejected)
+        return rejected(std::string(focus.status) == "ready" ? "geometry" : "focus");
     auto windows = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID);
-    if (!windows) return MacOwnedWindowState::Rejected;
+    if (!windows) return rejected("inventory");
+    if (CFArrayGetCount(windows) > 1024) mac_window_observation.failure = "inventory";
     unsigned matches = 0;
     safety.held_unique = CFArrayGetCount(windows) <= 1024
         && match_focus_window(windows, pid, expected, matches) == id;
     bool found = false, clear = safety.held_unique;
     for (CFIndex index = 0; clear && index < CFArrayGetCount(windows); ++index) {
         auto value = CFArrayGetValueAtIndex(windows, index);
-        if (!value || CFGetTypeID(value) != CFDictionaryGetTypeID()) { clear = false; break; }
+        if (!value || CFGetTypeID(value) != CFDictionaryGetTypeID()) { mac_window_observation.failure = "inventory"; clear = false; break; }
         auto window = static_cast<CFDictionaryRef>(value);
         auto rectangle = CFDictionaryGetValue(window, kCGWindowBounds);
         CGRect bounds;
         if (!rectangle || !CGRectMakeWithDictionaryRepresentation(static_cast<CFDictionaryRef>(rectangle), &bounds)
             || !std::isfinite(bounds.origin.x) || !std::isfinite(bounds.origin.y)
             || !std::isfinite(bounds.size.width) || !std::isfinite(bounds.size.height)
-            || bounds.size.width < 0 || bounds.size.height < 0) { clear = false; break; }
+            || bounds.size.width < 0 || bounds.size.height < 0) { mac_window_observation.failure = "inventory"; clear = false; break; }
         double alpha = 1;
         auto opacity = CFDictionaryGetValue(window, kCGWindowAlpha);
         if (opacity && (CFGetTypeID(opacity) != CFNumberGetTypeID()
-            || !CFNumberGetValue(static_cast<CFNumberRef>(opacity), kCFNumberDoubleType, &alpha))) { clear = false; break; }
-        if (!std::isfinite(alpha)) { clear = false; break; }
+            || !CFNumberGetValue(static_cast<CFNumberRef>(opacity), kCFNumberDoubleType, &alpha))) { mac_window_observation.failure = "inventory"; clear = false; break; }
+        if (!std::isfinite(alpha)) { mac_window_observation.failure = "inventory"; clear = false; break; }
         if (number(window, kCGWindowNumber) == id && number(window, kCGWindowOwnerPID) == pid) {
             found = true;
             safety.held_geometry_same = CGRectEqualToRect(bounds, expected) && alpha > 0
@@ -641,7 +653,10 @@ MacOwnedWindowState claude_mac_window_state(std::uint64_t id, pid_t pid, CGRect 
     }
     safety.foreground_same = safety.foreground_same && foreground();
     safety.application_ready = safety.application_ready && application.active && !application.hidden && !application.terminated;
-    return classify_mac_owned_window(read, safety);
+    const auto state = classify_mac_owned_window(read, safety);
+    if (state == MacOwnedWindowState::Rejected && std::string(mac_window_observation.failure) != "inventory")
+        mac_window_observation.failure = mac_window_rejection(safety);
+    return state;
 }
 static int chat_result(const char* stage) {
     std::cout << "chat " << stage << '\n';

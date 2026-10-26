@@ -2697,6 +2697,23 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'claude-desktop')
 
+    def test_windows_native_progress_is_closed_and_cannot_certify_an_action(self):
+        value = dict(schemaVersion=1, mechanism='claude-windows-native-chat', diagnosticsOnly=True,
+                     stage='action-uncertain', actionPhase='transport', transportFailure='timeout',
+                     submittedTurns=2, inputVerifiedTurns=2, copiedResponses=2,
+                     retryAttempted=False, clipboardCleared=True)
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'progress.json'
+            for progress in ('tree', 'paste', 'send', 'invoke', 'finish'):
+                item = {**value, 'nativeProgress': progress}
+                path.write_text(json.dumps(item))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [item])
+            for changes in ({'nativeProgress': 'PRIVATE'}, {'nativeProgress': None},
+                            {'nativeProgress': 4}, {'mechanism': 'claude-native-chat'}):
+                path.write_text(json.dumps({**item, **changes}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+
     def test_windows_tree_limits_remain_nonaccepting_and_closed(self):
         value = dict(schemaVersion=1, mechanism='claude-windows-native-chat', diagnosticsOnly=True,
                      stage='tree-depth', submittedTurns=1, inputVerifiedTurns=1, copiedResponses=0,
@@ -2764,6 +2781,68 @@ class QualificationTests(unittest.TestCase):
             path.write_text(json.dumps(value))
             with self.assertRaises(ValueError):
                 q.semantic_observations(tmp, 'chatgpt-desktop')
+
+    def test_native_window_guard_is_closed_and_does_not_authorize_recovery(self):
+        guard = dict(action='copy', site='collect-after', failure='focus', focusStatus='query-error',
+                     queryStage='focused-element', queryError='no-value')
+        value = dict(schemaVersion=1, mechanism='claude-native-chat', diagnosticsOnly=True,
+                     stage='tree-window', submittedTurns=1, inputVerifiedTurns=1, copiedResponses=0,
+                     retryAttempted=False, clipboardCleared=True, nativeWindowGuard=guard)
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'window.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [value])
+            self.assertEqual(q.envelope('claude-desktop', 'macos', 'aarch64', 'a' * 40)['qualification'], 'unqualified')
+            for key in guard:
+                path.write_text(json.dumps({**value, 'nativeWindowGuard': {**guard, key: 'PRIVATE'}}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+            for changed in ({**guard, 'pid': 123}, {key: item for key, item in guard.items() if key != 'site'}):
+                path.write_text(json.dumps({**value, 'nativeWindowGuard': changed}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+            path.write_text(json.dumps({**value, 'mechanism': 'claude-windows-native-chat'}))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'claude-desktop')
+
+    def test_mac_native_receipt_survives_uncertain_post_guard_without_qualifying(self):
+        value = dict(schemaVersion=1, mechanism='claude-native-chat', diagnosticsOnly=True,
+                     stage='action-uncertain', actionPhase='post-guard', transportFailure='timeout',
+                     nativeStage='composer', composerShape=dict(editors=0, startTasks=0, sendMessages=0),
+                     submittedTurns=2, inputVerifiedTurns=2, copiedResponses=2,
+                     retryAttempted=False, clipboardCleared=True)
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'receipt.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [value])
+            self.assertEqual(q.envelope('claude-desktop', 'macos', 'aarch64', 'a' * 40)['qualification'], 'unqualified')
+            for stage in ('PRIVATE', 7, None):
+                path.write_text(json.dumps({**value, 'nativeStage': stage}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+
+    def test_native_composer_shape_is_bounded_and_cannot_qualify_a_probe(self):
+        value = dict(schemaVersion=1, mechanism='claude-native-chat', diagnosticsOnly=True,
+                     stage='composer-ambiguous', submittedTurns=2, inputVerifiedTurns=2, copiedResponses=2,
+                     retryAttempted=False, clipboardCleared=True,
+                     composerShape=dict(editors=2, startTasks=0, sendMessages=1))
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'composer.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [value])
+            self.assertEqual(q.envelope('claude-desktop', 'macos', 'aarch64', 'a' * 40)['qualification'], 'unqualified')
+            for shape in (dict(editors=True, startTasks=0, sendMessages=1),
+                          dict(editors=-1, startTasks=0, sendMessages=1),
+                          dict(editors=1024, startTasks=0, sendMessages=1),
+                          dict(editors=1, startTasks=0, sendMessages=1025),
+                          dict(editors=1, sendMessages=1),
+                          dict(editors=1, startTasks=0, sendMessages=1, label='PRIVATE')):
+                path.write_text(json.dumps({**value, 'composerShape': shape}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+            path.write_text(json.dumps({**value, 'mechanism': 'claude-windows-native-chat'}))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'claude-desktop')
 
     def test_native_input_boundaries_preserve_terminal_failure_and_privacy(self):
         facts = dict(schemaVersion=1, mechanism='claude-native-chat', diagnosticsOnly=True,

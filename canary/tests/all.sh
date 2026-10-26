@@ -37,7 +37,7 @@ for test_script in \
   desktop-qualification.py \
   desktop-maintenance.py desktop-release-binding.py \
   hosted-cli-selection.py \
-  hosted-cli-workflow.py \
+  hosted-cli-workflow.py live-approval.py \
   daily-compatibility.py \
   omp-usage-comparison.py \
   cli-resolution.py \

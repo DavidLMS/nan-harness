@@ -502,7 +502,7 @@ fn verify_entry(entry: &Entry, policy: Policy) -> Result<(), ManifestError> {
             format,
             installer,
         } => (
-            moving_url(url, &version, &release.url),
+            moving_url(url, &version, &release.url) || inspected_codex_windows_url(release),
             format,
             installer,
             true,
@@ -533,6 +533,17 @@ fn verify_entry(entry: &Entry, policy: Policy) -> Result<(), ManifestError> {
 pub(crate) fn apt_url(base: &str, package: &str, version: &Version, architecture: &str) -> String {
     let initial = &package[..1];
     format!("{base}pool/main/{initial}/{package}/{package}_{version}_{architecture}.deb")
+}
+
+fn inspected_codex_windows_url(release: &Release) -> bool {
+    // The official MSIX identity differs from the embedded application version.
+    // Admit only these independently recovered, already-inspected package bytes.
+    release.app == DesktopHarnessKind::ChatGpt
+        && release.version == "26.1007.21434"
+        && release.digest.as_deref()
+            == Some("sha256:36770adda59f71027e94d3d18ff7087da45a41990d1a1575080cd3149dcab30a")
+        && release.url
+            == "https://persistent.oaistatic.com/codex-app-prod/releases/26.1007.2314.0/ChatGPT-x64.msix"
 }
 
 fn moving_url(expected: &str, version: &Version, url: &str) -> bool {

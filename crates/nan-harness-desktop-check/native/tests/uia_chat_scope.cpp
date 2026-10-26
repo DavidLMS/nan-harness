@@ -47,7 +47,8 @@ static void control_view_scope_contract() {
             auto found=parents.find(node);if(found==parents.end())return std::nullopt;
             return found->second;
         },[](int a,int b)->std::optional<bool>{return a==b;},
-        [&](int node){return !(foreign&&node==100);},[]{return true;});
+        [&](int node){return !(foreign&&node==100);},[]{return true;},
+        [](int node)->std::optional<std::vector<std::int32_t>>{return std::vector<std::int32_t>{node};});
     };
     assert(!attached(raw,102,false)); // Existing depth bound remains effective.
     assert(attached(controls,102,false));assert(!attached(controls,102,true));

@@ -143,11 +143,22 @@ jobs:
           PY
           fi
 
-  desktop:
+  approve-live:
+    name: Approve the selected live Desktop suite
     needs: select
+    if: inputs.mode == 'live' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/live-check-approval.yml
+    with:
+      subject: Verify the selected Desktop suite at ${{ github.sha }} using model ${{ needs.select.outputs.model }}.
+
+  desktop:
+    needs: [select, approve-live]
+    if: ${{ always() && !cancelled() && needs.select.result == 'success' && (inputs.mode != 'live' || (github.ref == 'refs/heads/main' && needs.approve-live.result == 'success')) }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
-    environment: ${{ inputs.mode == 'live' && 'canary-live' || (inputs.hosted_evidence && 'desktop-deterministic' || '') }}
+    environment:
+      name: ${{ inputs.mode == 'live' && 'canary-live-workers' || (inputs.hosted_evidence && 'desktop-deterministic' || '') }}
+      deployment: false
     strategy:
       fail-fast: false
       max-parallel: 3

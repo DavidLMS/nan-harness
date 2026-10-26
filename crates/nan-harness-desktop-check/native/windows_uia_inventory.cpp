@@ -201,7 +201,10 @@ struct Collection {
             return false;
         };
         return uia_attached_to_root(retained, retained_root, parent, equal, owned,
-                                    [&] { return within(); });
+                                    [&] { return within(); },
+                                    [&](const ComPtr<IUIAutomationElement>& node) {
+                                        return runtime_id(node.Get());
+                                    });
     }
     void observe_mode(IUIAutomationElement* root) {
         // Global uniqueness was measured by the existing complete inventory.

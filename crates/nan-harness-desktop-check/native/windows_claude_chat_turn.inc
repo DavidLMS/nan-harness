@@ -15,6 +15,9 @@ struct ChatInput {
     const wchar_t* send_name=L"Start task";
     UiaChatCapability original;
     const char* stage="request";
+    void progress(const char* stage) {
+        std::cout<<"progress "<<stage<<'\n'<<std::flush;
+    }
     ~ChatInput() {
         if(!prompt.empty())SecureZeroMemory(prompt.data(),prompt.size()*sizeof(wchar_t));
         if(!sentinel.empty())SecureZeroMemory(sentinel.data(),sentinel.size()*sizeof(wchar_t));
@@ -305,9 +308,12 @@ struct ChatInput {
         return "response-mismatch";
     }
     const char* input() {
+        progress("target");
         if(!target())return "control";
+        progress("focus");
         if(FAILED(editor->SetFocus()))return "input-focus-setting";
         if(!wait_focus())return "input-focused-identity";
+        progress("select");
         if(!key('A'))return "input-replace-select-key";
         if(const char* failure=clipboard_write(prompt))return failure;
         if(focus()!=UiaChatInputValue::Ready)return "input-focused-identity";
@@ -317,12 +323,17 @@ struct ChatInput {
         if(SUCCEEDED(previous_result) && previous_size<=1024 && previous)prior.assign(previous,previous_size);
         if(previous){SecureZeroMemory(previous,previous_size*sizeof(wchar_t));SysFreeString(previous);}
         if(FAILED(previous_result) || previous_size>1024 || focus()!=UiaChatInputValue::Ready)return "input-value-mismatch";
+        progress("paste");
         if(!key('V'))return "input-paste-key";
+        progress("pasted");
         if(!uia_chat_settle([&]{return pasted();},[&]{return within();},
             []{std::this_thread::sleep_for(std::chrono::milliseconds(20));}))return "input-value-mismatch";
+        progress("readback");
         if(const char* failure=clipboard_write(sentinel))return failure;
         if(!key('A'))return "input-readback-select-key";
+        progress("copy");
         if(!key('C'))return "input-readback-copy-key";
+        progress("copied");
         // Clipboard copy may settle, but neither Copy nor any key is repeated.
         while(within()) {
             if(focus()!=UiaChatInputValue::Ready)return "input-focused-identity";
@@ -335,12 +346,15 @@ struct ChatInput {
         // The official composer may hide Send until a draft exists. Write and
         // verify only the retained editor first; then admit one fresh Send.
         // This wait is read-only and never repeats paste or an uncertain send.
+        progress("send");
         if(!uia_chat_settle([&]{return retain_send();},[&]{return within();},
             []{std::this_thread::sleep_for(std::chrono::milliseconds(20));}))return "control";
+        progress("submit");
         if(!wait_focus() || !target(true))return "control";
         BOOL enabled=FALSE;
         if(FAILED(send->get_CurrentIsEnabled(&enabled)) || !enabled || !owned() || !within())return "control";
         // This is the only submission action. An HRESULT cannot prove receipt.
+        progress("invoke");
         const HRESULT submitted=invoke->Invoke();
         if(FAILED(submitted) || !within() || !owned())return "action-uncertain";
         return "sent";
@@ -400,8 +414,9 @@ int windows_claude_chat_turn() {
     std::optional<UiaChatFailureCounts> failure_counts;
     std::optional<unsigned> unfiltered_retry,unfiltered_details;
     const auto emit=[&](const char* stage) {
+        turn.progress("finish");
         if(std::string(stage)!="action-uncertain" && !turn.time_left())stage="deadline";
-        std::cout<<"turn "<<stage<<'\n';
+        std::cout<<"turn "<<stage<<'\n'<<std::flush;
         if(failure_counts) {
             const auto& counts=*failure_counts;
             std::cout<<"failure-scope "<<counts.server_errors<<' '<<counts.user_headings<<' '
@@ -416,6 +431,7 @@ int windows_claude_chat_turn() {
         }
         return std::cout?0:4;
     };
+    turn.progress("setup");
     if(!chat_parent(turn.checker_pid) || !turn.within() || !c.guard())return emit("window");
     if(FAILED(CoInitializeEx(nullptr,COINIT_MULTITHREADED)))return emit("tree");
     struct ComCleanup {
@@ -436,6 +452,7 @@ int windows_claude_chat_turn() {
         || FAILED(automation.As(&c.automation)) || FAILED(automation->get_ControlViewWalker(&c.walker)))return emit("tree");
     if(FAILED(automation->ElementFromHandle(c.request.window,&turn.root)) || !turn.root)
         return emit("tree-query");
+    turn.progress("tree");
     if(!c.append(turn.root.Get(),0)) {
         const std::string failure=c.stage;
         if(failure=="query" || failure=="root-process-query" || failure=="descendant-process-query")
@@ -452,11 +469,13 @@ int windows_claude_chat_turn() {
         if(failure=="deadline")return emit("deadline");
         return emit("tree-pid");
     }
+    turn.progress("composer");
     c.observe_mode(turn.root.Get());c.observe_capability(turn.root.Get());
     if(std::string(c.mode_status)!="chat")return emit("mode");
     if(turn.mode=="retry-ready" || turn.mode=="retry" || turn.mode=="failure-details")
         failure_counts=uia_chat_failure_counts(c.chat_nodes,turn.prompt);
     if(turn.mode!="input-replace-owned") {
+        turn.progress("action");
         const char* result=turn.action();
         if(turn.mode=="retry-ready" && std::string(result)=="scope-control-absent") {
             const auto retry=turn.unfiltered_label_count(L"Retry");

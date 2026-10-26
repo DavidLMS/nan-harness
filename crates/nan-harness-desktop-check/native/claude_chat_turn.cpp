@@ -17,6 +17,7 @@
 #include "mac_owned_window.hpp"
 bool claude_owned_mac_window(std::uint64_t, pid_t, CGRect);
 MacOwnedWindowState claude_mac_window_state(std::uint64_t, pid_t, CGRect);
+MacWindowObservation claude_mac_window_observation();
 namespace {
 using Clock = std::chrono::steady_clock;
 struct Request {
@@ -27,6 +28,8 @@ struct Request {
     CGRect bounds = CGRectZero;
     Clock::time_point deadline;
     mutable const char* deadline_phase = "deadline-window";
+    mutable const char* window_site = nullptr;
+    mutable MacWindowObservation window_observation;
     ~Request() { for (auto value : {&prompt, &marker, &sentinel}) std::fill(value->begin(), value->end(), '\0'); }
 };
 static bool decode(const std::string& hex, std::string& result) {
@@ -79,9 +82,16 @@ static bool settle_owned_window(Query query, Within within_deadline, Pause pause
     }
     return false;
 }
-static bool wait_owned_window(const Request& request) {
+static bool wait_owned_window(const Request& request, const char* site = "entry") {
     return settle_owned_window(
-        [&] { return claude_mac_window_state(request.window, request.pid, request.bounds); },
+        [&] {
+            const auto state = claude_mac_window_state(request.window, request.pid, request.bounds);
+            if (state == MacOwnedWindowState::Rejected) {
+                request.window_site = site;
+                request.window_observation = claude_mac_window_observation();
+            }
+            return state;
+        },
         [&] { return within(request); },
         [] { std::this_thread::sleep_for(std::chrono::milliseconds(20)); });
 }
@@ -206,7 +216,7 @@ struct Tree {
     bool collect(const Request& request) {
         ax_query_failed = false;
         failure = nullptr;
-        if (!wait_owned_window(request)) return reject("tree-window");
+        if (!wait_owned_window(request, "collect-before")) return reject("tree-window");
         auto app = AXUIElementCreateApplication(request.pid);
         if (!app) return reject("tree-query");
         if (AXUIElementSetMessagingTimeout(app, .1F) != kAXErrorSuccess) {
@@ -222,7 +232,7 @@ struct Tree {
         else valid = append(static_cast<AXUIElementRef>(window), -1, 0, request);
         if (window) CFRelease(window);
         if (ax_query_failed) return reject("tree-query");
-        if (!wait_owned_window(request)) return reject("tree-window");
+        if (!wait_owned_window(request, "collect-after")) return reject("tree-window");
         return valid;
     }
 };
@@ -469,6 +479,87 @@ static bool clean_failure_input(const Tree& tree, const Request& request, int dr
             || (node.role == "AXButton" && node.label == "Try again")) return false;
     }
     return true;
+}
+struct ComposerShape {
+    unsigned editors = 0, start_tasks = 0, send_messages = 0;
+};
+enum class ComposerReadiness { Pending, Ready, Rejected };
+static ComposerShape composer_shape(const Tree& tree) {
+    ComposerShape shape;
+    for (std::size_t i = 0; i < tree.nodes.size(); ++i) {
+        if (!descendant(tree, static_cast<int>(i), 0)) continue;
+        const auto& node = tree.nodes[i];
+        if (node.role == "AXTextArea" && node.label == "Write your prompt to Claude") ++shape.editors;
+        if (node.role == "AXButton" && node.label == "Start task") ++shape.start_tasks;
+        if (node.role == "AXButton" && node.label == "Send message") ++shape.send_messages;
+    }
+    return shape;
+}
+static ComposerReadiness composer_readiness(const ComposerShape& shape) {
+    const auto submissions = shape.start_tasks + shape.send_messages;
+    if (shape.editors > 1 || submissions > 1) return ComposerReadiness::Rejected;
+    return shape.editors == 1 && submissions == 1 ? ComposerReadiness::Ready : ComposerReadiness::Pending;
+}
+// Only absence before the first action is waitable. Ambiguity, ownership loss
+// and failed AX queries never authorize another observation or an input action.
+template<class Query, class Within, class Pause>
+static bool settle_composer_readiness(Query query, Within within_deadline, Pause pause) {
+    while (within_deadline()) {
+        const auto state = query();
+        if (!within_deadline() || state == ComposerReadiness::Rejected) return false;
+        if (state == ComposerReadiness::Ready) return true;
+        pause();
+    }
+    return false;
+}
+static const char* prepare_input_tree(const Request& request, Tree& tree, ComposerShape& shape, bool& observed) {
+    if (request.prompt.empty()) return "composer";
+    if (tree.nodes.empty() || !tree.nodes.front().element) return "tree-window";
+    struct HeldRoot {
+        AXUIElementRef element;
+        ~HeldRoot() { CFRelease(element); }
+    } root{static_cast<AXUIElementRef>(CFRetain(tree.nodes.front().element))};
+    bool refresh = false;
+    const char* failure = "composer";
+    const bool ready = settle_composer_readiness([&] {
+        if (refresh) {
+            Tree fresh;
+            if (!fresh.collect(request)) {
+                failure = fresh.failure ? fresh.failure : "tree-query";
+                return ComposerReadiness::Rejected;
+            }
+            if (fresh.nodes.empty() || !CFEqual(root.element, fresh.nodes.front().element)) {
+                failure = "tree-window";
+                return ComposerReadiness::Rejected;
+            }
+            // Transfer owned CF references without copying the tree.
+            tree.nodes.swap(fresh.nodes);
+        }
+        refresh = true;
+        if (!owned(request)) { failure = "tree-window"; return ComposerReadiness::Rejected; }
+        if (!chat(tree)) { failure = "mode"; return ComposerReadiness::Rejected; }
+        if (request.mode == "input-failure-owned" && !clean_failure_input(tree, request)) {
+            failure = "scope";
+            return ComposerReadiness::Rejected;
+        }
+        shape = composer_shape(tree);
+        observed = true;
+        const auto state = composer_readiness(shape);
+        if (state == ComposerReadiness::Rejected) {
+            failure = "composer-ambiguous";
+            return state;
+        }
+        const int editor = unique(tree, "AXTextArea", "Write your prompt to Claude");
+        const int send = unique(tree, "AXButton", shape.start_tasks ? "Start task" : "Send message");
+        if ((editor >= 0 && !target(tree.nodes[editor], request))
+            || (send >= 0 && !contained_control(tree.nodes[send], request))) {
+            failure = "control";
+            return ComposerReadiness::Rejected;
+        }
+        return state;
+    }, [&] { return within(request); },
+       [] { std::this_thread::sleep_for(std::chrono::milliseconds(20)); });
+    return ready ? nullptr : failure;
 }
 static const char* input(const Request& request, const Tree& tree) {
     if (!chat(tree)) return "mode";
@@ -848,6 +939,7 @@ int claude_chat_turn() {
         const char* stage = "request";
         RowShape row_shape{}; bool row_shape_observed = false;
         ScopeShape scope_shape{}; bool scope_shape_observed = false;
+        ComposerShape composer{}; bool composer_observed = false;
         if (request(value)) {
             Tree tree;
             if (!wait_owned_window(value)) stage = "window";
@@ -862,12 +954,17 @@ int claude_chat_turn() {
                         row_shape_observed = observe_row_shape(tree, value, row_shape, [&] { return within(value); });
                         scope_shape_observed = row_shape_observed && observe_scope_shape(tree, scope_shape, [&] { return within(value); });
                     }
-                    stage = input_mode(value.mode) ? input(value, tree) : action(value, tree);
+                    if (input_mode(value.mode)) {
+                        stage = prepare_input_tree(value, tree, composer, composer_observed);
+                        if (!stage) stage = input(value, tree);
+                    } else stage = action(value, tree);
                 }
             }
             stage = deadline_result(value, stage, !within(value));
         }
         std::cout << "turn " << stage << '\n';
+        if (composer_observed)
+            std::cout << "composer " << composer.editors << ' ' << composer.start_tasks << ' ' << composer.send_messages << '\n';
         if (row_shape_observed && within(value)) {
             std::cout << "rows";
             for (unsigned count : row_shape) std::cout << ' ' << count;
@@ -877,6 +974,11 @@ int claude_chat_turn() {
                 for (unsigned count : scope_shape.counts) std::cout << ' ' << count;
                 std::cout << '\n';
             }
+        }
+        if (value.window_site) {
+            const auto& observation = value.window_observation;
+            std::cout << "window-guard " << value.window_site << ' ' << observation.failure << ' '
+                << observation.focus_status << ' ' << observation.query_stage << ' ' << observation.query_error << '\n';
         }
         return std::cout ? 0 : 5;
     }
