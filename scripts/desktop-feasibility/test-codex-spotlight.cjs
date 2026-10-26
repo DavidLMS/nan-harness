@@ -7,19 +7,38 @@ const URL_VALUE='app://-/index.html?initialRoute=%2Fspotlight';
 const env={GITHUB_ACTIONS:'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:'Windows',
   NANH_DESKTOP_RENDERER_APP:'chatgpt-desktop',NANH_CODEX_PUBLIC_ONBOARDING:'engineering',NANH_CODEX_INPUT_CHANNEL:'cdp-dom',
   NANH_CODEX_PROJECT_POLICY:'open-project',NANH_DESKTOP_QUALIFICATION_MODE:'renderer',NANH_CODEX_PROJECT_ARTIFACT_SHA256:source.ARTIFACT};
+function inlineStyle(raw) {
+  const values=new Map(),priorities=new Map();
+  for(const declaration of raw.split(';')) {
+    const colon=declaration.indexOf(':');if(colon<0)continue;
+    const name=declaration.slice(0,colon).trim(),text=declaration.slice(colon+1).trim();
+    const priority=/!important$/.test(text)?'important':'',value=text.replace(/\s*!important$/,'');
+    // Real Chromium enumerates the outline shorthand as these three longhands.
+    for(const [key,item] of name==='outline'?[['outline-color','initial'],['outline-style',value],['outline-width','initial']]:[[name,value]]) {
+      values.set(key,item);priorities.set(key,priority);
+    }
+  }
+  return {[Symbol.iterator]:()=>values.keys(),getPropertyPriority:name=>priorities.get(name)??'',
+    getPropertyValue:name=>name==='outline'?(values.get('outline-style')==='none'
+      &&values.get('outline-color')==='initial'&&values.get('outline-width')==='initial'?'none':'other'):values.get(name)??''};
+}
 function dom() {
   const node=(attributes={},parent=null)=>{const n={attributes,parentElement:parent,children:[],isConnected:true,
     style:{opacity:'1',pointerEvents:'none',display:'block',visibility:'visible'},animations:[],
     getAttribute(k){return this.attributes[k]??null;},hasAttribute(k){return Object.hasOwn(this.attributes,k);},
+    getAttributeNames(){return Object.keys(this.attributes);},
     contains(e){for(;e;e=e.parentElement)if(e===this)return true;return false;},
     getBoundingClientRect:()=>({width:30,height:20}),getAnimations(){return this.animations;}};
     parent?.children.push(n);return n;};
-  const root=node(),motion=node({'data-open':'false'},root),command=node({},motion);
+  const html=node(),body=node({tabindex:'0',style:'outline: none'},html);
+  Object.assign(body,{tagName:'BODY',tabIndex:0,isContentEditable:false});
+  Object.defineProperty(body,'style',{get:()=>inlineStyle(body.attributes.style??'')});
+  const root=node({},body),motion=node({'data-open':'false'},root),command=node({},motion);
   motion.style.opacity='0';
   const input=node({},command),list=node({},command),option=node({},list);
   input.type='text';
   const state={root,motion,command,input,list,option,foreign:[],foreignEditables:[],frames:[],ready:'complete',focus:false};
-  const document={hasFocus:()=>state.focus,visibilityState:'visible',get readyState(){return state.ready;},
+  const document={body,documentElement:html,hasFocus:()=>state.focus,visibilityState:'visible',get readyState(){return state.ready;},
     querySelectorAll(selector){
       switch(selector) {
         case '.command-menu-dialog.global-command-menu-dialog':return state.root?[state.root]:[];
@@ -27,7 +46,7 @@ function dom() {
         case 'input[cmdk-input][role="combobox"]':return state.input?[state.input]:[];
         case '[cmdk-list][role="listbox"]':return state.list?[state.list]:[];
         case 'textarea,[contenteditable="true"],input:not([type="radio"]):not([type="checkbox"]):not([type="hidden"])':return [state.input,...state.foreignEditables].filter(Boolean);
-        case 'input,textarea,[contenteditable="true"],button,a[href],select,[tabindex],[role="button"],[role="option"],[role="combobox"],[role="listbox"]':return [state.command,state.input,state.list,state.option,...state.foreign,...state.foreignEditables].filter(Boolean);
+        case 'input,textarea,[contenteditable="true"],button,a[href],select,[tabindex],[role="button"],[role="option"],[role="combobox"],[role="listbox"]':return [document.body,state.command,state.input,state.list,state.option,...state.foreign,...state.foreignEditables].filter(Boolean);
         case 'iframe,frame,object,embed,textarea,[contenteditable="true"],[role="dialog"],[role="alertdialog"],[aria-modal="true"],[role="menu"]':return [...state.frames,...state.foreignEditables];
         case 'fieldset > legend':case 'input[type="radio"][name="conversational-onboarding-inline-role"]':
         case '[role="dialog"],[role="alertdialog"]':case 'textarea[data-avatar-overlay-composition-autofocus]':return [];
@@ -117,6 +136,15 @@ function fixture(options={}) {
   const facts={};vm.runInNewContext(inventory.slice(begin,end),{facts,directCDP:true,bindingVerified:true,codingComposerReady:true,browser:f.browser,mainGuard:f.guard});
   const fixturePath=process.argv[2];if(fixturePath)fs.writeFileSync(fixturePath,JSON.stringify({folderTrust,codexSession:facts.codexSession})+'\n',{mode:0o600});
   await f.guard.close();assert(f.handles().every(h=>h.disposed));
+  f=fixture();
+  const providerNames=['--font-code-family','--font-ui-family','--codex-content-font-family','--font-ui-size',
+    '--text-4xl','--text-3xl','--text-2xl','--text-xl','--text-lg','--text-base','--text-sm','--text-xs',
+    '--text-dynamic-isle-row','--text-heading-lg','--text-heading-app','--text-heading-md','--text-heading-sm',
+    '--cursor-interaction','--text-document'];
+  f.dom().document.body.attributes.style+='; '+providerNames.map(name=>`${name}: SYNTHETIC_PRIVATE_VALUE`).join('; ');
+  assert(await f.guard(),'the source theme/font provider may update BODY cosmetic variables');
+  assert(!JSON.stringify(f.guard.spotlightAuxiliary()).includes('SYNTHETIC_PRIVATE_VALUE'));
+  await f.guard.close();
   const cases=[
     ['source-open',d=>{d.state.motion.attributes['data-open']='true';}],
     ['source-open',d=>{d.state.ready='loading';d.state.motion.attributes['data-open']='true';}],
@@ -128,6 +156,14 @@ function fixture(options={}) {
     ['auxiliary-focus',d=>{d.state.focus=true;}],
     ['foreign-controls',d=>{d.state.foreign=[d.node()];}],
     ['foreign-controls',d=>{d.state.frames=[d.node()];}],
+    ['foreign-controls',d=>{d.document.body.attributes.role='button';}],
+    ['foreign-controls',d=>{d.document.body.attributes.contenteditable='true';}],
+    ['foreign-controls',d=>{d.document.body.attributes['aria-modal']='true';}],
+    ['foreign-controls',d=>{d.document.body.attributes.tabindex='1';d.document.body.tabIndex=1;}],
+    ['foreign-controls',d=>{d.document.body.attributes.style='outline: none; pointer-events: auto';}],
+    ...['opacity: 0','position: fixed','--unknown-property: none','--font-code-size: 12px',
+      '--codex-window-zoom: 1','-webkit-font-smoothing: antialiased','outline-color: red',
+      '--font-ui-family: synthetic !important'].map(style=>['foreign-controls',d=>{d.document.body.attributes.style+='; '+style;}]),
     ['initial-scope',d=>{d.state.root.children=[];}],
   ];
   for(const [reason,change] of cases) {
@@ -172,6 +208,22 @@ function fixture(options={}) {
     }});
     assert(await f.guard(),'control-free initial document may hydrate under the original deadline');
     assert.equal(f.readCount(),3);await f.guard.close();
+  }
+  for(const pending of [false,true]) {
+    let original;
+    f=fixture({beforeRead:({reads,dom:d})=>{
+      if(reads===1&&pending){original={...d.state};Object.assign(d.state,{root:null,motion:null,command:null,input:null,list:null,option:null});}
+      if(reads===2){
+        const old=d.document.body,replacement=d.node({...old.attributes},d.document.documentElement);
+        Object.assign(replacement,{tagName:'BODY',tabIndex:0,isContentEditable:false});
+        old.isConnected=false;d.document.body=replacement;
+        if(pending)Object.assign(d.state,original);
+        d.state.root.parentElement=replacement;
+      }
+    }});
+    assert.equal(await f.guard(),false,'body replacement is terminal even before the lazy root arrives');
+    assert.equal(f.guard.spotlightAuxiliary().failure,'scope-changed');assert.equal(f.readCount(),2);
+    assert.equal(await f.guard(),false);assert.equal(f.readCount(),2);await f.guard.close();
   }
   // Later controllers first match the private original document identity and
   // then retain one independent closed tuple across every functional proof.
