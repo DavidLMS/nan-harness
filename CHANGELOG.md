@@ -11,6 +11,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Reap completed Windows harness Jobs without blocking after status polling,
+  and verify that their owned descendants have exited before confirming cleanup.
 - Reserve time for the Windows Claude post-action ownership checks within the
   original deadline, and retain the native action stage in closed diagnostics.
 - Keep Hermes canonical-gateway conversations in a separate persistent NaN

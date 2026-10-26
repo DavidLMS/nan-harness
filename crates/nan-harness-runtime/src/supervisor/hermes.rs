@@ -169,7 +169,13 @@ impl HermesGateway {
     ) -> Result<(), RuntimeError> {
         // EOF asks this exact Python process to mark its own native planned stop.
         self.lifetime.take();
-        let graceful = timeout(STOP_GRACE, self.child.wait()).await;
+        let graceful = timeout(STOP_GRACE, async {
+            let status = self.child.wait().await?;
+            #[cfg(windows)]
+            self.child.wait_for_descendants().await?;
+            io::Result::Ok(status)
+        })
+        .await;
         let drained = matches!(&graceful, Ok(Ok(status)) if status.success());
         let stopped = match graceful {
             Ok(result) => result.map(|_| ()),
@@ -304,14 +310,15 @@ async fn wait_helper(
         } => None,
     };
     let exit_code = result.as_ref().and_then(ExitStatus::code);
-    if result.is_some_and(|status| status.success()) {
-        return Ok(());
-    }
+    let succeeded = result.is_some_and(|status| status.success());
     // Cancellation and timeout retain the handle until this helper is reaped.
     let stopped = timeout(Duration::from_secs(5), child.kill()).await;
     if !matches!(stopped, Ok(Ok(()))) {
         prepared.retain_workspace();
         return Err(failure("NH-HERMES-HELPER-CLEANUP"));
+    }
+    if succeeded {
+        return Ok(());
     }
     // Closed exit codes match READINESS_EXIT_CODES in the embedded native helper.
     Err(failure(match (action, exit_code) {
@@ -397,6 +404,11 @@ async fn resolve_command(
             return Err(failure("NH-HERMES-LAUNCHER"));
         }
         let status = child.wait().await.map_err(RuntimeError::WaitForProcess)?;
+        #[cfg(windows)]
+        child
+            .wait_for_descendants()
+            .await
+            .map_err(RuntimeError::WaitForProcess)?;
         if !status.success() {
             return Err(failure("NH-HERMES-LAUNCHER"));
         }

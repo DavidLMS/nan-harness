@@ -328,11 +328,18 @@ async fn kill_and_reap(child: &mut ManagedChild) -> Result<(), RuntimeError> {
 }
 
 async fn reap_child(child: &mut ManagedChild) -> Result<(), RuntimeError> {
-    match child.wait().await {
-        Ok(_) => Ok(()),
-        Err(error) if is_process_gone_error(&error) => Ok(()),
-        Err(error) => Err(RuntimeError::WaitForProcess(error)),
-    }
+    reap_result(child.wait().await)?;
+    #[cfg(windows)]
+    tokio::time::timeout(Duration::from_secs(5), child.wait_for_descendants())
+        .await
+        .map_err(|_| {
+            RuntimeError::WaitForProcess(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "owned child descendants did not drain",
+            ))
+        })?
+        .map_err(RuntimeError::WaitForProcess)?;
+    Ok(())
 }
 
 fn is_process_gone_error(error: &std::io::Error) -> bool {
