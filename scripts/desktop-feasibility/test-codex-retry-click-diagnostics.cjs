@@ -105,6 +105,15 @@ async function runTurnGuardFailure(cached,throws=false) {
     stableSamples:2,inputCount:1,listCount:1,editableCount:1,toastAnnouncerCount:1};
   const rejected={...verified,status:'rejected',failure:'foreign-controls',toastAnnouncerCount:null,rejectionCheck:'toast-announcer'};
   const actual=[await runTurnGuardFailure(verified),await runTurnGuardFailure(rejected),await runTurnGuardFailure(null,true)];
+  const shared=JSON.parse(fs.readFileSync(__dirname+'/../../canary/tests/fixtures/codex-retry-click.json','utf8'));
+  assert.deepEqual(JSON.parse(JSON.stringify(receipts)),shared.ordinary,'all deterministic refusal producers share the Rust/Python wire fixture');
+  // Remaining budget is wall-clock derived. Validate it separately; every
+  // other raw producer field must match the Rust/Python shared contract exactly.
+  assert.deepEqual(actual.map((value,index)=>{
+    assert(Number.isInteger(value.retryClickRefusal.remainingMs));
+    assert(value.retryClickRefusal.remainingMs>=0&&value.retryClickRefusal.remainingMs<=5000);
+    return {...value,retryClickRefusal:{...value.retryClickRefusal,remainingMs:shared.raw[index].retryClickRefusal.remainingMs}};
+  }),shared.raw);
   if(process.argv[2])fs.writeFileSync(process.argv[2],JSON.stringify({ordinary:receipts,actual})+'\n',{mode:0o600});
   console.log('PASS: exact cached Retry refusal, existing hit-query counts, final guard/deadline discrimination, no input replay and advisory snapshot failure');
 })().catch(error=>{console.error(error);process.exitCode=1;});

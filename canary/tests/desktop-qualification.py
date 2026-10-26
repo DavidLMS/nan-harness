@@ -307,6 +307,27 @@ class CodexRetryRefusalContractTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(tmp, 'chatgpt-desktop', 'windows')
 
+    def test_shared_node_to_rust_closed_wire_fixture_reaches_the_reducer(self):
+        fixture = json.loads((ROOT / 'canary/tests/fixtures/codex-retry-click.json').read_text())
+        self.assertEqual(set(fixture), {'raw', 'closed', 'ordinary'})
+        self.assertEqual(len(fixture['raw']), 3)
+        self.assertEqual(len(fixture['ordinary']), 26)
+        for observation in fixture['ordinary']:
+            refusal = dict(observation)
+            phase = refusal.pop('phase')
+            q.codex_retry_click_refusal(refusal, phase)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'fact.json'
+            for raw, closed in zip(fixture['raw'], fixture['closed'], strict=True):
+                self.assertNotIn('providerResponseVerified', raw)
+                self.assertNotIn('providerGenerationCount', raw)
+                self.assertEqual(closed, raw | dict(providerResponseVerified=False, providerGenerationCount=4))
+                path.write_text(json.dumps(closed))
+                self.assertEqual(q.semantic_observations(tmp, 'chatgpt-desktop', 'windows'), [closed])
+                self.assertEqual(closed['errorCategory'], 'action-uncertain')
+                self.assertFalse(closed['retryAttempted'])
+                self.assertFalse(closed['retryCompleted'])
+
 
 class RendererCheckpointTests(unittest.TestCase):
     def test_unknown_auxiliary_shape_is_closed_and_bound_to_its_refused_read(self):
