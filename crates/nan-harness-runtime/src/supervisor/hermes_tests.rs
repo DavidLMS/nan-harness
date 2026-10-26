@@ -118,7 +118,12 @@ impl Fixture {
 
 #[tokio::test]
 async fn native_gateway_is_reaped_before_bridge_shutdown_for_success_and_failure() {
-    for mode in ["success", "nonzero", "readiness-failure"] {
+    for mode in [
+        "success",
+        "bootstrap-relaunch",
+        "nonzero",
+        "readiness-failure",
+    ] {
         let mut fixture = Fixture::new(mode);
         let mut bridge = fixture.bridge(true).await;
         let result = run_bridged_child(
@@ -131,7 +136,7 @@ async fn native_gateway_is_reaped_before_bridge_shutdown_for_success_and_failure
         )
         .await;
         match mode {
-            "success" => assert!(
+            "success" | "bootstrap-relaunch" => assert!(
                 matches!(result.unwrap().completion, Completion::Exited(status) if status.success())
             ),
             "nonzero" => assert!(

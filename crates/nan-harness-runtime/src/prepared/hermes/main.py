@@ -188,6 +188,11 @@ def owner():
 
 def main(arguments):
     action, *rest = arguments
+    lazy_installs = os.environ.pop("NAN_HARNESS_HERMES_LAZY_INSTALLS", None)
+    if lazy_installs is None:
+        os.environ.pop("HERMES_DISABLE_LAZY_INSTALLS", None)
+    else:
+        os.environ["HERMES_DISABLE_LAZY_INSTALLS"] = lazy_installs
     home = Path(os.environ["NAN_HARNESS_HERMES_MANAGED_HOME"]).resolve()
     overlay = Path(os.environ["NAN_HARNESS_HERMES_OVERLAY"]).resolve()
     os.environ["HERMES_HOME"] = str(home)

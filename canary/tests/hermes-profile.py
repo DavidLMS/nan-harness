@@ -350,6 +350,22 @@ class Qualification(unittest.TestCase):
 
 
 class PrivateFiles(unittest.TestCase):
+    def test_native_actions_retain_the_original_lazy_tool_policy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for original in (None, "0", "1"):
+                environment = {"NAN_HARNESS_HERMES_MANAGED_HOME": directory,
+                               "NAN_HARNESS_HERMES_OVERLAY": directory,
+                               "HERMES_DISABLE_LAZY_INSTALLS": "1"}
+                if original is not None:
+                    environment["NAN_HARNESS_HERMES_LAZY_INSTALLS"] = original
+                observed = []
+                with patch.dict(os.environ, environment, clear=True), \
+                        patch.object(runtime, "require_absent", lambda _home: observed.append(
+                            os.environ.get("HERMES_DISABLE_LAZY_INSTALLS"))):
+                    runtime.main(["absent"])
+                    self.assertNotIn("NAN_HARNESS_HERMES_LAZY_INSTALLS", os.environ)
+                self.assertEqual(observed, [original])
+
     def test_native_owner_stdin_is_eof_while_host_lifetime_remains_open(self):
         script = """
 import importlib.util, os, sys, threading, types

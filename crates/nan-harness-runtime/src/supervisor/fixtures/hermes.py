@@ -25,7 +25,11 @@ if sys.argv[1] == "--print-runtime-command":
         print("x" * 70000, flush=True)
         time.sleep(60)
     runtime = root / "runtime"
-    runtime.write_text("#!" + sys.executable + "\nimport runpy,sys\nsys.argv=[" + repr(__file__) +
+    runtime.write_text("#!" + sys.executable + "\nimport os,subprocess,runpy,sys\n"
+                       "if " + repr(mode()) + " == 'bootstrap-relaunch' and os.environ.get('HERMES_DISABLE_LAZY_INSTALLS') != '1':\n"
+                       "    environment=dict(os.environ,HERMES_DISABLE_LAZY_INSTALLS='1')\n"
+                       "    raise SystemExit(subprocess.call([sys.executable,__file__,*sys.argv[1:]],env=environment))\n"
+                       "sys.argv=[" + repr(__file__) +
                        ", 'native', *sys.argv[1:]]\nrunpy.run_path(" + repr(__file__) + ",run_name='__main__')\n")
     runtime.chmod(0o700)
     print(json.dumps([str(runtime)]))

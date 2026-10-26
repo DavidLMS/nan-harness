@@ -218,6 +218,20 @@ fn native_command(
             command.env_remove(name);
         }
     }
+    let lazy_installs = original
+        .get_envs()
+        .find(|(name, _)| *name == "HERMES_DISABLE_LAZY_INSTALLS")
+        .map_or_else(
+            || std::env::var_os("HERMES_DISABLE_LAZY_INSTALLS"),
+            |(_, value)| value.map(std::ffi::OsStr::to_os_string),
+        );
+    command.env_remove("NAN_HARNESS_HERMES_LAZY_INSTALLS");
+    if let Some(value) = lazy_installs {
+        command.env("NAN_HARNESS_HERMES_LAZY_INSTALLS", value);
+    }
+    // Bootstrap must keep the directly owned PID. Dependency activation still
+    // runs; the helper restores the user's lazy-tool policy before native main.
+    command.env("HERMES_DISABLE_LAZY_INSTALLS", "1");
     // Native identify otherwise attributes an inherited systemd/launchd/Desktop
     // marker to this new gateway instead of its actual external Rust owner.
     for name in [
