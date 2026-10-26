@@ -165,7 +165,7 @@ function mainConfirmationFacts() {
   return {inputChannel:'native-focused',status:'unmeasured',identityUnchanged:null,mainScopeUnique:null,documentFocused:null,counts:null};
 }
 async function bindCorrelationMain(held,browser,guard,deadline,route,
-  identity=correlationIdentity,pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),diagnostic=null,settleGuard=null,requireDocumentFocus=true,progress=()=>{},observeSource=null) {
+  identity=correlationIdentity,pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),diagnostic=null,settleGuard=null,requireDocumentFocus=true,progress=()=>{},observeSource=null,initialHome=null) {
   if(diagnostic)diagnostic.inputChannel=requireDocumentFocus?'native-focused':'cdp-dom';
   const publish=()=>{try {progress();}catch {}};
   const stop=status=>{if(diagnostic)diagnostic.status=status;publish();return null;};
@@ -191,6 +191,19 @@ async function bindCorrelationMain(held,browser,guard,deadline,route,
       if(settleGuard&&!sameCorrelationIdentity(held,fresh))return stop('identity-changed');
       if(settleGuard&&requireDocumentFocus&&!fresh.scope.focused)return stop('document-unfocused');
       if(settleGuard&&!await settleGuard())return stop('guard-rejected');
+      if(!fresh.scope.mainScope&&initialHome) {
+        const home=await initialHome.tryBind();
+        if(home.status==='rejected')return stop(Date.now()>=deadline?'deadline':'source-scope');
+        if(home.status==='confirmed') {
+          if(diagnostic) {
+            diagnostic.identityUnchanged=true;diagnostic.mainScopeUnique=false;
+            diagnostic.documentFocused=true;diagnostic.counts=home.identity.scope.counts;
+            diagnostic.sourceScopes={coding:false,home:true};diagnostic.sourceKind='fresh-linux-home';
+            diagnostic.freshHomeProof=home.binding.proof;diagnostic.status='confirmed';
+          }
+          publish();return {...home.identity,initialHomeBinding:home.binding};
+        }
+      }
       if(fresh.scope.mainScope||!settleGuard)break;
       // Completed trust may still be hydrating the same source page. Only
       // passive proof repeats; zero controls never authorize an action.
@@ -674,6 +687,7 @@ async function run() {
       if(request.codexProfileLoan!==undefined&&(!profileAuthority||request.codexProfileLoan.directories[0].path!==request.ownedWorkspace)){profileAuthority?.close();facts.errorCategory='invalid-request';save();return;}
       const onboardingOwnerGuard=profileAuthority?()=>ownerGuard()===true&&profileAuthority.verify()
         &&(!macProfileCustody||ownerGuard()===true):ownerGuard;
+      let initialHome;
       try {
       let folderTrust,trustGuard;
       checkpoint('folder-trust');
@@ -693,24 +707,34 @@ async function run() {
           trustGuard.allowPassiveFolderSettle();
       }
       checkpoint('role-binding');
+      const initialHomeSource=require('./codex-initial-home.cjs');
+      if(directCDP&&profileAuthority&&trustGuard
+        &&['absent','completed'].includes(folderTrust?.status)
+        &&initialHomeSource.policy(process.platform,process.env,request.codexProfileLoan)) {
+        initialHome=initialHomeSource.create({held:initialMain,guard:trustGuard,
+          owner:onboardingOwnerGuard,profile:profileAuthority,identity:correlationIdentity,
+          same:sameCorrelationIdentity,deadline:correlationDeadline});
+      }
       const heldMain=trial?await bindCorrelationMain(initialMain,browser,onboardingOwnerGuard,correlationDeadline,
         require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
         ms=>new Promise(resolve=>setTimeout(resolve,ms)),facts.initialMainConfirmation,
         folderTrust?.status==='completed'?trustGuard:null,!directCDP,()=>save(),async heldPage=>({
           coding:await heldPage.evaluate(require('./codex-onboarding.cjs').codingScope),
-          home:await heldPage.evaluate(require('./codex-dom.cjs').homeComposerScope)})):null;
+          home:await heldPage.evaluate(require('./codex-dom.cjs').homeComposerScope)}),initialHome):null;
       trustGuard?.finishPassiveFolderSettle();
       // Trust consumes initial admission; preserve its original auxiliary binding.
-      // Fresh role binding above must still succeed before subsequent input.
-      const mainGuard=folderTrust?.clickAttempted?(heldMain?trustGuard:undefined):trial&&heldMain?heldMainGuard(heldMain,browser,onboardingOwnerGuard,correlationDeadline,
+      // Initial source binding above must still succeed before subsequent input.
+      const mainGuard=heldMain?.initialHomeBinding?.guard??(folderTrust?.clickAttempted?(heldMain?trustGuard:undefined):trial&&heldMain?heldMainGuard(heldMain,browser,onboardingOwnerGuard,correlationDeadline,
         require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
-        ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,true,!directCDP,directCDP):undefined;
+        ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,true,!directCDP,directCDP):undefined);
       checkpoint('onboarding');
-      facts.publicOnboarding = await require('./codex-onboarding.cjs').run(page,
+      facts.publicOnboarding = heldMain?.initialHomeBinding
+        ?initialHomeSource.onboardingReceipt(folderTrust):await require('./codex-onboarding.cjs').run(page,
         onboardingOwnerGuard,
         correlationDeadline,mainGuard,folderTrust,request.codexProfileLoan,directCDP,
         receipt=>{facts.publicOnboarding=receipt;save();});
-      const bindingVerified=!!mainGuard&&await mainGuard();
+      const bindingVerified=!!mainGuard&&await mainGuard()
+        &&(!heldMain.initialHomeBinding||await heldMain.initialHomeBinding.verify());
       const codingComposerReady=bindingVerified&&(await page.evaluate(require('./codex-onboarding.cjs').codingScope)
         ||directCDP&&await page.evaluate(require('./codex-dom.cjs').homeComposerScope));
       facts.codexSession={inputChannel:directCDP?'cdp-dom':'native-focused',bindingVerified,codingComposerReady:!!codingComposerReady,auxiliaryInert:bindingVerified,
@@ -721,7 +745,7 @@ async function run() {
         facts.mainAuxCorrelation=await observeMainAux(heldMain,browser,onboardingOwnerGuard,correlationDeadline,
           require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,ms=>new Promise(resolve=>setTimeout(resolve,ms)),!directCDP);
       }
-      } finally {profileAuthority?.close();}
+      } finally {await initialHome?.close();profileAuthority?.close();}
     }
     checkpoint('final-inventory');
     const counts = await page.evaluate(appName => {

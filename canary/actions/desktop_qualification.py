@@ -372,7 +372,70 @@ def folder_trust_observation(trust):
             raise ValueError('invalid folder trust guard failure')
 
 
-def public_onboarding(setup, app):
+def codex_fresh_home_proof(value):
+    fixed = {
+        'sourceVersion': '26.930.41038',
+        'bootstrapSourceSha256': '28c6096af241a37a9a33a2e5601f0aa05426910d5c84d08824d852342a2b4d5d',
+        'composerSourceSha256': '7198ee078e78a748d03c3cc96f5c041d056584d762728fd0be23e695bc394da0',
+    }
+    flags = {'profileRetained', 'nativeOwnerVerified', 'mainIdentityRetained',
+             'documentRetained', 'documentFocused', 'composerRetained', 'uniqueHomeComposer'}
+    if (type(value) is not dict or set(value) != set(fixed) | flags | {'stableSamples'}
+            or any(value[key] != expected for key, expected in fixed.items())
+            or any(value[key] is not True for key in flags)
+            or type(value['stableSamples']) is not int or value['stableSamples'] != 2):
+        raise ValueError('invalid Codex fresh home proof')
+    return value
+
+
+def codex_initial_confirmation(confirmation, app, platform=None):
+    flags = {'identityUnchanged', 'mainScopeUnique', 'documentFocused'}
+    count_keys = set('roleLegend roleRadios engineering dialog quickChatComposer editable'.split())
+    optional = {'inputChannel', 'sourceScopes', 'sourceKind', 'freshHomeProof'}
+    if (app != 'chatgpt-desktop' or type(confirmation) is not dict
+            or set(confirmation) - optional != flags | {'status', 'counts'}
+            or type(confirmation.get('inputChannel', 'native-focused')) is not str
+            or confirmation.get('inputChannel', 'native-focused') not in {'native-focused', 'cdp-dom'}
+            or any(confirmation[key] is not None and type(confirmation[key]) is not bool for key in flags)
+            or type(confirmation['status']) is not str or confirmation['status'] not in {
+                'unmeasured', 'initial-missing', 'deadline', 'ownership-lost', 'identity-changed',
+                'source-scope', 'document-unfocused', 'guard-rejected', 'confirmed', 'query-failed'}
+            or confirmation['counts'] is not None and (type(confirmation['counts']) is not dict
+                or set(confirmation['counts']) != count_keys
+                or any(type(count) is not int or not 0 <= count <= 4096 for count in confirmation['counts'].values()))):
+        raise ValueError('invalid Codex initial main confirmation')
+    if 'sourceScopes' in confirmation:
+        scopes = confirmation['sourceScopes']
+        if (type(scopes) is not dict or set(scopes) != {'coding', 'home'}
+                or any(type(flag) is not bool for flag in scopes.values())):
+            raise ValueError('invalid Codex passive source scopes')
+    kind = confirmation.get('sourceKind', 'role')
+    if (type(kind) is not str or kind not in {'role', 'fresh-linux-home'}
+            or 'sourceKind' in confirmation and confirmation['status'] != 'confirmed'):
+        raise ValueError('invalid Codex initial source kind')
+    if kind == 'fresh-linux-home':
+        if (platform != 'linux' or confirmation['status'] != 'confirmed'
+                or confirmation.get('inputChannel') != 'cdp-dom'
+                or confirmation['identityUnchanged'] is not True
+                or confirmation['documentFocused'] is not True
+                or confirmation['mainScopeUnique'] is not False
+                or confirmation['counts'] != dict(roleLegend=0, roleRadios=0, engineering=0,
+                                                  dialog=0, quickChatComposer=0, editable=1)
+                or confirmation.get('sourceScopes') != {'coding': False, 'home': True}):
+            raise ValueError('invalid Codex fresh home confirmation')
+        codex_fresh_home_proof(confirmation.get('freshHomeProof'))
+    elif ('freshHomeProof' in confirmation or confirmation['status'] == 'confirmed' and (
+            not all(confirmation[key] is True for key in {'identityUnchanged', 'mainScopeUnique'})
+            or not (confirmation['documentFocused'] is True
+                    or confirmation.get('inputChannel') == 'cdp-dom' and confirmation['documentFocused'] is False)
+            or confirmation['counts'] is None
+            or any(confirmation['counts'][key] != count for key, count in
+                   {'roleLegend': 1, 'roleRadios': 11, 'engineering': 1}.items()))):
+        raise ValueError('invalid Codex initial main confirmation')
+    return confirmation
+
+
+def public_onboarding(setup, app, *, platform=None, initial_confirmation=None):
     shape = set(setup) - {'roleClickFailure', 'transitionPublicDOMObservation', 'transitionReadinessObservation', 'homeAfterContinueReady', 'folderTrust', 'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'taskScopeObservation', 'taskControlKind', 'codingReadinessObservation', 'codingNavigationObservation', 'codingPublicDOMObservation', 'codingHomeObservation', 'codingEditableObservation', 'codingHomeStateObservation', 'workspaceMenuObservation', 'macHomeStateObservation', 'taskSkipConfirmationAttempted', 'taskSkipConfirmationCompleted', 'taskSkipConfirmationProof', 'mainGuardFailure', 'pageSetFailure', 'foreignOverlayImportSetup', 'foreignOverlaySourceCounts', 'foreignOverlayActionability'} if type(setup) is dict else set()
     booleans = {'conversationalScope', 'engineeringControl', 'roleClickAttempted',
                 'roleClickCompleted', 'engineeringChecked', 'continueControl',
@@ -383,7 +446,7 @@ def public_onboarding(setup, app):
                 'label-count', 'label-association', 'checked-mismatch', 'final-ownership'}
     sessions = {'unmeasured', 'guard-missing', 'deadline-invalid', 'deadline-expired', 'platform', 'host-policy', 'onboarding-policy'}
     stages = {'session', 'role-proof', 'role-action', 'role-readback', 'continue-action',
-              'scope-transition', 'stopped-after-role', 'task-action', 'coding-readiness'}
+              'scope-transition', 'stopped-after-role', 'task-action', 'coding-readiness', 'fresh-linux-home'}
     errors = {None, 'invalid-session', 'scope-not-matched', 'role-already-selected',
               'action-blocked', 'role-readback-failed', 'continue-not-matched',
               'ownership-lost', 'scope-remained', 'action-uncertain', 'observation-failed'}
@@ -397,6 +460,18 @@ def public_onboarding(setup, app):
             or type(setup['sessionProofFailure']) is not str or setup['sessionProofFailure'] not in sessions
             or any(type(setup[key]) is not bool for key in booleans)):
         raise ValueError('invalid public onboarding diagnostic')
+    if setup['stage'] == 'fresh-linux-home':
+        task_flags = {'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted'}
+        confirmation = codex_initial_confirmation(initial_confirmation, app, platform)
+        if (set(setup) - {'folderTrust'} != fields | task_flags | {'codingComposerReady'}
+                or confirmation.get('sourceKind') != 'fresh-linux-home'
+                or any(setup[key] is not False for key in booleans - {'roleScopeAbsent'} | task_flags)
+                or setup['roleScopeAbsent'] is not True or setup['codingComposerReady'] is not True
+                or setup['errorCategory'] is not None or setup['roleProofFailure'] != 'unmeasured'
+                or setup['sessionProofFailure'] != 'unmeasured'
+                or 'folderTrust' in setup and (type(setup['folderTrust']) is not dict
+                    or setup['folderTrust'].get('status') not in {'absent', 'completed'})):
+            raise ValueError('invalid Codex fresh home receipt')
     if 'roleClickFailure' in setup:
         failure = setup['roleClickFailure']
         if (type(failure) is not dict or set(failure) != {'kind', 'elapsedMs', 'budgetMs'}
@@ -687,7 +762,7 @@ def public_onboarding(setup, app):
     if (setup.get('taskClickCompleted') and not setup.get('taskClickAttempted')
             or setup.get('taskClickAttempted') and not all(setup.get(key) for key in
                 ('roleClickCompleted', 'continueClickCompleted', 'taskScopeProved'))
-            or setup.get('codingComposerReady') and setup['stage'] != 'coding-readiness'):
+            or setup.get('codingComposerReady') and setup['stage'] not in {'coding-readiness', 'fresh-linux-home'}):
         raise ValueError('inconsistent Codex coding readiness')
     specific_overlay_failures = {
         'deadline-expired': {'deadline-expired'},
@@ -909,7 +984,7 @@ def validate_occlusion_profile(item):
         raise ValueError('invalid occluding hitbox')
 
 
-def semantic_observations(directory, app):
+def semantic_observations(directory, app, platform=None):
     if directory is None:
         return []
     directory = Path(directory)
@@ -3027,33 +3102,8 @@ def semantic_observations(directory, app):
                             raise ValueError('invalid Codex activation inventory failure')
                 record['initialMainActivation'] = activation
             if 'initialMainConfirmation' in value:
-                confirmation = value['initialMainConfirmation']
-                flags = {'identityUnchanged', 'mainScopeUnique', 'documentFocused'}
-                count_keys = set('roleLegend roleRadios engineering dialog quickChatComposer editable'.split())
-                if (app != 'chatgpt-desktop' or type(confirmation) is not dict
-                        or set(confirmation) - {'inputChannel', 'sourceScopes'} != flags | {'status', 'counts'}
-                        or type(confirmation.get('inputChannel', 'native-focused')) is not str
-                        or confirmation.get('inputChannel', 'native-focused') not in {'native-focused', 'cdp-dom'}
-                        or any(confirmation[key] is not None and type(confirmation[key]) is not bool for key in flags)
-                        or type(confirmation['status']) is not str or confirmation['status'] not in {
-                            'unmeasured', 'initial-missing', 'deadline', 'ownership-lost', 'identity-changed',
-                            'source-scope', 'document-unfocused', 'guard-rejected', 'confirmed', 'query-failed'}
-                        or confirmation['counts'] is not None and (type(confirmation['counts']) is not dict
-                            or set(confirmation['counts']) != count_keys
-                            or any(type(count) is not int or not 0 <= count <= 4096 for count in confirmation['counts'].values()))
-                        or confirmation['status'] == 'confirmed' and (not all(confirmation[key] is True for key in {'identityUnchanged', 'mainScopeUnique'})
-                            or not (confirmation['documentFocused'] is True
-                                            or confirmation.get('inputChannel') == 'cdp-dom' and confirmation['documentFocused'] is False)
-                            or confirmation['counts'] is None
-                            or any(confirmation['counts'][key] != count for key, count in
-                                {'roleLegend': 1, 'roleRadios': 11, 'engineering': 1}.items()))):
-                    raise ValueError('invalid Codex initial main confirmation')
-                if 'sourceScopes' in confirmation:
-                    scopes = confirmation['sourceScopes']
-                    if (type(scopes) is not dict or set(scopes) != {'coding', 'home'}
-                            or any(type(flag) is not bool for flag in scopes.values())):
-                        raise ValueError('invalid Codex passive source scopes')
-                record['initialMainConfirmation'] = confirmation
+                record['initialMainConfirmation'] = codex_initial_confirmation(
+                    value['initialMainConfirmation'], app, platform)
             if 'mainAuxCorrelation' in value:
                 record['mainAuxCorrelation'] = main_aux_correlation(value['mainAuxCorrelation'], app)
             if 'codexSession' in value:
@@ -3068,7 +3118,8 @@ def semantic_observations(directory, app):
                     raise ValueError('invalid Codex session observation')
                 record['codexSession'] = dict(session)
             if 'publicOnboarding' in value:
-                record['publicOnboarding'] = public_onboarding(value['publicOnboarding'], app)
+                record['publicOnboarding'] = public_onboarding(value['publicOnboarding'], app,
+                    platform=platform, initial_confirmation=record.get('initialMainConfirmation'))
             if 'startupScreen' in value:
                 if (type(value['startupScreen']) is not str or value['startupScreen'] not in {'unmeasured', 'gpu-unavailable', 'startup-failed', 'other', 'cli-connection-failed'}
                         or (value['startupScreen'] == 'cli-connection-failed' and app != 'chatgpt-desktop')):
@@ -3378,7 +3429,7 @@ def semantic_observations(directory, app):
 def reduce_report(*, app, platform, architecture, source_sha, model, frozen, prepared,
                   checker, launcher, real_nanh, report, facts=None):
     result = envelope(app, platform, architecture, source_sha)
-    result['semanticObservations'] = semantic_observations(facts, app)
+    result['semanticObservations'] = semantic_observations(facts, app, platform)
     if facts is not None and (Path(facts) / 'native-diagnostics.json').exists():
         bundle = validate_bundle(Path(facts) / 'native-diagnostics.json', source_sha, platform)
         if any(event['record'].get('app') != app for event in bundle['events']):
@@ -3491,7 +3542,7 @@ def diagnose_pending(app, platform, architecture, source_sha, output, facts):
     pending = envelope(app, platform, architecture, source_sha)
     if bounded_json(output, 65536) != pending:
         raise ValueError('pending evidence differs')
-    observations = semantic_observations(facts, app) if facts and Path(facts).exists() else []
+    observations = semantic_observations(facts, app, platform) if facts and Path(facts).exists() else []
     pending['semanticObservations'] = [dict(schemaVersion=1,
         mechanism='qualification-runner-failure', diagnosticsOnly=True,
         errorCategory='report-absent'), *observations]

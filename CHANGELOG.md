@@ -11,6 +11,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Keep the MiMo native-configuration canary compatible with deferred MCP dispatch
   in MiMo Code 0.1.16 while retaining the previous tool-discovery routes.
+- Recognize the inspected Linux Codex fresh-profile home startup during Desktop
+  qualification while retaining native ownership, document and composer proofs.
 
 ## [0.1.25] - 2026-10-26
 
