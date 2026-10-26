@@ -173,8 +173,9 @@ mod tests {
             layer: 0,
         };
         let scripted = |suffix: &str, budget, mode| {
-            std::fs::write(&executable,format!("#!/usr/bin/env python3\nimport sys\nprint('ready 1000',flush=True)\nwire=sys.stdin.buffer.read()\nassert wire.count(b'\\n')==1\nassert len(wire)<8192\nassert len(wire.split())==13\nassert int(wire.split()[7])<=16000\n{suffix}\n")).unwrap();
+            std::fs::write(&executable,format!("#!/usr/bin/env python3\nimport sys\nif '--version' in sys.argv: raise SystemExit(0)\nprint('ready 1000',flush=True)\nwire=sys.stdin.buffer.read()\nassert wire.count(b'\\n')==1\nassert len(wire)<8192\nassert len(wire.split())==13\nassert int(wire.split()[7])<=16000\n{suffix}\n")).unwrap();
             std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+            nan_harness_test_support::executable_fixture::wait_until_ready(&executable).unwrap();
             run(
                 &executable,
                 &window,
