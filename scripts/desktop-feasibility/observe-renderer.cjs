@@ -44,6 +44,17 @@ function inventoryDeadlines(trial,platform,request,started) {
   // shorter startup clock must not expire while the owned app is still loading.
   return {total,startup:trial?total:Math.min(started+(trial?35000:25000),total)};
 }
+function spotlightPreparedWindowsPolicy(request,directCDP,platform,env,started) {
+  // Windows lends no Node profile handle. Rust proves prepared_for_renderer
+  // before launch and polls profile/process custody throughout this driver.
+  // Reuse that private contract and original cutoff; a Unix loan is not it.
+  if(platform!=='win32'||directCDP!==true||!request||request.codexProfileLoan!==undefined
+    ||request.codexProfileIsolation!=='prepared-windows'||!Number.isSafeInteger(started)||started<0)return false;
+  try {
+    inventoryDeadlines(true,platform,request,started);
+    return require('./codex-spotlight.cjs').policy(platform,env);
+  } catch {return false;}
+}
 // This passive receipt never relaxes the page-count guard or sends input.
 function correlationFacts() {
   return {schemaVersion:1,mechanism:'codex-main-aux-correlation',diagnosticsOnly:true,
@@ -691,7 +702,7 @@ async function run() {
       let initialHome,trustGuard,mainGuard;
       try {
       let folderTrust;
-      const spotlightPolicy=!!profileAuthority&&require('./codex-spotlight.cjs').policy();
+      const spotlightPolicy=spotlightPreparedWindowsPolicy(request,directCDP,process.platform,process.env,started);
       checkpoint('folder-trust');
       if(trial&&request.ownedWorkspace!==undefined) {
         const folderAuthority=require('./codex-folder-trust.cjs').authority(request.ownedWorkspace);

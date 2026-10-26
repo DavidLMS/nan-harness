@@ -61,7 +61,7 @@ function fixture(options={}) {
   const guard=createHeldMainGuard(identities(main),browser,owner,1000,raw=>source.route(raw)?'spotlight':'unknown',identity,
     async ms=>{clock+=ms;},false,true,false,{sameCorrelationIdentity:(a,b)=>a.page===b.page&&a.loader===b.loader&&a.url===b.url,
       settleFolderAuxiliary:async()=>false,now:()=>clock,requireVisibleDocument:true,spotlightPolicy:options.policy!==false});
-  return {guard,main,auxiliary,browser,identities,owner,readCount:()=>reads,handles:()=>handles,
+  return {guard,main,auxiliary,browser,identities,identity,owner,readCount:()=>reads,handles:()=>handles,
     dom:()=>heldDocument,setClock:x=>{clock=x;},clock:()=>clock};
 }
 (async()=>{
@@ -78,6 +78,41 @@ function fixture(options={}) {
   const folderTrust=await require('./codex-folder-trust.cjs').run(f.main,f.guard,Date.now()+1000,{workspace:'synthetic',verify:async()=>true});
   assert.equal(folderTrust.status,'absent');assert.equal(folderTrust.spotlightAuxiliary.status,'verified');
   const inventory=fs.readFileSync(__dirname+'/observe-renderer.cjs','utf8');
+  const policyBegin=inventory.indexOf('function onboardingBudget('),policyEnd=inventory.indexOf('// This passive receipt',policyBegin);
+  const preparedPolicy=vm.runInNewContext(inventory.slice(policyBegin,policyEnd)+';spotlightPreparedWindowsPolicy',{require});
+  // Exact Rust Windows request contract: native profile custody remains in
+  // RendererSession.guard; unlike Unix it deliberately contains no Node loan.
+  const preparedRequest={ownerPid:9,connectionPath:'C:\\synthetic\\connection-9.json',ownedWorkspace:'C:\\synthetic\\workspace',
+    codexProfileIsolation:'prepared-windows',inventoryDeadlineUnixMs:1000};
+  assert(preparedPolicy(preparedRequest,true,'win32',env,0));
+  for(const invalid of [{...preparedRequest,codexProfileIsolation:undefined},
+    {...preparedRequest,codexProfileIsolation:'unknown'}, {...preparedRequest,codexProfileLoan:{}},
+    {...preparedRequest,inventoryDeadlineUnixMs:undefined}, {...preparedRequest,inventoryDeadlineUnixMs:0},
+    {...preparedRequest,inventoryDeadlineUnixMs:120001}, {...preparedRequest,inventoryDeadlineUnixMs:'1000'},
+    {...preparedRequest,inventoryDeadlineUnixMs:NaN}, {...preparedRequest,inventoryDeadlineUnixMs:1.5}])
+    assert.equal(preparedPolicy(invalid,true,'win32',env,0),false);
+  assert(!preparedPolicy(preparedRequest,false,'win32',env,0));
+  for(const platform of ['darwin','linux'])assert(!preparedPolicy({...preparedRequest,codexProfileLoan:{}},true,platform,env,0));
+  for(const key of Object.keys(env))assert(!preparedPolicy(preparedRequest,true,'win32',{...env,[key]:'other'},0),key);
+  {
+    const actual=fixture();
+    const factoryBegin=inventory.indexOf('function heldMainGuard('),factoryEnd=inventory.indexOf('// One public page activation',factoryBegin);
+    const same=(a,b)=>a.page===b.page&&a.loader===b.loader&&a.url===b.url;
+    const context={require,Date:{now:actual.clock},sameCorrelationIdentity:same,settleFolderAuxiliary:async()=>false};
+    const actualFactory=vm.runInNewContext(inventory.slice(factoryBegin,factoryEnd)+';heldMainGuard',context);
+    const wiringBegin=inventory.indexOf('const spotlightPolicy='),wiringEnd=inventory.indexOf('folderTrust=await',wiringBegin);
+    const wired=vm.runInNewContext(`let trustGuard;${inventory.slice(wiringBegin,wiringEnd)}};trustGuard;`,{
+      spotlightPreparedWindowsPolicy:preparedPolicy,request:preparedRequest,directCDP:true,started:0,trial:true,
+      process:{platform:'win32',env},profileAuthority:null,focusGuard:null,heldMainGuard:actualFactory,
+      initialMain:actual.identities(actual.main),browser:actual.browser,onboardingOwnerGuard:actual.owner,
+      correlationDeadline:1000,correlationIdentity:actual.identity,checkpoint:()=>{},facts:{},save:()=>{},
+      setTimeout:(resolve,ms)=>{actual.setClock(actual.clock()+ms);queueMicrotask(resolve);},
+      require:name=>name==='./codex-folder-trust.cjs'?{authority:()=>({})}:require(name),
+    });
+    assert(await wired(),'production Windows wiring admits the closed source without a Unix Node loan');
+    assert.equal(actual.readCount(),2);assert.equal(wired.spotlightAuxiliary().status,'verified');
+    await wired.close();assert(actual.handles().every(h=>h.disposed));
+  }
   const begin=inventory.indexOf('facts.codexSession='),end=inventory.indexOf('if(!bindingVerified||!codingComposerReady)',begin);
   const facts={};vm.runInNewContext(inventory.slice(begin,end),{facts,directCDP:true,bindingVerified:true,codingComposerReady:true,browser:f.browser,mainGuard:f.guard});
   const fixturePath=process.argv[2];if(fixturePath)fs.writeFileSync(fixturePath,JSON.stringify({folderTrust,codexSession:facts.codexSession})+'\n',{mode:0o600});
