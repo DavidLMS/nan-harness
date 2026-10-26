@@ -7,7 +7,7 @@
 enum class UiaRuntimeIdResult { Unique, Duplicate, Invalid, Limit };
 
 // IDs are opaque and desktop-local. Keep this index only for one bounded
-// inventory, while its native elements remain retained; never reuse it across
+// inventory or parent walk, while its native elements remain retained; never reuse it across
 // snapshots or expose IDs in diagnostic output.
 class UiaRuntimeIds {
     std::set<std::vector<std::int32_t>> ids;
