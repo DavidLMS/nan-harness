@@ -14,6 +14,9 @@ use tokio::process::Command;
 
 const INTERNAL_CANARY_USAGE_FILE: &str = "NAN_HARNESS_INTERNAL_CANARY_USAGE_FILE";
 
+#[cfg(all(test, windows))]
+mod windows_job_tests;
+
 /// Starts the child process described by a prepared launch plan.
 ///
 /// # Errors

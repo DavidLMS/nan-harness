@@ -128,6 +128,8 @@ jobs:
         run: python.exe -B canary/tests/hermes-profile.py
       - name: Verify Hermes native profile path interoperability on Windows
         run: cargo test --locked -p nan-harness-runtime --all-features --lib prepared::hermes::native_path
+      - name: Verify completed Windows jobs can be reaped after polling
+        run: cargo test --locked -p nan-harness-runtime --all-features --lib process::windows_job_tests
       - name: Verify Windows local search installation and lifecycle
         shell: pwsh
         run: |
