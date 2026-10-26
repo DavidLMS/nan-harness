@@ -346,7 +346,7 @@ def public_mac_codex_home_state(value):
 
 
 def folder_trust_observation(trust):
-    if (type(trust) is not dict or set(trust) - {'rejectionStage','guardFailure'} != {'status', 'clickAttempted', 'clickCompleted'}
+    if (type(trust) is not dict or set(trust) - {'rejectionStage','guardFailure','auxiliaryRouteFailure'} != {'status', 'clickAttempted', 'clickCompleted'}
             or type(trust['status']) is not str
             or trust['status'] not in {'absent', 'blocked', 'completed', 'action-uncertain'}
             or type(trust['clickAttempted']) is not bool or type(trust['clickCompleted']) is not bool
@@ -370,6 +370,20 @@ def folder_trust_observation(trust):
                 'deadline','native-ownership','page-set','main-identity','main-focus','main-scope',
                 'auxiliary-route','auxiliary-identity','auxiliary-focus','auxiliary-controls','query-failed','unmeasured'}):
             raise ValueError('invalid folder trust guard failure')
+    if 'auxiliaryRouteFailure' in trust:
+        observation = trust['auxiliaryRouteFailure']
+        routes = {'blank', 'avatarOverlay', 'hotkeyWindow', 'quickChat', 'quickChatPrewarm',
+                  'globalDictation', 'debug', 'detachedWindow', 'unknown'}
+        if (trust.get('guardFailure') != 'auxiliary-route'
+                or type(observation) is not dict
+                or set(observation) != {'initialRoute', 'settleRoute', 'samePage'}
+                or type(observation['initialRoute']) is not str
+                or observation['initialRoute'] not in routes - {'avatarOverlay'}
+                or observation['settleRoute'] is not None and (
+                    type(observation['settleRoute']) is not str or observation['settleRoute'] not in routes)
+                or (observation['settleRoute'] is None) != (observation['samePage'] is None)
+                or observation['samePage'] is not None and type(observation['samePage']) is not bool):
+            raise ValueError('invalid folder trust auxiliary route observation')
 
 
 def windows_launcher_observation(value, app, platform):
@@ -1173,7 +1187,8 @@ def semantic_observations(directory, app, platform=None):
                         'menuDismissed', 'composerReverified'}
             fields = booleans | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'stage', 'errorCategory'}
             diagnostics = {'composerObservation', 'guardFailure'}
-            optional = {'actionObservation', 'onboardingSkipped', 'onboardingObservation', 'queryFailure', 'frameTransitionWaited', 'catalogState'}
+            optional = {'actionObservation', 'onboardingSkipped', 'onboardingObservation', 'queryFailure',
+                        'frameTransitionWaited', 'catalogState', 'clickFailure'}
             stages = {'policy', 'onboarding', 'menu', 'refresh', 'catalog', 'dismiss', 'composer', 'ready'}
             errors = {None, 'policy-rejected', 'onboarding-unavailable', 'menu-unavailable', 'refresh-uncertain',
                       'catalog-unavailable', 'dismiss-uncertain', 'composer-changed', 'composer-unavailable'}
@@ -1234,6 +1249,36 @@ def semantic_observations(directory, app, platform=None):
                             'unmeasured', 'none', 'onboarding', 'modal', 'other'}):
                     raise ValueError('invalid Hermes action observation')
                 record['actionObservation'] = action
+            if 'clickFailure' in value:
+                failure = value['clickFailure']
+                timing = {'budgetMs', 'remainingBeforeMs', 'elapsedMs', 'remainingAfterMs'}
+                action = value.get('actionObservation', {})
+                if (value['stage'] != 'menu' or value['errorCategory'] != 'menu-unavailable'
+                        or action.get('action') != 'menu' or action.get('sampleStatus') != 'click-failed'
+                        or type(failure) is not dict
+                        or set(failure) != timing | {'errorFamily', 'postFailure'}
+                        or type(failure['errorFamily']) is not str
+                        or failure['errorFamily'] not in {'timeout', 'target-closed', 'protocol', 'error', 'other'}
+                        or any(type(failure[key]) is not int or not 0 <= failure[key] <= 120000 for key in timing)
+                        or failure['budgetMs'] != min(5000, max(1, failure['remainingBeforeMs']))):
+                    raise ValueError('invalid Hermes menu click failure')
+                post = failure['postFailure']
+                flags = {'documentSame', 'rootConnected', 'rootSame', 'controlConnected', 'controlSame'}
+                if type(post) is not dict or type(post.get('status')) is not str:
+                    raise ValueError('invalid Hermes post-click observation')
+                if post['status'] == 'unavailable':
+                    if set(post) != {'status'}:
+                        raise ValueError('invalid unavailable Hermes post-click observation')
+                elif post['status'] == 'observed':
+                    if (set(post) != flags | {'status', 'menuCount'}
+                            or any(type(post[key]) is not bool for key in flags)
+                            or type(post['menuCount']) is not int or not 0 <= post['menuCount'] <= 2
+                            or post['rootSame'] and not (post['documentSame'] and post['rootConnected'])
+                            or post['controlSame'] and not (post['documentSame'] and post['controlConnected'])):
+                        raise ValueError('invalid observed Hermes post-click observation')
+                else:
+                    raise ValueError('invalid Hermes post-click status')
+                record['clickFailure'] = failure
             if 'onboardingObservation' in value:
                 observation = value['onboardingObservation']
                 counts = {'coverCount', 'choiceCount'}

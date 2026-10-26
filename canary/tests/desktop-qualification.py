@@ -137,6 +137,37 @@ class CodexRetainedCustodyTests(unittest.TestCase):
 
 
 class RendererCheckpointTests(unittest.TestCase):
+    def test_auxiliary_route_refusal_reports_only_closed_existing_read_categories(self):
+        route = dict(initialRoute='blank', settleRoute='avatarOverlay', samePage=True)
+        trust = dict(status='blocked', clickAttempted=False, clickCompleted=False,
+                     rejectionStage='guard', guardFailure='auxiliary-route', auxiliaryRouteFailure=route)
+        value = dict(schemaVersion=1, mechanism='renderer-inventory', diagnosticsOnly=True,
+            app='chatgpt-desktop', endpointOwned=True, launcherOwned=True, attached=True,
+            pageCount=1, textareaCount=0, editableCount=0, sendCount=0, retryCount=0,
+            newThreadCount=0, loginCount=0, dialogCount=0, errorCategory='target-invalid',
+            folderTrustObservation={'phase': 'guard', **trust})
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'fact.json'
+            for observation in [route, dict(initialRoute='unknown', settleRoute=None, samePage=None),
+                                dict(initialRoute='hotkeyWindow', settleRoute='quickChat', samePage=False)]:
+                item = copy.deepcopy(value)
+                item['folderTrustObservation']['auxiliaryRouteFailure'] = observation
+                path.write_text(json.dumps(item))
+                self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop'), [item])
+            for change in [{'initialRoute': 'PRIVATE'}, {'initialRoute': 'avatarOverlay'},
+                           {'settleRoute': 'PRIVATE'}, {'samePage': 'PRIVATE'}, {'samePage': None},
+                           {'settleRoute': None}, {'url': 'PRIVATE'}]:
+                item = copy.deepcopy(value)
+                item['folderTrustObservation']['auxiliaryRouteFailure'] = route | change
+                path.write_text(json.dumps(item))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'chatgpt-desktop')
+            item = copy.deepcopy(value)
+            item['folderTrustObservation']['guardFailure'] = 'main-identity'
+            path.write_text(json.dumps(item))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'chatgpt-desktop')
+
     def test_parent_failure_boundaries_are_closed(self):
         value = dict(schemaVersion=1, mechanism='renderer-inventory-failure',
                      diagnosticsOnly=True, stage='process-custody', reason='isolation-unavailable')
@@ -1848,6 +1879,47 @@ class QualificationTests(unittest.TestCase):
                 path.write_text(json.dumps({**value, 'actionObservation': changed}))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'hermes-desktop')
+
+    def test_hermes_menu_click_failure_is_closed_and_never_proves_delivery(self):
+        post = dict(status='observed', documentSame=True, rootConnected=True, rootSame=True,
+                    controlConnected=True, controlSame=True, menuCount=1)
+        failure = dict(errorFamily='timeout', budgetMs=5000, remainingBeforeMs=10000,
+                       elapsedMs=5001, remainingAfterMs=4999, postFailure=post)
+        value = dict(schemaVersion=1, mechanism='hermes-windows-catalog-readiness', diagnosticsOnly=True,
+                     stage='menu', errorCategory='menu-unavailable', menuOpened=False,
+                     refreshAttempted=False, catalogVerified=False, modelRowVerified=False,
+                     menuDismissed=False, composerReverified=False, composerObservation=None, guardFailure=None,
+                     actionObservation=dict(action='menu', sampleStatus='click-failed', blocker='none'),
+                     clickFailure=failure)
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'fact.json'
+            for observation in [post, {'status': 'unavailable'}, post | {'menuCount': 0}, post | {'menuCount': 2}]:
+                item = copy.deepcopy(value)
+                item['clickFailure']['postFailure'] = observation
+                path.write_text(json.dumps(item))
+                record = q.semantic_observations(root, 'hermes-desktop')[0]
+                self.assertEqual(record, item)
+                self.assertFalse(record['menuOpened'])
+                self.assertFalse(record['catalogVerified'])
+            for change in [{'errorFamily': 'PRIVATE'}, {'message': 'PRIVATE'}, {'budgetMs': True},
+                           {'budgetMs': 4999}, {'remainingBeforeMs': 120001}, {'elapsedMs': -1},
+                           {'remainingAfterMs': None}, {'postFailure': None},
+                           {'postFailure': {'status': 'unavailable', 'menuCount': 0}},
+                           {'postFailure': post | {'url': 'PRIVATE'}},
+                           {'postFailure': post | {'rootConnected': False}},
+                           {'postFailure': post | {'controlConnected': False}},
+                           {'postFailure': post | {'menuCount': True}},
+                           {'postFailure': post | {'documentSame': False}}]:
+                item = copy.deepcopy(value)
+                item['clickFailure'].update(change)
+                path.write_text(json.dumps(item))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'hermes-desktop')
+            item = copy.deepcopy(value)
+            item['actionObservation']['action'] = 'refresh'
+            path.write_text(json.dumps(item))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'hermes-desktop')
 
     def test_retained_zed_post_target_state_is_advisory_and_closed(self):
         facts = dict(schemaVersion=1, mechanism='zed-atspi-retry', diagnosticsOnly=True,
@@ -5133,7 +5205,7 @@ class WindowsProbeNamespaceTests(unittest.TestCase):
         value = dict(schemaVersion=1, mechanism='windows-launcher', diagnosticsOnly=True,
             app='chatgpt-desktop', stage='connection-create', cause='already-exists',
             childStarted=True, childExitCode=None, osCode=183)
-        with tempfile.TemporaryDirectory() as root:
+        with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as outside:
             directory = Path(root) / 'chatgpt-desktop-deterministic-0'
             directory.mkdir()
             (directory / 'closed.json').write_text(json.dumps(value))
@@ -5146,8 +5218,9 @@ class WindowsProbeNamespaceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'invalid semantic probe entry'):
                 q.semantic_observations(root, 'chatgpt-desktop', 'windows')
             (directory / 'codex-restart-foreign').rename(control)
-            control.rename(Path(root) / 'private')
-            control.symlink_to(Path(root) / 'private', target_is_directory=True)
+            target = Path(outside) / 'private'
+            control.rename(target)
+            control.symlink_to(target, target_is_directory=True)
             with self.assertRaisesRegex(ValueError, 'invalid semantic probe entry'):
                 q.semantic_observations(root, 'chatgpt-desktop', 'windows')
 

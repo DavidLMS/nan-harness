@@ -2,13 +2,17 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const {EventEmitter}=require('node:events');
 async function trial(scenario) {
+ const menuFailure=scenario.startsWith('menu-failure-');
+ const deadline=menuFailure?120000:3000;
  let clock=0,opened=false,owner=true,refreshClicks=0,pillClicks=0,escapes=0,skipClicks=0,rowReads=0;
+ let clickCalls=0,snapshotCalls=0;
  let coverReads=0, actionSamples=0, frameReads=0, pillSamples=0, coverDismissed=false;
  let onboardingPresent=scenario.startsWith('onboarding-') && !scenario.startsWith('onboarding-late-');
  let pageReplacedByOwner=false;
  const session=new EventEmitter(); session.send=async method=>{
    if(method!=='Page.getFrameTree')return;
    frameReads++;if(scenario==='frame-request-error')throw new Error('PRIVATE');
+   if(scenario==='menu-failure-target-closed'&&clickCalls)throw new Error('PRIVATE');
    if(scenario==='stalled-frame')return new Promise(()=>{});
    const url=new URL(page.url());
    return {frameTree:{frame:{id:scenario==='frame-replaced' && clock>=100?'other':'main',
@@ -17,7 +21,25 @@ async function trial(scenario) {
      urlFragment:scenario.startsWith('frame-transition-')&&frameReads===1?'':scenario==='frame-fragment-mismatch'?'#/foreign':scenario==='frame-fragment-invalid'?null:scenario==='frame-fragment-missing'?undefined:url.hash}}};
  };
  const point={x:5,y:5,left:0,top:0,width:20,height:20};
- const editorHandle={},rootHandle={};
+ const document={};
+ const element=(attrs={})=>({isConnected:true,ownerDocument:document,innerText:'',
+   getAttribute:key=>attrs[key]??null,getBoundingClientRect:()=>({width:20,height:20})});
+ const clicked=element({'aria-label':'Model · PRIVATE: qwen3.6'});
+ const currentControl=element({'aria-label':'Model · PRIVATE: qwen3.6'});
+ const root=element(),replacementRoot=element();
+ root.querySelectorAll=()=>[scenario==='menu-failure-control-loss'?currentControl:clicked];
+ const item=element();item.innerText='Refresh models';
+ const menuElement=element();menuElement.querySelectorAll=()=>[item];
+ document.querySelectorAll=selector=>selector==='[data-slot="composer-root"]'
+   ?[scenario==='menu-failure-root-loss'?replacementRoot:root]:opened?[menuElement]:[];
+ const editorHandle={},rootHandle={evaluate:async(callback,control)=>{
+   snapshotCalls++;assert.equal(control,handle);
+   if(scenario==='menu-failure-observer-throw')throw new Error('PRIVATE');
+   if(scenario==='menu-failure-root-loss'){root.isConnected=false;clicked.isConnected=false;}
+   if(scenario==='menu-failure-control-loss')clicked.isConnected=false;
+   if(scenario==='menu-failure-foreign-document'){root.ownerDocument={};clicked.ownerDocument={};}
+   return callback(root,clicked);
+ }};
  const handle={dispose:async()=>{},evaluate:async(_callback,diagnostic)=>{
  pillSamples++;
  if(opened && ['catalog-during-preclick','startup-only-catalog'].includes(scenario)) {
@@ -30,7 +52,23 @@ async function trial(scenario) {
      || (scenario==='onboarding-auto-dismiss-reappears' && pillSamples===3)
      || (scenario==='onboarding-return-after-skip' && skipClicks===1)) onboardingPresent=true;
  if(scenario==='onboarding-late-owner-loss' && pillSamples===2)owner=false;
- const covered=scenario==='covered'||onboardingPresent||scenario==='onboarding-auto-dismiss-covered';const status=covered?'no-owned-point':scenario==='hidden-control'?'hidden':scenario==='outside-control'?'outside-viewport':'owned';const blocker=covered?'onboarding':status==='owned'?'none':'unmeasured';const sampledPoint=opened&&scenario==='moving-refresh'?{...point,left:++actionSamples<3?actionSamples:3}:opened&&scenario==='never-stable-refresh'?{...point,left:++actionSamples}:point;return diagnostic?{sampleStatus:status,blocker,point:status==='owned'?sampledPoint:null}:status==='owned'?sampledPoint:null;},click:async()=>{if(scenario==='menu-click-uncertain')throw new Error('PRIVATE');if(opened){refreshClicks++; if(scenario==='startup-only-catalog')return; if(scenario==='uncertain')throw new Error('PRIVATE');
+ const covered=scenario==='covered'||onboardingPresent||scenario==='onboarding-auto-dismiss-covered';const status=covered?'no-owned-point':scenario==='hidden-control'?'hidden':scenario==='outside-control'?'outside-viewport':'owned';const blocker=covered?'onboarding':status==='owned'?'none':'unmeasured';const sampledPoint=opened&&scenario==='moving-refresh'?{...point,left:++actionSamples<3?actionSamples:3}:opened&&scenario==='never-stable-refresh'?{...point,left:++actionSamples}:point;
+ if(scenario==='menu-failure-deadline'&&pillSamples===4)clock=deadline-1;
+ return diagnostic?{sampleStatus:status,blocker,point:status==='owned'?sampledPoint:null}:status==='owned'?sampledPoint:null;},click:async options=>{
+ clickCalls++;
+ assert.equal(options.noWaitAfter,opened?undefined:true,'only the menu click skips the navigation wait');
+ assert.equal(options.force,undefined);assert(options.timeout>=1&&options.timeout<=5000);
+ if(menuFailure) {
+   const families={'menu-failure-target-closed':'TargetClosedError','menu-failure-protocol':'ProtocolError',
+     'menu-failure-other':'PRIVATE_ERROR_NAME'};
+   const error=new Error('PRIVATE native output, paths and prompts');
+   error.name=families[scenario]??(scenario==='menu-failure-error'?'Error':'TimeoutError');
+   if(scenario==='menu-failure-after-open'){opened=true;pillClicks++;}
+   if(scenario==='menu-failure-owner-loss')owner=false;
+   clock+=options.timeout;
+   throw error;
+ }
+ if(scenario==='menu-click-uncertain')throw new Error('PRIVATE');if(opened){refreshClicks++; if(scenario==='startup-only-catalog')return; if(scenario==='uncertain')throw new Error('PRIVATE');
  const send=(dir,obj)=>session.emit('Network.webSocketFrame'+dir,{requestId:'socket',response:{opcode:1,payloadData:JSON.stringify(obj)}});
  if(scenario==='catalog-during-dispatch') {
    send('Sent',{jsonrpc:'2.0',id:90,method:'model.options',params:{profile:'default',explicit_only:true}});
@@ -38,7 +76,7 @@ async function trial(scenario) {
  }
  send('Sent',{jsonrpc:'2.0',id:1,method:'model.options',params:{profile:'default',explicit_only:true,refresh:true}});
  send('Received',{jsonrpc:'2.0',id:1,result:{providers:[{models:['qwen3.6']}]}});
- }else{pillClicks++;opened=true;if(scenario==='owner-loss')owner=false;}}};
+ }else{pillClicks++;if(scenario!=='menu-no-effect')opened=true;if(scenario==='owner-loss')owner=false;}}};
  const control={count:async()=>scenario==='duplicate'?2:1,isEnabled:async()=>scenario!=='disabled',elementHandle:async()=>handle,evaluate:async()=>true};
  const heldCover={dispose:async()=>{}};
  const choiceHandle={dispose:async()=>{},evaluate:async(fn,diagnostic)=>diagnostic?({sampleStatus:'owned',blocker:'none',point}):fn({isConnected:onboardingPresent}),click:async()=>{
@@ -83,16 +121,17 @@ async function trial(scenario) {
  const exports={};
  const context={exports,require:p=>require(p==='./hermes-catalog-readiness.cjs'?__dirname+'/hermes-catalog-readiness.cjs':p),
  process:{platform:'win32',env:{GITHUB_ACTIONS:'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:'Windows',FEASIBILITY_HERMES_READINESS_POLICY:'current-catalog'}},
- Date:{now:()=>clock},setTimeout:(fn,ms)=>{if(ms<=100 || scenario==='stalled-frame'){clock+=ms;fn();return null;}return setTimeout(fn,ms);},clearTimeout,URL,JSON,Number,Error};
+ Date:{now:()=>clock},setTimeout:(fn,ms)=>{if(ms<=100 || scenario==='stalled-frame'){clock+=ms;fn();return null;}return setTimeout(fn,ms);},clearTimeout,URL,JSON,Number,Error,
+ document,getComputedStyle:()=>({display:'block',visibility:'visible'})};
  vm.runInNewContext(fs.readFileSync(__dirname+'/hermes-windows-ready.cjs','utf8'),context);
  const facts=await exports.run(page,session,()=>{
    if(scenario==='owner-query-error')throw new Error('PRIVATE');
    if(scenario==='owner-query-exhausts-budget')clock=3001;
    if(scenario==='owner-query-replaces-page')pageReplacedByOwner=true;
    return owner && !(scenario==='startup-owner-loss' && clock>=200) && !(scenario==='stability-owner-loss' && clock>=100);
- },3000,'default');
+ },deadline,'default');
  assert(!JSON.stringify(facts).includes('PRIVATE'));
- return {facts,pillClicks,refreshClicks,escapes,skipClicks,rowReads};
+ return {facts,pillClicks,refreshClicks,escapes,skipClicks,rowReads,clickCalls,snapshotCalls};
 }
 // Execute the serialized browser callback without Node helper bindings.
 function sampled(blocker) {
@@ -113,7 +152,10 @@ for(const blocker of ['onboarding','modal','other']) {
 assert.equal(sampled('forged-onboarding').blocker,'other');
 assert.equal(sampled('self').sampleStatus,'owned');
 // The frozen row label adds reasoning metadata without changing the model name.
-const {modelRowLabel}=require('./hermes-windows-ready.cjs');
+const {modelRowLabel,menuClickErrorFamily}=require('./hermes-windows-ready.cjs');
+for(const name of ['PRIVATE','constructor','__proto__',null,undefined])
+ assert.equal(menuClickErrorFamily({name}),'other');
+assert.equal(menuClickErrorFamily({get name(){throw new Error('PRIVATE');}}),'other');
 const text=value=>({nodeType:3,textContent:value});
 const meta={nodeType:1,tagName:'SPAN',textContent:' Medium',classList:{contains:c=>c==='text-(--ui-text-tertiary)'}};
 function modelElement(children,slot='dropdown-menu-sub-trigger',role='menuitem') {
@@ -147,6 +189,47 @@ for(const element of [modelElement([text('Qwen3.6 27B'),meta]),modelElement([tex
  assert.equal(staleCatalog.facts.catalogVerified,false);
  assert.equal(staleCatalog.facts.catalogState,'awaiting-request');
  const good=await trial('good');assert.equal(good.facts.stage,'ready');assert.equal(good.pillClicks,1);assert.equal(good.refreshClicks,1);assert.equal(good.escapes,1);
+ const noEffect=await trial('menu-no-effect');
+ assert.notEqual(noEffect.facts.stage,'ready');assert.equal(noEffect.clickCalls,1);
+ assert.equal(noEffect.refreshClicks,0);assert.equal(noEffect.escapes,0);
+ assert.equal(noEffect.facts.clickFailure,undefined,'returned click still needs native menu effect');
+ let menuFailureFixture;
+ for(const [scenario,family,postStatus] of [
+  ['menu-failure-before-open','timeout','observed'],['menu-failure-after-open','timeout','observed'],
+  ['menu-failure-target-closed','target-closed','unavailable'],['menu-failure-protocol','protocol','observed'],
+  ['menu-failure-error','error','observed'],['menu-failure-other','other','observed'],
+  ['menu-failure-observer-throw','timeout','unavailable'],['menu-failure-owner-loss','timeout','unavailable'],
+  ['menu-failure-root-loss','timeout','observed'],['menu-failure-control-loss','timeout','observed'],
+  ['menu-failure-foreign-document','timeout','observed'],
+  ['menu-failure-deadline','timeout','unavailable'],
+ ]) {
+  const result=await trial(scenario),failure=result.facts.clickFailure;
+  assert.equal(result.facts.stage,'menu',scenario);
+  assert.equal(result.facts.errorCategory,'menu-unavailable',scenario);
+  assert.equal(result.facts.actionObservation.sampleStatus,'click-failed',scenario);
+  assert.equal(result.facts.guardFailure,null,'post-failure observer preserves original guard facts');
+  assert.equal(result.clickCalls,1,scenario);assert.equal(result.refreshClicks,0);assert.equal(result.escapes,0);
+  assert.equal(result.facts.menuOpened,false);assert.equal(result.facts.catalogVerified,false);
+  assert.equal(failure.errorFamily,family,scenario);assert.equal(failure.postFailure.status,postStatus,scenario);
+  assert.equal(failure.budgetMs,Math.min(5000,Math.max(1,failure.remainingBeforeMs)),scenario);
+  assert.equal(failure.elapsedMs,failure.budgetMs,scenario);
+  for(const key of ['remainingBeforeMs','remainingAfterMs','elapsedMs'])
+   assert(Number.isInteger(failure[key])&&failure[key]>=0&&failure[key]<=120000,scenario);
+  assert(result.snapshotCalls<=1,scenario);
+  if(postStatus==='observed') {
+   assert.equal(failure.postFailure.documentSame,scenario!=='menu-failure-foreign-document');
+   assert.equal(failure.postFailure.menuCount,scenario==='menu-failure-after-open'?1:0);
+   assert.equal(failure.postFailure.rootConnected,scenario!=='menu-failure-root-loss');
+   assert.equal(failure.postFailure.rootSame,!['menu-failure-root-loss','menu-failure-foreign-document'].includes(scenario));
+   assert.equal(failure.postFailure.controlConnected,!['menu-failure-root-loss','menu-failure-control-loss'].includes(scenario));
+   assert.equal(failure.postFailure.controlSame,!['menu-failure-root-loss','menu-failure-control-loss','menu-failure-foreign-document'].includes(scenario));
+  } else assert.deepEqual(JSON.parse(JSON.stringify(failure.postFailure)),{status:'unavailable'});
+  if(scenario==='menu-failure-deadline') {
+   assert.equal(failure.budgetMs,1);assert.equal(failure.remainingAfterMs,0);assert.equal(result.snapshotCalls,0);
+  }
+  if(scenario==='menu-failure-after-open')menuFailureFixture=result.facts;
+ }
+ if(process.argv[2])fs.writeFileSync(process.argv[2],JSON.stringify(menuFailureFixture)+'\n',{mode:0o600});
  const pending=await trial('row-pending');assert.equal(pending.facts.stage,'ready');assert.equal(pending.rowReads,3);
  assert.equal(pending.refreshClicks,1);assert.equal(pending.escapes,1);
  for(const scenario of ['duplicate-row','wrong-row-label']) {

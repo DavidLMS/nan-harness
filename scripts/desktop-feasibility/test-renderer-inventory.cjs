@@ -171,6 +171,107 @@ assert.equal(roleSourceScope({foreignFieldset:true}).mainScope,false);
       loseOwner:()=>{owned=false;},run:(heldOverride=held)=>helper.observeMainAux(heldOverride,browser,
         ()=>owned,1000,()=> 'avatarOverlay',identity,async ms=>{clock+=ms;})};
   }
+  // Closed route diagnostics describe only the URL strings already consumed by
+  // the rejecting guard; they cannot authorize another measurement or input.
+  const sourceRoute=require('./codex-onboarding.cjs').sourceRoute;
+  const avatar='app://-/index.html?initialRoute=%2Favatar-overlay';
+  const routeCases=[
+    ['hotkeyWindow','app://-/index.html?initialRoute=%2Fhotkey-window'],
+    ['quickChat','app://-/index.html?initialRoute=%2Fchatgpt%2Fquick-chat'],
+    ['quickChatPrewarm','app://-/index.html?initialRoute=%2Fchatgpt%2Fquick-chat-prewarm'],
+    ['globalDictation','app://-/index.html?initialRoute=%2Fglobal-dictation'],
+    ['debug','app://-/index.html?initialRoute=%2Fdebug'],
+    ['detachedWindow','app://-/detached-window.html?initialRoute=%2Fdetached-window'],
+    ['unknown','https://PRIVATE.invalid/PRIVATE-path'],['blank','about:blank'],
+    ['unknown',avatar,()=> 'unknown'],
+  ];
+  for(const [category,url,classify=sourceRoute] of routeCases) {
+    const f=fixture();let reads=0,owners=0;
+    f.aux.url=()=>{reads++;return url;};
+    const guard=helper.heldMainGuard(f.held,f.browser,()=>{owners++;return true;},1000,
+      classify,f.identity,async ms=>{clock+=ms;},false,true,true,false);
+    assert.equal(await guard(),false);assert.equal(guard.failure(),'auxiliary-route');
+    assert.deepEqual(guard.auxiliaryRouteFailure(),{initialRoute:category,settleRoute:null,samePage:null});
+    assert.equal(reads,1);assert.equal(owners,0);
+    assert.ok(!JSON.stringify(guard.auxiliaryRouteFailure()).includes('PRIVATE'));
+  }
+  for(const scenario of ['same-unknown','replacement']) {
+    const f=fixture();let reads=0,owners=0;
+    const replacement={url:()=>{reads++;return 'https://PRIVATE.invalid/PRIVATE-new';}};
+    f.aux.url=()=>{
+      reads++;
+      if(scenario==='replacement')f.setPages([f.main,replacement]);
+      return scenario==='same-unknown'?'https://PRIVATE.invalid/PRIVATE-old':
+        reads===1?'about:blank':avatar;
+    };
+    const guard=helper.heldMainGuard(f.held,f.browser,()=>{owners++;return true;},1000,
+      sourceRoute,f.identity,async ms=>{clock+=ms;},false,false,false,true);
+    assert.equal(await guard(),false);assert.equal(guard.failure(),'auxiliary-route');
+    const expected={initialRoute:scenario==='same-unknown'?'unknown':'blank',
+      settleRoute:'unknown',
+      samePage:scenario!=='replacement'};
+    assert.deepEqual(guard.auxiliaryRouteFailure(),expected);
+    assert.equal(reads,2);assert.equal(owners,0,'no new ownership/query work before the same refusal');
+    const refused=async()=>false;refused.failure=guard.failure;
+    refused.auxiliaryRouteFailure=guard.auxiliaryRouteFailure;
+    const receipt=await require('./codex-folder-trust.cjs').run({},refused,Date.now()+1000,
+      {workspace:'/owned',verify:async()=>true},()=>{throw Error('must not dispatch');},
+      ()=>{throw Error('PRIVATE-observer');});
+    assert.equal(receipt.guardFailure,'auxiliary-route');assert.equal(receipt.status,'blocked');
+    assert.deepEqual(receipt.auxiliaryRouteFailure,expected);
+    assert.equal(receipt.clickAttempted,false);assert.equal(receipt.clickCompleted,false);
+    assert.equal(reads,2,'diagnostic projection never reads the live URL again');
+    assert.ok(!JSON.stringify(receipt).includes('PRIVATE'));
+  }
+  // A blank target can finish its inspected navigation between existing reads.
+  // Admission still requires two new inert samples of that exact target.
+  for(const scenario of ['committed','first-unknown','swap-before','swap-during','owner','owner-after',
+    'deadline','deadline-during','main-identity','main-hidden','aux-focused','aux-controls','aux-churn','route-churn',
+    'first-sample-route','first-sample-frame','second-sample-route','second-sample-frame']) {
+    const f=fixture();let reads=0,owners=0;const samples=[];
+    const replacement={url:()=>avatar};
+    f.aux.url=()=>{
+      reads++;
+      if(reads===2&&scenario==='swap-before')f.setPages([f.main,replacement]);
+      if(reads===2&&scenario==='deadline')clock=1000;
+      if(reads===1)return scenario==='first-unknown'?'https://PRIVATE.invalid/foreign':'about:blank';
+      return scenario==='route-churn'&&reads>=3?'https://PRIVATE.invalid/changed':avatar;
+    };
+    f.setAlter((value,n)=>{
+      if(n===1&&scenario==='swap-during')f.setPages([f.main,replacement]);
+      if(n===1&&scenario==='main-identity')value.loader='changed';
+      if(n===1&&scenario==='main-hidden')value.scope.visibleDocument=false;
+      if(n===2&&scenario==='deadline-during')clock=1000;
+      if(n===2&&scenario==='aux-focused')value.scope.focused=true;
+      if(n===2&&scenario==='aux-controls')value.scope.counts.editable=1;
+      if(n===2&&scenario==='first-sample-route')value.url='https://PRIVATE.invalid/changed';
+      if(n===2&&scenario==='first-sample-frame')value.frameUrl='https://PRIVATE.invalid/changed';
+      if(n===4&&scenario==='second-sample-route')value.url='https://PRIVATE.invalid/changed';
+      if(n===4&&scenario==='second-sample-frame')value.frameUrl='https://PRIVATE.invalid/changed';
+      if(n===4&&scenario==='aux-churn')value.loader='changed';
+    });
+    const guard=helper.heldMainGuard(f.held,f.browser,()=>{
+      owners++;return scenario!=='owner'&&!(scenario==='owner-after'&&owners===2);
+    },1000,sourceRoute,async page=>{
+      samples.push(page===f.main?'main':'aux');return f.identity(page);
+    },async ms=>{clock+=ms;},false,false,false,true);
+    assert.equal(await guard(),scenario==='committed',scenario);
+    if(scenario==='committed') {
+      assert.deepEqual(samples,['main','aux','main','aux']);assert.equal(owners,4);
+      assert.ok(guard.binding().auxiliary);assert.equal(guard.auxiliaryRouteFailure(),null);
+      assert.equal(clock,100,'fresh samples retain the existing passive interval');
+    } else assert.equal(guard.binding().auxiliary,null,scenario+' cannot bind a rejected target');
+    assert.ok(clock<=1000,'the original deadline remains authoritative');
+  }
+  for(const getter of [()=>{throw Error('PRIVATE-error');},()=>({initialRoute:'PRIVATE',settleRoute:null,samePage:null}),
+    ()=>({initialRoute:'avatarOverlay',settleRoute:null,samePage:null})]) {
+    const refused=async()=>false;refused.failure=()=> 'auxiliary-route';refused.auxiliaryRouteFailure=getter;
+    const receipt=await require('./codex-folder-trust.cjs').run({},refused,Date.now()+1000,
+      {workspace:'/owned',verify:async()=>true});
+    assert.equal(receipt.guardFailure,'auxiliary-route');assert.equal(receipt.clickAttempted,false);
+    assert.equal(receipt.auxiliaryRouteFailure,undefined);
+    assert.ok(!JSON.stringify(receipt).includes('PRIVATE'));
+  }
   {
     const sampled=fixture();sampled.setPages([sampled.main]);
     sampled.setAlter(value=>{value.scope.mainScope=false;});

@@ -106,6 +106,18 @@ async function run(page,guard,deadline,authority,seal=()=>{},progress=()=>{}) {
       if(['deadline','native-ownership','page-set','main-identity','main-focus','main-scope',
         'auxiliary-route','auxiliary-identity','auxiliary-focus','auxiliary-controls','query-failed','unmeasured'].includes(failure))
         receipt.guardFailure=failure;
+      if(failure==='auxiliary-route'&&typeof guard.auxiliaryRouteFailure==='function') {
+        try {
+          const detail=guard.auxiliaryRouteFailure();
+          const routes=['blank','avatarOverlay','hotkeyWindow','quickChat','quickChatPrewarm',
+            'globalDictation','debug','detachedWindow','unknown'];
+          if(detail&&Object.keys(detail).sort().join(',')==='initialRoute,samePage,settleRoute'
+            &&detail.initialRoute!=='avatarOverlay'&&routes.includes(detail.initialRoute)
+            &&(detail.settleRoute===null?detail.samePage===null:
+              routes.includes(detail.settleRoute)&&typeof detail.samePage==='boolean'))
+            receipt.auxiliaryRouteFailure={...detail};
+        } catch { /* Diagnostic failure never changes the retained guard refusal. */ }
+      }
       return reject('guard');
     }
     if(Date.now()>=deadline)return reject('deadline');
