@@ -277,8 +277,11 @@ class CodexRetryRefusalContractTests(unittest.TestCase):
                              ('control-count', 'admission'), ('control-disabled', 'revalidate'),
                              ('missing-handle', 'capture'), ('control-replaced', 'revalidate'),
                              ('stationary-hit-changed', 'sample-second'),
-                             ('final-sample-changed', 'sample-final'), ('final-point-lost', 'sample-final')]:
+                             ('final-sample-changed', 'sample-final'), ('final-point-lost', 'sample-final'),
+                             ('reveal-failed', 'viewport-reveal')]:
             q.codex_retry_click_refusal(self.refusal() | dict(reason=reason), phase)
+        for reason in ['guard-rejected', 'deadline', 'control-count', 'control-disabled', 'control-replaced']:
+            q.codex_retry_click_refusal(self.refusal() | dict(reason=reason), 'viewport-reveal')
         for reason, name in [('first-hit-missing', 'first'), ('second-hit-missing', 'second')]:
             q.codex_retry_click_refusal(self.refusal() | {'reason': reason, name: self.sample(0, 9)}, 'sample-second')
             with self.assertRaises(ValueError):
@@ -309,9 +312,9 @@ class CodexRetryRefusalContractTests(unittest.TestCase):
 
     def test_shared_node_to_rust_closed_wire_fixture_reaches_the_reducer(self):
         fixture = json.loads((ROOT / 'canary/tests/fixtures/codex-retry-click.json').read_text())
-        self.assertEqual(set(fixture), {'raw', 'closed', 'ordinary'})
+        self.assertEqual(set(fixture), {'raw', 'closed', 'ordinary', 'viewport'})
         self.assertEqual(len(fixture['raw']), 3)
-        self.assertEqual(len(fixture['ordinary']), 26)
+        self.assertEqual(len(fixture['ordinary']), 45)
         for observation in fixture['ordinary']:
             refusal = dict(observation)
             phase = refusal.pop('phase')
@@ -327,6 +330,36 @@ class CodexRetryRefusalContractTests(unittest.TestCase):
                 self.assertEqual(closed['errorCategory'], 'action-uncertain')
                 self.assertFalse(closed['retryAttempted'])
                 self.assertFalse(closed['retryCompleted'])
+            viewport = fixture['viewport']
+            self.assertEqual(set(viewport), {'raw', 'closed'})
+            self.assertEqual(len(viewport['raw']), 2)
+            for raw, closed, (verified, generation) in zip(viewport['raw'], viewport['closed'],
+                                                          [(True, 5), (False, 4)], strict=True):
+                self.assertEqual(closed, raw | dict(providerResponseVerified=verified,
+                                                   providerGenerationCount=generation))
+                self.assertEqual(closed['retryViewportReveal'], 'completed')
+                self.assertEqual(closed['retryCompleted'], verified)
+                path.write_text(json.dumps(closed))
+                self.assertEqual(q.semantic_observations(tmp, 'chatgpt-desktop', 'windows'), [closed])
+
+    def test_viewport_observation_is_closed_and_does_not_certify_retry(self):
+        value = self.record() | dict(retryViewportReveal='completed')
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'fact.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(tmp, 'chatgpt-desktop', 'windows'), [value])
+            self.assertFalse(value['retryAttempted'])
+            self.assertFalse(value['retryCompleted'])
+            completed = value | dict(errorCategory=None, retryAttempted=True, retryCompleted=True,
+                userTurnObserved=True, assistantTurnCount=1, responseVerified=True,
+                providerResponseVerified=True, providerGenerationCount=5, retryClickPhase='complete')
+            path.write_text(json.dumps(completed))
+            self.assertEqual(q.semantic_observations(tmp, 'chatgpt-desktop', 'windows'), [completed])
+            for change in [dict(retryControl=False), *[dict(retryViewportReveal=state)
+                           for state in [None, True, {}, [], 'PRIVATE']]]:
+                path.write_text(json.dumps(value | change))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(tmp, 'chatgpt-desktop', 'windows')
 
 
 class RendererCheckpointTests(unittest.TestCase):

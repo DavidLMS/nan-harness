@@ -134,8 +134,8 @@ function sampleEditor(control,kind='editor') {
   return {rect:[r.left,r.top,r.width,r.height],points,testedViewportCount};
 }
 
-async function ordinaryClick(locator,guard,deadline,attempt,after=guard,observe=()=>{},observeRefusal=()=>{}) {
-  const phase=value=>{try {observe(value);}catch {}};
+async function ordinaryClick(locator,guard,deadline,attempt,after=guard,observe=()=>{},options={}) {
+  const phase=(value,details)=>{try {observe(value,details);}catch {}};
   let firstSample=null,secondSample=null,finalSample=null;
   const sampleFact=value=>{
     try {
@@ -148,7 +148,7 @@ async function ordinaryClick(locator,guard,deadline,attempt,after=guard,observe=
     } catch {return null;}
   };
   const refuse=reason=>{
-    try {observeRefusal({reason,remainingMs:reason==='deadline'?0:Math.max(0,Math.min(600000,Math.floor(deadline-Date.now()))),
+    try {options.onRefusal?.({reason,remainingMs:reason==='deadline'?0:Math.max(0,Math.min(600000,Math.floor(deadline-Date.now()))),
       first:sampleFact(firstSample),second:sampleFact(secondSample),final:sampleFact(finalSample)});}catch {}
     return false;
   };
@@ -163,6 +163,28 @@ async function ordinaryClick(locator,guard,deadline,attempt,after=guard,observe=
     phase('sample-first');
     let first=await handle.evaluate(sampleEditor,'button');firstSample=first;
     if(first.blocked)return refuse('sample-blocked');
+    if(options.revealRetryViewport===true&&first.points.length===0&&first.testedViewportCount===0) {
+      phase('viewport-reveal');
+      const revealOwned=async()=>{
+        if(!await guard())return refuse('guard-rejected');
+        if(Date.now()>=deadline)return refuse('deadline');
+        if(await locator.count()!==1)return refuse('control-count');
+        if(!await locator.isEnabled())return refuse('control-disabled');
+        if(!await locator.evaluate((e,held)=>e===held,handle))return refuse('control-replaced');
+        return true;
+      };
+      if(!await revealOwned())return false;
+      const remaining=deadline-Date.now();if(remaining<=0)return refuse('deadline');
+      try {await handle.scrollIntoViewIfNeeded({timeout:Math.min(2000,remaining)});}
+      catch {return refuse('reveal-failed');}
+      if(!await revealOwned())return false;
+      // A native retained-node reveal is not Retry. Discard the offscreen
+      // sample; all original stable/final hit proofs must start afresh.
+      first=await handle.evaluate(sampleEditor,'button');firstSample=first;
+      if(!first.blocked&&first.points.length===0&&first.testedViewportCount===0)return refuse('reveal-failed');
+      phase('sample-first',!first.blocked&&first.points.length?{retryViewportReveal:'completed'}:undefined);
+      if(first.blocked)return refuse('sample-blocked');
+    }
     let point;
     while(!point) {
       await pause(Math.min(100,Math.max(0,deadline-Date.now())));
@@ -331,11 +353,15 @@ async function runTurn(page,guard,request,deadline=Date.now()+request.timeoutMs,
       if(!await ordinaryClick(retry,targetOwned,deadline,async()=>{
         await releaseRecovery(deadline,targetOwned);
         facts.retryAttempted=true;
-      },retryOwned,phase=>{facts.retryClickPhase=phase;},refusal=>{
-        facts.retryClickRefusal=refusal;
-        if(refusal.reason==='guard-rejected') {
-          try {const cached=guardSpotlight();if(cached)facts.retryGuardSpotlight=cached;}catch {}
-        }
+      },retryOwned,(phase,details)=>{
+        facts.retryClickPhase=phase;
+        if(details?.retryViewportReveal==='completed')facts.retryViewportReveal='completed';
+      },{revealRetryViewport:true,onRefusal:refusal=>{
+          facts.retryClickRefusal=refusal;
+          if(refusal.reason==='guard-rejected') {
+            try {const cached=guardSpotlight();if(cached)facts.retryGuardSpotlight=cached;}catch {}
+          }
+        },
       }))return stop('action-uncertain');
       facts.retryCompleted=true;
     }

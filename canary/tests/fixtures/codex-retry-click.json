@@ -639,6 +639,400 @@
       },
       "second": null,
       "final": null
+    },
+    {
+      "phase": "sample-second",
+      "reason": "first-hit-missing",
+      "remainingMs": 9900,
+      "first": {
+        "blocked": null,
+        "ownedHitCount": 0,
+        "testedViewportCount": 0
+      },
+      "second": {
+        "blocked": null,
+        "ownedHitCount": 0,
+        "testedViewportCount": 0
+      },
+      "final": null
+    },
+    {
+      "phase": "sample-second",
+      "reason": "first-hit-missing",
+      "remainingMs": 9900,
+      "first": {
+        "blocked": null,
+        "ownedHitCount": 0,
+        "testedViewportCount": 9
+      },
+      "second": {
+        "blocked": null,
+        "ownedHitCount": 0,
+        "testedViewportCount": 9
+      },
+      "final": null
+    },
+    {
+      "phase": "sample-first",
+      "reason": "sample-blocked",
+      "remainingMs": 10000,
+      "first": {
+        "blocked": "hidden",
+        "ownedHitCount": null,
+        "testedViewportCount": null
+      },
+      "second": null,
+      "final": null
+    },
+    {
+      "phase": "viewport-reveal",
+      "reason": "reveal-failed",
+      "remainingMs": 10000,
+      "first": {
+        "blocked": null,
+        "ownedHitCount": 0,
+        "testedViewportCount": 0
+      },
+      "second": null,
+      "final": null
+    },
+    {
+      "phase": "viewport-reveal",
+      "reason": "reveal-failed",
+      "remainingMs": 10000,
+      "first": {
+        "blocked": null,
+        "ownedHitCount": 0,
+        "testedViewportCount": 0
+      },
+      "second": null,
+      "final": null
+    },
+    {
+      "phase": "sample-first",
+      "reason": "sample-blocked",
+      "remainingMs": 10000,
+      "first": {
+        "blocked": "foreign-overlay",
+        "ownedHitCount": null,
+        "testedViewportCount": null
+      },
+      "second": null,
+      "final": null
+    },
+    {
+      "phase": "viewport-reveal",
+      "reason": "guard-rejected",
+      "remainingMs": 10000,
+      "first": {
+        "blocked": null,
+        "ownedHitCount": 0,
+        "testedViewportCount": 0
+      },
+      "second": null,
+      "final": null
+    },
+    {
+      "phase": "viewport-reveal",
+      "reason": "guard-rejected",
+      "remainingMs": 10000,
+      "first": {
+        "blocked": null,
+        "ownedHitCount": 0,
+        "testedViewportCount": 0
+      },
+      "second": null,
+      "final": null
+    },
+    {
+      "phase": "revalidate",
+      "reason": "guard-rejected",
+      "remainingMs": 9900,
+      "first": {
+        "blocked": null,
+        "ownedHitCount": 1,
+        "testedViewportCount": 9
+      },
+      "second": null,
+      "final": null
+    },
+    {
+      "phase": "viewport-reveal",
+      "reason": "deadline",
+      "remainingMs": 0,
+      "first": {
+        "blocked": null,
+        "ownedHitCount": 0,
+        "testedViewportCount": 0
+      },
+      "second": null,
+      "final": null
+    },
+    {
+      "phase": "viewport-reveal",
+      "reason": "deadline",
+      "remainingMs": 0,
+      "first": {
+        "blocked": null,
+        "ownedHitCount": 0,
+        "testedViewportCount": 0
+      },
+      "second": null,
+      "final": null
+    },
+    {
+      "phase": "revalidate",
+      "reason": "deadline",
+      "remainingMs": 0,
+      "first": {
+        "blocked": null,
+        "ownedHitCount": 1,
+        "testedViewportCount": 9
+      },
+      "second": null,
+      "final": null
+    },
+    {
+      "phase": "viewport-reveal",
+      "reason": "control-count",
+      "remainingMs": 10000,
+      "first": {
+        "blocked": null,
+        "ownedHitCount": 0,
+        "testedViewportCount": 0
+      },
+      "second": null,
+      "final": null
+    },
+    {
+      "phase": "viewport-reveal",
+      "reason": "control-count",
+      "remainingMs": 10000,
+      "first": {
+        "blocked": null,
+        "ownedHitCount": 0,
+        "testedViewportCount": 0
+      },
+      "second": null,
+      "final": null
+    },
+    {
+      "phase": "viewport-reveal",
+      "reason": "control-disabled",
+      "remainingMs": 10000,
+      "first": {
+        "blocked": null,
+        "ownedHitCount": 0,
+        "testedViewportCount": 0
+      },
+      "second": null,
+      "final": null
+    },
+    {
+      "phase": "viewport-reveal",
+      "reason": "control-disabled",
+      "remainingMs": 10000,
+      "first": {
+        "blocked": null,
+        "ownedHitCount": 0,
+        "testedViewportCount": 0
+      },
+      "second": null,
+      "final": null
+    },
+    {
+      "phase": "viewport-reveal",
+      "reason": "control-replaced",
+      "remainingMs": 10000,
+      "first": {
+        "blocked": null,
+        "ownedHitCount": 0,
+        "testedViewportCount": 0
+      },
+      "second": null,
+      "final": null
+    },
+    {
+      "phase": "viewport-reveal",
+      "reason": "control-replaced",
+      "remainingMs": 10000,
+      "first": {
+        "blocked": null,
+        "ownedHitCount": 0,
+        "testedViewportCount": 0
+      },
+      "second": null,
+      "final": null
+    },
+    {
+      "phase": "sample-final",
+      "reason": "final-sample-changed",
+      "remainingMs": 9900,
+      "first": {
+        "blocked": null,
+        "ownedHitCount": 1,
+        "testedViewportCount": 9
+      },
+      "second": {
+        "blocked": null,
+        "ownedHitCount": 1,
+        "testedViewportCount": 9
+      },
+      "final": {
+        "blocked": null,
+        "ownedHitCount": 0,
+        "testedViewportCount": 9
+      }
     }
-  ]
+  ],
+  "viewport": {
+    "raw": [
+      {
+        "schemaVersion": 1,
+        "mechanism": "codex-renderer-qualification",
+        "diagnosticsOnly": true,
+        "endpointOwned": true,
+        "targetVerified": true,
+        "attached": true,
+        "bindingVerified": true,
+        "auxiliaryInert": true,
+        "codingComposerReady": true,
+        "uniqueComposer": true,
+        "inputReadback": false,
+        "inputSubmitted": false,
+        "userTurnObserved": true,
+        "assistantTurnCount": 1,
+        "responseVerified": true,
+        "errorObserved": false,
+        "retryControl": true,
+        "retryAttempted": true,
+        "retryCompleted": true,
+        "errorCategory": null,
+        "retryClickPhase": "complete",
+        "retryViewportReveal": "completed"
+      },
+      {
+        "schemaVersion": 1,
+        "mechanism": "codex-renderer-qualification",
+        "diagnosticsOnly": true,
+        "endpointOwned": true,
+        "targetVerified": true,
+        "attached": true,
+        "bindingVerified": true,
+        "auxiliaryInert": true,
+        "codingComposerReady": true,
+        "uniqueComposer": true,
+        "inputReadback": false,
+        "inputSubmitted": false,
+        "userTurnObserved": false,
+        "assistantTurnCount": 0,
+        "responseVerified": false,
+        "errorObserved": false,
+        "retryControl": true,
+        "retryAttempted": false,
+        "retryCompleted": false,
+        "errorCategory": "action-uncertain",
+        "retryClickPhase": "revalidate",
+        "retryViewportReveal": "completed",
+        "retryClickRefusal": {
+          "reason": "guard-rejected",
+          "remainingMs": 4897,
+          "first": {
+            "blocked": null,
+            "ownedHitCount": 1,
+            "testedViewportCount": 9
+          },
+          "second": null,
+          "final": null
+        },
+        "retryGuardSpotlight": {
+          "sourceVersion": "26.1007.21434",
+          "rendererSha256": "2b78662247051c8b0905e1afbe0839187b8267e9181e179bc422322e4010433b",
+          "status": "verified",
+          "failure": null,
+          "stableSamples": 2,
+          "inputCount": 1,
+          "listCount": 1,
+          "editableCount": 1,
+          "toastAnnouncerCount": 1
+        }
+      }
+    ],
+    "closed": [
+      {
+        "schemaVersion": 1,
+        "mechanism": "codex-renderer-qualification",
+        "diagnosticsOnly": true,
+        "endpointOwned": true,
+        "targetVerified": true,
+        "attached": true,
+        "bindingVerified": true,
+        "auxiliaryInert": true,
+        "codingComposerReady": true,
+        "uniqueComposer": true,
+        "inputReadback": false,
+        "inputSubmitted": false,
+        "userTurnObserved": true,
+        "assistantTurnCount": 1,
+        "responseVerified": true,
+        "errorObserved": false,
+        "retryControl": true,
+        "retryAttempted": true,
+        "retryCompleted": true,
+        "errorCategory": null,
+        "retryClickPhase": "complete",
+        "retryViewportReveal": "completed",
+        "providerResponseVerified": true,
+        "providerGenerationCount": 5
+      },
+      {
+        "schemaVersion": 1,
+        "mechanism": "codex-renderer-qualification",
+        "diagnosticsOnly": true,
+        "endpointOwned": true,
+        "targetVerified": true,
+        "attached": true,
+        "bindingVerified": true,
+        "auxiliaryInert": true,
+        "codingComposerReady": true,
+        "uniqueComposer": true,
+        "inputReadback": false,
+        "inputSubmitted": false,
+        "userTurnObserved": false,
+        "assistantTurnCount": 0,
+        "responseVerified": false,
+        "errorObserved": false,
+        "retryControl": true,
+        "retryAttempted": false,
+        "retryCompleted": false,
+        "errorCategory": "action-uncertain",
+        "retryClickPhase": "revalidate",
+        "retryViewportReveal": "completed",
+        "retryClickRefusal": {
+          "reason": "guard-rejected",
+          "remainingMs": 4897,
+          "first": {
+            "blocked": null,
+            "ownedHitCount": 1,
+            "testedViewportCount": 9
+          },
+          "second": null,
+          "final": null
+        },
+        "retryGuardSpotlight": {
+          "sourceVersion": "26.1007.21434",
+          "rendererSha256": "2b78662247051c8b0905e1afbe0839187b8267e9181e179bc422322e4010433b",
+          "status": "verified",
+          "failure": null,
+          "stableSamples": 2,
+          "inputCount": 1,
+          "listCount": 1,
+          "editableCount": 1,
+          "toastAnnouncerCount": 1
+        },
+        "providerResponseVerified": false,
+        "providerGenerationCount": 4
+      }
+    ]
+  }
 }

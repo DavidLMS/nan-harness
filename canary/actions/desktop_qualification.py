@@ -429,11 +429,12 @@ def spotlight_auxiliary(value, platform):
 
 def codex_retry_click_refusal(value, phase):
     phases = {
-        'guard-rejected': {'admission', 'revalidate', 'sample-second', 'sample-final', 'post-guard'},
-        'deadline': {'admission', 'revalidate', 'sample-second', 'sample-final', 'post-guard'},
-        'control-count': {'admission', 'revalidate'},
-        'control-disabled': {'admission', 'revalidate'},
-        'missing-handle': {'capture'}, 'control-replaced': {'revalidate'},
+        'guard-rejected': {'admission', 'viewport-reveal', 'revalidate', 'sample-second', 'sample-final', 'post-guard'},
+        'deadline': {'admission', 'viewport-reveal', 'revalidate', 'sample-second', 'sample-final', 'post-guard'},
+        'control-count': {'admission', 'viewport-reveal', 'revalidate'},
+        'control-disabled': {'admission', 'viewport-reveal', 'revalidate'},
+        'missing-handle': {'capture'}, 'control-replaced': {'viewport-reveal', 'revalidate'},
+        'reveal-failed': {'viewport-reveal'},
         'sample-blocked': {'sample-first', 'sample-second'},
         'first-hit-missing': {'sample-second'}, 'second-hit-missing': {'sample-second'},
         'stationary-hit-changed': {'sample-second'},
@@ -2945,7 +2946,7 @@ def semantic_observations(directory, app, platform=None):
             fields = flags | set('schemaVersion mechanism diagnosticsOnly assistantTurnCount providerGenerationCount errorCategory'.split())
             errors = {None, 'ownership-lost', 'composer-unavailable', 'stale-turn', 'input-mismatch', 'action-uncertain', 'retry-unavailable', 'response-timeout', 'query-failed', 'invalid-request'}
             optional = {'preAttachFailure', 'composerAdmissionFailure', 'composerReadinessObservation',
-                        'retryClickPhase', 'retryClickRefusal', 'retryGuardSpotlight'}
+                        'retryClickPhase', 'retryClickRefusal', 'retryGuardSpotlight', 'retryViewportReveal'}
             if (app != 'chatgpt-desktop' or set(value) - optional != fields or value['diagnosticsOnly'] is not True
                     or any(type(value[key]) is not bool for key in flags)
                     or type(value['assistantTurnCount']) is not int or not 0 <= value['assistantTurnCount'] <= 4096
@@ -2956,8 +2957,13 @@ def semantic_observations(directory, app, platform=None):
                 raise ValueError('invalid Codex renderer qualification')
             record.update({key: value[key] for key in fields - {'schemaVersion', 'mechanism'}})
             if 'retryClickPhase' in value:
-                enum(record, value, 'retryClickPhase', {'admission','capture','sample-first',
+                enum(record, value, 'retryClickPhase', {'admission','capture','sample-first','viewport-reveal',
                      'revalidate','sample-second','sample-final','dispatch','post-guard','complete'})
+            if 'retryViewportReveal' in value:
+                if (not value['retryControl'] or type(value['retryViewportReveal']) is not str
+                        or value['retryViewportReveal'] != 'completed'):
+                    raise ValueError('unexpected Codex Retry viewport observation')
+                record['retryViewportReveal'] = value['retryViewportReveal']
             if 'retryClickRefusal' in value:
                 if value['errorCategory'] != 'action-uncertain' or not value['retryControl'] or value['retryCompleted']:
                     raise ValueError('unexpected Codex Retry refusal')

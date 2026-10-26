@@ -1,14 +1,13 @@
 //! Closed, non-authoritative diagnostics from the retained Codex controller.
 
-use super::RetryClickPhase;
 use serde::{Deserialize, Deserializer, Serialize};
 
 // Derived unit-enum decoding also accepts {"variant":null}. This protocol
 // requires literal strings and never includes an invalid value in its error.
 macro_rules! closed_string_enum {
-    (enum $name:ident { $($variant:ident => $wire:literal),+ $(,)? }) => {
-        #[derive(Serialize)]
-        enum $name {
+    ($visibility:vis enum $name:ident { $($variant:ident => $wire:literal),+ $(,)? }) => {
+        #[derive(Clone, Copy, Serialize)]
+        $visibility enum $name {
             $(#[serde(rename = $wire)] $variant),+
         }
 
@@ -27,6 +26,21 @@ macro_rules! closed_string_enum {
             }
         }
     };
+}
+
+closed_string_enum! {
+    pub(super) enum RetryClickPhase {
+        Admission => "admission",
+        Capture => "capture",
+        SampleFirst => "sample-first",
+        ViewportReveal => "viewport-reveal",
+        Revalidate => "revalidate",
+        SampleSecond => "sample-second",
+        SampleFinal => "sample-final",
+        Dispatch => "dispatch",
+        PostGuard => "post-guard",
+        Complete => "complete",
+    }
 }
 
 // Nullable keys are still required on the wire. Only explicitly optional
@@ -61,6 +75,7 @@ closed_string_enum! {
         StationaryHitChanged => "stationary-hit-changed",
         FinalSampleChanged => "final-sample-changed",
         FinalPointLost => "final-point-lost",
+        RevealFailed => "reveal-failed",
     }
 }
 
@@ -139,16 +154,22 @@ impl RetryClickRefusal {
                 Some(
                     Phase::Admission
                         | Phase::Revalidate
+                        | Phase::ViewportReveal
                         | Phase::SampleSecond
                         | Phase::SampleFinal
                         | Phase::PostGuard
                 )
             ),
             Reason::ControlCount | Reason::ControlDisabled => {
-                matches!(phase, Some(Phase::Admission | Phase::Revalidate))
+                matches!(
+                    phase,
+                    Some(Phase::Admission | Phase::Revalidate | Phase::ViewportReveal)
+                )
             }
             Reason::MissingHandle => matches!(phase, Some(Phase::Capture)),
-            Reason::ControlReplaced => matches!(phase, Some(Phase::Revalidate)),
+            Reason::ControlReplaced => {
+                matches!(phase, Some(Phase::Revalidate | Phase::ViewportReveal))
+            }
             Reason::SampleBlocked => {
                 matches!(phase, Some(Phase::SampleFirst | Phase::SampleSecond))
             }
@@ -158,6 +179,7 @@ impl RetryClickRefusal {
             Reason::FinalSampleChanged | Reason::FinalPointLost => {
                 matches!(phase, Some(Phase::SampleFinal))
             }
+            Reason::RevealFailed => matches!(phase, Some(Phase::ViewportReveal)),
         };
         phase_valid
             && match self.reason {
@@ -171,6 +193,12 @@ impl RetryClickRefusal {
                 }
                 _ => true,
             }
+    }
+}
+
+closed_string_enum! {
+    pub(super) enum ViewportReveal {
+        Completed => "completed",
     }
 }
 

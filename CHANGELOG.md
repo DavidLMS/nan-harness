@@ -9,6 +9,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Bring the retained Codex Retry button into view before click verification
+  during Desktop qualification, preserving ownership and single-action checks.
 - Verify Codex's preloaded Spotlight palette stays closed and unfocused while
   Desktop qualification uses the retained main window.
 - Reprove the same owned Codex auxiliary window when its avatar route commits
