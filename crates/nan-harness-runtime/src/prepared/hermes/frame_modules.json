@@ -44,5 +44,6 @@
   "subprocess.py": "subprocess",
   "selectors.py": "selectors",
   "socket.py": "socket",
-  "ssl.py": "tls"
+  "ssl.py": "tls",
+  "ctypes/__init__.py": "ctypes"
 }

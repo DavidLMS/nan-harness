@@ -32,6 +32,7 @@ def require_absent(home):
 
 
 def ready(home, pid):
+    from frame_diagnostics import clear_exception, record_exception
     from hermes_cli.gateway_runtime import discover_gateway_endpoint
     from hermes_cli.gateway_runtime_discovery import query_identify
     deadline = time.monotonic() + 60
@@ -40,6 +41,7 @@ def ready(home, pid):
         try:
             identity = query_identify(home, timeout=0.2)
         except (OSError, ValueError) as error:
+            record_exception(error)
             if isinstance(error, FileNotFoundError):
                 reason = "control-absent"
             elif isinstance(error, PermissionError):
@@ -50,6 +52,7 @@ def ready(home, pid):
                 reason = "control-protocol"
             time.sleep(0.05)
             continue
+        clear_exception()
         if identity.get("pid") != pid:
             raise ReadinessFailure("identity-pid")
         if Path(identity.get("hermes_home", "")).resolve() != home:

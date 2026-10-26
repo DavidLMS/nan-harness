@@ -171,12 +171,15 @@ def run(args):
             diagnostics.extend(closed_frontend_diagnostics(text))
             if status:
                 diagnostics.append(frontend_phase(text))
+                try:
+                    diagnostics.extend(managed_profile_diagnostics(config))
+                    frames.extend(managed_profile_frames(config, trace_identity))
+                except (OSError, ValueError, TypeError):
+                    pass  # Advisory evidence cannot mask process-cleanup uncertainty.
+                diagnostics.append(PREFIX + ("PROVIDER-OBSERVED" if server.requests else "PROVIDER-ABSENT"))
         status = private_command([sys.executable, "-c", LAUNCH_WRAPPER, *arguments], root, timeout=150,
                                  environment=environment, allow_failure=True, diagnostic_callback=closed_diagnostic)
         if status != 0:
-            diagnostics.extend(managed_profile_diagnostics(config))
-            frames.extend(managed_profile_frames(config, trace_identity))
-            diagnostics.append(PREFIX + ("PROVIDER-OBSERVED" if server.requests else "PROVIDER-ABSENT"))
             if status in {1, 2, 125}:
                 diagnostics.append("NH-HERMES-FRONTEND-EXIT-" + str(status))
             raise RuntimeError()

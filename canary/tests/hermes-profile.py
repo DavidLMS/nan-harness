@@ -32,6 +32,33 @@ spec.loader.exec_module(frame_diagnostics)
 
 
 class Qualification(unittest.TestCase):
+    def test_control_exception_preserves_the_throw_site_and_only_numeric_os_codes(self):
+        from hermes_diagnostics import managed_profile_frames, safe_frames
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory)
+            home = config / "hermes-profiles/owned"
+            home.mkdir(parents=True)
+            identity = "c" * 32
+            with patch.dict(os.environ, {"NAN_HARNESS_HERMES_DIAGNOSTICS": identity,
+                                        "NAN_HARNESS_HERMES_MANAGED_HOME": str(home)}):
+                try:
+                    exec(compile("raise FileNotFoundError(2, 'private synthetic message and path')",
+                                 "/private/synthetic/gateway/runtime_bootstrap_windows.py", "exec"))
+                except FileNotFoundError as error:
+                    frame_diagnostics.record_exception(error)
+                values = managed_profile_frames(config, identity)
+                self.assertEqual(len(values), 1)
+                self.assertEqual(values[0]["action"], "control-error")
+                self.assertEqual(values[0]["errorKind"], "missing")
+                self.assertEqual(values[0]["errno"], 2)
+                self.assertEqual(values[0]["stacks"], [[{"module": "runtime_windows", "line": 1}]])
+                self.assertNotIn("private", json.dumps(values))
+                self.assertNotIn("synthetic", json.dumps(values))
+                self.assertEqual(safe_frames([{**values[0], "winerror": True}]), [])
+                self.assertEqual(safe_frames([{**values[0], "errno": "private"}]), [])
+                frame_diagnostics.clear_exception()
+                self.assertEqual(managed_profile_frames(config, identity), [])
+
     def test_source_positions_contain_only_known_module_identifiers_and_lines(self):
         namespace = {"sys": sys}
         exec(compile("def held():\n    private = 'sensitive synthetic payload'\n    return sys._getframe()\n",

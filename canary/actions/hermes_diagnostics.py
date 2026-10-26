@@ -110,14 +110,22 @@ def managed_profile_diagnostics(config):
 
 
 def safe_frames(values):
-    if not isinstance(values, list) or len(values) > 3:
+    if not isinstance(values, list) or len(values) > 4:
         return []
     result = []
     for value in values:
-        if (not isinstance(value, dict) or set(value) != {"action", "sequence", "stacks"}
-                or not isinstance(value["action"], str) or value["action"] not in {"owner", "ready", "frontend"}
+        if not isinstance(value, dict):
+            return []
+        error = value.get("action") == "control-error"
+        fields = {"action", "sequence", "stacks"} | ({"errorKind", "errno", "winerror"} if error else set())
+        if (set(value) != fields
+                or not isinstance(value["action"], str) or value["action"] not in {"owner", "ready", "frontend", "control-error"}
                 or type(value["sequence"]) is not int or not 0 <= value["sequence"] <= 100000
                 or not isinstance(value["stacks"], list) or len(value["stacks"]) > 4):
+            return []
+        if error and (not isinstance(value["errorKind"], str) or value["errorKind"] not in {"missing", "permission", "timeout", "io", "protocol"}
+                      or any(value[name] is not None and (type(value[name]) is not int or not 0 <= value[name] <= 65535)
+                             for name in ("errno", "winerror"))):
             return []
         for stack in value["stacks"]:
             if not isinstance(stack, list) or len(stack) > 3:
@@ -151,4 +159,14 @@ def managed_profile_frames(config, identity):
             records.extend(safe_frames([{key: value[key] for key in ("action", "sequence", "stacks")}]))
         except (OSError, ValueError, TypeError):
             continue
+    path = profile / ".nanh-control-error.json"
+    try:
+        if not path.is_symlink() and path.resolve().is_relative_to(profile) and path.stat().st_size <= 16384:
+            value = json.loads(path.read_bytes())
+            if (isinstance(value, dict) and set(value) == {"schemaVersion", "identity", "kind", "errno", "winerror", "frames"}
+                    and type(value["schemaVersion"]) is int and value["schemaVersion"] == 1 and value["identity"] == identity):
+                records.extend(safe_frames([{"action": "control-error", "sequence": 0, "stacks": [value["frames"]],
+                    "errorKind": value["kind"], "errno": value["errno"], "winerror": value["winerror"]}]))
+    except (OSError, ValueError, TypeError):
+        pass
     return records
