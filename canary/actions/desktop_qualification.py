@@ -346,7 +346,7 @@ def public_mac_codex_home_state(value):
 
 
 def folder_trust_observation(trust):
-    if (type(trust) is not dict or set(trust) - {'rejectionStage','guardFailure','auxiliaryRouteFailure'} != {'status', 'clickAttempted', 'clickCompleted'}
+    if (type(trust) is not dict or set(trust) - {'rejectionStage','guardFailure','auxiliaryRouteFailure','unknownRouteShapes'} != {'status', 'clickAttempted', 'clickCompleted'}
             or type(trust['status']) is not str
             or trust['status'] not in {'absent', 'blocked', 'completed', 'action-uncertain'}
             or type(trust['clickAttempted']) is not bool or type(trust['clickCompleted']) is not bool
@@ -384,6 +384,39 @@ def folder_trust_observation(trust):
                 or (observation['settleRoute'] is None) != (observation['samePage'] is None)
                 or observation['samePage'] is not None and type(observation['samePage']) is not bool):
             raise ValueError('invalid folder trust auxiliary route observation')
+    if 'unknownRouteShapes' in trust:
+        if 'auxiliaryRouteFailure' not in trust:
+            raise ValueError('missing folder trust route refusal')
+        codex_unknown_route_shapes(trust['unknownRouteShapes'], trust['auxiliaryRouteFailure'])
+
+
+def codex_unknown_route_shapes(shapes, routes):
+    if (type(shapes) is not dict or set(shapes) != {'initial', 'settle'}
+            or not any(routes[key + 'Route'] == 'unknown' for key in shapes)):
+        raise ValueError('invalid Codex unknown route shapes')
+    enums = {
+        'protocolKind': {'app', 'about', 'data', 'devtools', 'http', 'https', 'file', 'other', 'invalid'},
+        'entryKind': {'index', 'detachedWindow', 'other'},
+        'initialRouteKind': {'absent', 'multiple', 'avatarOverlay', 'detachedWindow', 'hotkeyWindow',
+                             'globalDictation', 'debug', 'spotlight', 'spacePrewarm', 'other'},
+        'queryShape': {'none', 'initialRouteOnly', 'initialRouteWithSandbox', 'other'},
+    }
+    invalid = dict(protocolKind='invalid', ownedAppHost=False, entryKind='other',
+                   initialRouteKind='absent', queryShape='other', fragmentPresent=False)
+    for phase, shape in shapes.items():
+        if routes[phase + 'Route'] != 'unknown':
+            if shape is not None:
+                raise ValueError('unexpected Codex known route shape')
+            continue
+        if (type(shape) is not dict or set(shape) != set(enums) | {'ownedAppHost', 'fragmentPresent'}
+                or any(type(shape[key]) is not str or shape[key] not in values for key, values in enums.items())
+                or any(type(shape[key]) is not bool for key in ('ownedAppHost', 'fragmentPresent'))
+                or shape['ownedAppHost'] and shape['protocolKind'] != 'app'
+                or shape['protocolKind'] == 'invalid' and shape != invalid
+                or shape['queryShape'] == 'none' and shape['initialRouteKind'] != 'absent'
+                or shape['queryShape'] in {'initialRouteOnly', 'initialRouteWithSandbox'}
+                    and shape['initialRouteKind'] in {'absent', 'multiple'}):
+            raise ValueError('invalid Codex unknown route shape')
 
 
 def windows_launcher_observation(value, app, platform):

@@ -1,6 +1,7 @@
 'use strict';
 const fs=require('node:fs');
 const path=require('node:path');
+const unknownRoutes=require('./codex-unknown-route-shapes.cjs');
 function authority(ownedWorkspace, io=fs, platform=process.platform) {
   let fd;
   const paths=platform==='win32'?path.win32:path.posix;
@@ -117,6 +118,13 @@ async function run(page,guard,deadline,authority,seal=()=>{},progress=()=>{}) {
               routes.includes(detail.settleRoute)&&typeof detail.samePage==='boolean'))
             receipt.auxiliaryRouteFailure={...detail};
         } catch { /* Diagnostic failure never changes the retained guard refusal. */ }
+      }
+      if(receipt.auxiliaryRouteFailure&&typeof guard.unknownRouteShapes==='function') {
+        try {
+          const shapes=guard.unknownRouteShapes();
+          if(unknownRoutes.validPair(shapes,receipt.auxiliaryRouteFailure))
+            receipt.unknownRouteShapes=unknownRoutes.copyPair(shapes);
+        } catch { /* Closed diagnostics are advisory; the guard still refuses. */ }
       }
       return reject('guard');
     }

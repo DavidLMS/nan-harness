@@ -174,7 +174,42 @@ assert.equal(roleSourceScope({foreignFieldset:true}).mainScope,false);
   // Closed route diagnostics describe only the URL strings already consumed by
   // the rejecting guard; they cannot authorize another measurement or input.
   const sourceRoute=require('./codex-onboarding.cjs').sourceRoute;
+  const unknownRoutes=require('./codex-unknown-route-shapes.cjs');
   const avatar='app://-/index.html?initialRoute=%2Favatar-overlay';
+  const appShape={protocolKind:'app',ownedAppHost:true,entryKind:'index',
+    initialRouteKind:'avatarOverlay',queryShape:'initialRouteOnly',fragmentPresent:false};
+  const initial=value=>'app://-/index.html?initialRoute='+encodeURIComponent(value);
+  for(const [raw,changes] of [
+    [avatar,{}],[initial('/spotlight'),{initialRouteKind:'spotlight'}],
+    [initial('/hotkey-window'),{initialRouteKind:'hotkeyWindow'}],
+    [initial('/global-dictation'),{initialRouteKind:'globalDictation'}],
+    [initial('/debug'),{initialRouteKind:'debug'}],
+    [initial('/space/local-page-PRIVATE?window=page&prewarm=1'),{initialRouteKind:'spacePrewarm'}],
+    [initial('/space/local-page-PRIVATE?window=page&prewarm=1&extra=PRIVATE'),{initialRouteKind:'other'}],
+    [initial('/space/local-page-PRIVATE?window=page&prewarm=1#'),{initialRouteKind:'other'}],
+    [initial('/space/local-page-PRIVATE?window=page&window=page&prewarm=1'),{initialRouteKind:'other'}],
+    [initial('/PRIVATE-route'),{initialRouteKind:'other'}],
+    [avatar+'&mcpAppSandboxLocalDevelopment=1',{queryShape:'initialRouteWithSandbox'}],
+    [avatar+'&mcpAppSandboxLocalDevelopment=PRIVATE',{queryShape:'other'}],
+    [avatar+'&initialRoute=PRIVATE',{initialRouteKind:'multiple',queryShape:'other'}],
+    ['app://-/index.html',{initialRouteKind:'absent',queryShape:'none'}],
+    [avatar+'#PRIVATE',{fragmentPresent:true}],
+    [avatar.replace('app://-','app://PRIVATE'),{ownedAppHost:false}],
+    [avatar.replace('app://-','app://PRIVATE@-'),{ownedAppHost:false}],
+    [avatar.replace('app://-','app://-:123'),{ownedAppHost:false}],
+    [avatar.replace('/index.html','/PRIVATE.html'),{entryKind:'other'}],
+    [initial('/detached-window').replace('/index.html','/detached-window.html'),
+      {entryKind:'detachedWindow',initialRouteKind:'detachedWindow'}],
+    ['devtools://devtools/PRIVATE',{protocolKind:'devtools',ownedAppHost:false,entryKind:'other',initialRouteKind:'absent',queryShape:'none'}],
+    ['data:text/html,PRIVATE',{protocolKind:'data',ownedAppHost:false,entryKind:'other',initialRouteKind:'absent',queryShape:'none'}],
+    ['invalid://PRIVATE/PRIVATE',{protocolKind:'other',ownedAppHost:false,entryKind:'other',initialRouteKind:'absent',queryShape:'none'}],
+    ['not a PRIVATE URL',{protocolKind:'invalid',ownedAppHost:false,entryKind:'other',initialRouteKind:'absent',queryShape:'other'}],
+  ]) {
+    const actual=unknownRoutes.shape(raw);
+    assert.deepEqual(actual,{...appShape,...changes});
+    assert.equal(unknownRoutes.validPair({initial:actual,settle:null},{initialRoute:'unknown',settleRoute:null}),true);
+    assert.ok(!JSON.stringify(actual).includes('PRIVATE'));
+  }
   const routeCases=[
     ['hotkeyWindow','app://-/index.html?initialRoute=%2Fhotkey-window'],
     ['quickChat','app://-/index.html?initialRoute=%2Fchatgpt%2Fquick-chat'],
@@ -193,6 +228,8 @@ assert.equal(roleSourceScope({foreignFieldset:true}).mainScope,false);
     assert.equal(await guard(),false);assert.equal(guard.failure(),'auxiliary-route');
     assert.deepEqual(guard.auxiliaryRouteFailure(),{initialRoute:category,settleRoute:null,samePage:null});
     assert.equal(reads,1);assert.equal(owners,0);
+    assert.deepEqual(guard.unknownRouteShapes(),category==='unknown'
+      ?{initial:unknownRoutes.shape(url),settle:null}:null);
     assert.ok(!JSON.stringify(guard.auxiliaryRouteFailure()).includes('PRIVATE'));
   }
   for(const scenario of ['same-unknown','replacement']) {
@@ -214,14 +251,33 @@ assert.equal(roleSourceScope({foreignFieldset:true}).mainScope,false);
     assert.equal(reads,2);assert.equal(owners,0,'no new ownership/query work before the same refusal');
     const refused=async()=>false;refused.failure=guard.failure;
     refused.auxiliaryRouteFailure=guard.auxiliaryRouteFailure;
+    refused.unknownRouteShapes=guard.unknownRouteShapes;
     const receipt=await require('./codex-folder-trust.cjs').run({},refused,Date.now()+1000,
       {workspace:'/owned',verify:async()=>true},()=>{throw Error('must not dispatch');},
       ()=>{throw Error('PRIVATE-observer');});
     assert.equal(receipt.guardFailure,'auxiliary-route');assert.equal(receipt.status,'blocked');
     assert.deepEqual(receipt.auxiliaryRouteFailure,expected);
+    assert.deepEqual(receipt.unknownRouteShapes,guard.unknownRouteShapes());
     assert.equal(receipt.clickAttempted,false);assert.equal(receipt.clickCompleted,false);
     assert.equal(reads,2,'diagnostic projection never reads the live URL again');
     assert.ok(!JSON.stringify(receipt).includes('PRIVATE'));
+  }
+  {
+    const f=fixture();let reads=0;
+    f.aux.url=()=>{reads++;return 'https://PRIVATE.invalid/PRIVATE';};
+    const original=unknownRoutes.shape;
+    unknownRoutes.shape=()=>{throw Error('PRIVATE-diagnostic');};
+    try {
+      const guard=helper.heldMainGuard(f.held,f.browser,()=>{throw Error('no native read');},1000,
+        sourceRoute,f.identity,async()=>{},false,false,false,true);
+      const receipt=await require('./codex-folder-trust.cjs').run({},guard,Date.now()+1000,
+        {workspace:'/owned',verify:async()=>true});
+      assert.equal(receipt.status,'blocked');assert.equal(receipt.guardFailure,'auxiliary-route');
+      assert.equal(receipt.unknownRouteShapes,undefined);assert.equal(receipt.clickAttempted,false);
+      assert.ok(!JSON.stringify(receipt).includes('PRIVATE'));
+      assert.equal(guard.failure(),'auxiliary-route');
+      assert.equal(guard.unknownRouteShapes(),null);assert.equal(reads,2);
+    } finally {unknownRoutes.shape=original;}
   }
   // A blank target can finish its inspected navigation between existing reads.
   // Admission still requires two new inert samples of that exact target.

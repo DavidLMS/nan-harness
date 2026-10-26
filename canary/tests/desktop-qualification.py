@@ -137,6 +137,51 @@ class CodexRetainedCustodyTests(unittest.TestCase):
 
 
 class RendererCheckpointTests(unittest.TestCase):
+    def test_unknown_auxiliary_shape_is_closed_and_bound_to_its_refused_read(self):
+        shape = dict(protocolKind='app', ownedAppHost=True, entryKind='index',
+                     initialRouteKind='spacePrewarm', queryShape='initialRouteOnly', fragmentPresent=False)
+        trust = dict(phase='guard', status='blocked', clickAttempted=False, clickCompleted=False,
+            rejectionStage='guard', guardFailure='auxiliary-route',
+            auxiliaryRouteFailure=dict(initialRoute='unknown', settleRoute='unknown', samePage=True),
+            unknownRouteShapes=dict(initial=shape, settle=shape))
+        value = dict(schemaVersion=1, mechanism='renderer-inventory', diagnosticsOnly=True,
+            app='chatgpt-desktop', endpointOwned=True, launcherOwned=True, attached=True,
+            pageCount=1, textareaCount=0, editableCount=0, sendCount=0, retryCount=0,
+            newThreadCount=0, loginCount=0, dialogCount=0, errorCategory='target-invalid',
+            folderTrustObservation=trust)
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'fact.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop'), [value])
+            for change in [{'url': 'PRIVATE'}, {'protocolKind': 'PRIVATE'}, {'ownedAppHost': 'PRIVATE'},
+                           {'entryKind': True}, {'initialRouteKind': 'PRIVATE'}, {'fragmentPresent': 1},
+                           {'protocolKind': 'file'}, {'queryShape': 'none'}, {'initialRouteKind': 'multiple'},
+                           {'protocolKind': 'invalid'}]:
+                item = copy.deepcopy(value)
+                item['folderTrustObservation']['unknownRouteShapes']['initial'] = shape | change
+                path.write_text(json.dumps(item))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'chatgpt-desktop')
+            for phase in ('initial', 'settle'):
+                item = copy.deepcopy(value)
+                item['folderTrustObservation']['unknownRouteShapes'][phase] = None
+                path.write_text(json.dumps(item))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'chatgpt-desktop')
+                item = copy.deepcopy(value)
+                item['folderTrustObservation']['auxiliaryRouteFailure'][phase + 'Route'] = 'blank'
+                path.write_text(json.dumps(item))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'chatgpt-desktop')
+                item['folderTrustObservation']['unknownRouteShapes'][phase] = None
+                path.write_text(json.dumps(item))
+                self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop'), [item])
+            item = copy.deepcopy(value)
+            del item['folderTrustObservation']['auxiliaryRouteFailure']
+            path.write_text(json.dumps(item))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'chatgpt-desktop')
+
     def test_auxiliary_route_refusal_reports_only_closed_existing_read_categories(self):
         route = dict(initialRoute='blank', settleRoute='avatarOverlay', samePage=True)
         trust = dict(status='blocked', clickAttempted=False, clickCompleted=False,

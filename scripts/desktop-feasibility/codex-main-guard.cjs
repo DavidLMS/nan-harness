@@ -1,6 +1,7 @@
 // Only this factory can issue a retained guard capability. Its complete source
 // samples always have fresh native ownership proofs before and after the reads.
 const guards=new WeakSet(),owners=new WeakMap();
+const unknownRoutes=require('./codex-unknown-route-shapes.cjs');
 // Classify only the string already consumed by a guard read. This closed
 // diagnostic vocabulary never participates in admission or reads a page.
 function closedAuxiliaryRoute(raw,kind) {
@@ -15,6 +16,14 @@ function createHeldMainGuard(held, browser, owner, deadline, route,
   let activationSettleTicket=false,activationSettleGranted=false,mainScopeProved=false;
   let auxiliary=null, auxiliaryIdentity=null, failure='unmeasured', failureDetails=null;
   let rejectedAuxiliary=null, rejectedAuxiliaryBlank=false, auxiliaryRouteFailure=null;
+  let unknownRouteShapes=null,unknownShapesFailed=false;
+  const recordUnknown=(phase,raw,kind)=>{
+    if(kind!=='unknown'||unknownShapesFailed)return;
+    try {
+      unknownRouteShapes??={initial:null,settle:null};
+      unknownRouteShapes[phase]=unknownRoutes.shape(raw);
+    } catch {unknownRouteShapes=null;unknownShapesFailed=true;}
+  };
   const started=now();
   let nativeProofCount=0,nativeProofMs=0,identityCount=0,identityMs=0;
   const checkpoint=phase=>{
@@ -48,6 +57,7 @@ function createHeldMainGuard(held, browser, owner, deadline, route,
   const measure=async function measure(expectedExtra=null) {
     failure='unmeasured';failureDetails=null;mainScopeProved=false;
     rejectedAuxiliary=null;rejectedAuxiliaryBlank=false;auxiliaryRouteFailure=null;
+    unknownRouteShapes=null;unknownShapesFailed=false;
     try {
       if(!held)return reject('main-identity');
       if(!timely())return false;
@@ -64,6 +74,7 @@ function createHeldMainGuard(held, browser, owner, deadline, route,
           rejectedAuxiliary=extra;
           rejectedAuxiliaryBlank=url===''||url==='about:blank';
           auxiliaryRouteFailure={initialRoute:closedAuxiliaryRoute(url,kind),settleRoute:null,samePage:null};
+          recordUnknown('initial',url,auxiliaryRouteFailure.initialRoute);
           return reject('auxiliary-route');
         }
       }
@@ -130,6 +141,7 @@ function createHeldMainGuard(held, browser, owner, deadline, route,
         // the already-read string; diagnostic failure cannot replace refusal.
         auxiliaryRouteFailure.settleRoute=closedAuxiliaryRoute(url,kind);
         auxiliaryRouteFailure.samePage=extra===rejectedAuxiliary;
+        recordUnknown('settle',url,auxiliaryRouteFailure.settleRoute);
       }
       // The same blank target may commit between the two existing URL reads.
       // Consume its one settling allowance before two fresh, owned source samples.
@@ -165,6 +177,8 @@ function createHeldMainGuard(held, browser, owner, deadline, route,
   prove.failureDetails=()=>failure==='page-set'?failureDetails:null;
   prove.auxiliaryRouteFailure=()=>failure==='auxiliary-route'&&auxiliaryRouteFailure
     ?{...auxiliaryRouteFailure}:null;
+  prove.unknownRouteShapes=()=>failure==='auxiliary-route'&&unknownRouteShapes
+    ?unknownRoutes.copyPair(unknownRouteShapes):null;
   const privateIdentity=value=>value&&Object.fromEntries(['url','target','frame','loader','frameUrl','fragment'].map(key=>[key,value[key]]));
   prove.binding=()=>({schemaVersion:1,main:privateIdentity(held),auxiliary:privateIdentity(auxiliaryIdentity)});
   guards.add(prove);owners.set(prove,owner);
