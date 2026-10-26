@@ -14,6 +14,33 @@ spec.loader.exec_module(module)
 
 
 class InspectedCodex(unittest.TestCase):
+    def test_windows_versioned_source_rejects_changed_identity_or_source(self):
+        value = module.manifest('windows')
+        entry = value['apps'][0]
+        changes = [dict(version='26.1007.2314'), dict(digest='sha256:' + 'a' * 64),
+                   dict(url=entry['url'].replace('26.1007.2314.0', '26.1021.3705.0')),
+                   dict(url=entry['url'].replace('oaistatic.com', 'oaistatic.com.attacker.example')),
+                   dict(url=entry['url'] + '?download=1'), dict(url=entry['url'] + '#fragment')]
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'manifest.json'
+            for change in changes:
+                module.write_json(path, {**value, 'apps': [{**entry, **change}]})
+                with self.assertRaises(ValueError):
+                    module.read_frozen_manifest(path, ['chatgpt-desktop'], 'windows', 'x86_64', 'qwen3.6')
+
+    def test_windows_stages_inspected_release_when_mutable_latest_has_changed(self):
+        original = b'original inspected package'
+        entry = {**module.manifest('windows')['apps'][0],
+                 'digest': 'sha256:' + hashlib.sha256(original).hexdigest()}
+        fetched = []
+        def fetch(url, path):
+            fetched.append(url)
+            path.write_bytes(original if '/releases/26.1007.2314.0/' in url else b'new upstream package')
+        with tempfile.TemporaryDirectory() as temporary:
+            staged = module.stage(entry, Path(temporary) / 'artifacts', fetch)
+            self.assertEqual(staged.read_bytes(), original)
+            self.assertEqual(fetched, ['https://persistent.oaistatic.com/codex-app-prod/releases/26.1007.2314.0/ChatGPT-x64.msix'])
+
     def test_download_failures_are_closed_without_urls_or_process_output(self):
         for status, code in {22: 'http', 23: 'local-io', 28: 'timeout',
                              63: 'size-limit', 99: 'unavailable'}.items():

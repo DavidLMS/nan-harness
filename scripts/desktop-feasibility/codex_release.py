@@ -1,4 +1,8 @@
 """Exact official bytes inspected for the deterministic desktop baseline."""
+# The MSIX identity differs from its embedded app version. This immutable
+# official release URL was independently verified against the inspected digest.
+CODEX_WINDOWS_RELEASE_URL = 'https://persistent.oaistatic.com/codex-app-prod/releases/26.1007.2314.0/ChatGPT-x64.msix'
+
 CODEX_PROJECT_RELEASES = {
     'macos': ('f6cf4d2e9b69aeefa33adda4bcd1a2d306357f5253a1ac6049700870c28dd0c7',
               '418a460276b195f5642e43b320ec2821d6c34c646cb316ed2c0285546298243f'),

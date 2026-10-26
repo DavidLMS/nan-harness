@@ -744,6 +744,55 @@ fn staged_artifact_metadata_is_bounded_and_single() {
 }
 
 #[test]
+fn codex_windows_immutable_url_requires_the_inspected_package_identity() {
+    let release = Release {
+        app: DesktopHarnessKind::ChatGpt,
+        version: "26.1007.21434".into(),
+        runtime_version: None,
+        channel: policy(DesktopHarnessKind::ChatGpt, Platform::Windows, Architecture::X86_64).channel(),
+        url: "https://persistent.oaistatic.com/codex-app-prod/releases/26.1007.2314.0/ChatGPT-x64.msix".into(),
+        format: PackageFormat::Msix,
+        digest: Some("sha256:36770adda59f71027e94d3d18ff7087da45a41990d1a1575080cd3149dcab30a".into()),
+        revision: None,
+        staged: true,
+        installer: Installer::External,
+    };
+    let verify = |release: Release, architecture| {
+        verify_entry(
+            &Entry::Frozen(release),
+            policy(DesktopHarnessKind::ChatGpt, Platform::Windows, architecture),
+        )
+    };
+    assert_eq!(verify(release.clone(), Architecture::X86_64), Ok(()));
+    assert_eq!(
+        verify(release.clone(), Architecture::Aarch64),
+        Err(ManifestError::Untrusted)
+    );
+    let changes: [&dyn Fn(&mut Release); 8] = [
+        &|r| r.version = "26.1007.2314".into(),
+        &|r| r.digest = Some(format!("sha256:{}", "a".repeat(64))),
+        &|r| r.digest = None,
+        &|r| r.url = r.url.replace("26.1007.2314.0", "26.1021.3705.0"),
+        &|r| {
+            r.url = r
+                .url
+                .replace("oaistatic.com", "oaistatic.com.attacker.example")
+        },
+        &|r| r.url.push_str("?download=1"),
+        &|r| r.url.push_str("#fragment"),
+        &|r| r.app = DesktopHarnessKind::Claude,
+    ];
+    for change in changes {
+        let mut altered = release.clone();
+        change(&mut altered);
+        assert_eq!(
+            verify(altered, Architecture::X86_64),
+            Err(ManifestError::Untrusted)
+        );
+    }
+}
+
+#[test]
 fn claude_windows_immutable_url_binds_version_architecture_and_revision() {
     let expected = "https://claude.ai/api/desktop/win32/x64/msix/latest/redirect";
     let version = Version::new(2, 19675, 0);

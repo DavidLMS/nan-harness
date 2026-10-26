@@ -9,7 +9,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from codex_release import CODEX_PROJECT_RELEASES, CODEX_PROJECT_VERSIONS
+from codex_release import CODEX_PROJECT_RELEASES, CODEX_PROJECT_VERSIONS, CODEX_WINDOWS_RELEASE_URL
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'canary/actions'))
 from cell import ensure_private_directory, write_json
@@ -46,8 +46,9 @@ def manifest(platform):
         url = f'{base}ChatGPT-darwin-arm64-{version}.zip'
         channel, package, staged, installer = f'sparkle:{base}appcast.xml', 'zip', True, 'checker'
     else:
-        url = f'{base}ChatGPT-x64.msix'
-        channel, package, staged, installer = f'official-latest:{url}', 'msix', True, 'external'
+        url = CODEX_WINDOWS_RELEASE_URL
+        channel = f'official-latest:{base}ChatGPT-x64.msix'
+        package, staged, installer = 'msix', True, 'external'
     entry = dict(status='frozen', app='chatgpt-desktop', version=version,
                  channel=channel, url=url, format=package,
                  digest='sha256:' + CODEX_PROJECT_RELEASES[platform][0],

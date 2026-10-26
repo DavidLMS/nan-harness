@@ -184,7 +184,10 @@ def _expected_url(entry, platform, architecture):
             deb_arch = "amd64" if architecture == "x86_64" else "arm64"
             return url == f"https://persistent.oaistatic.com/codex-app-prod/linux/deb/pool/main/c/chatgpt/chatgpt_{version}_{deb_arch}.deb"
         if platform == "windows":
-            return url == "https://persistent.oaistatic.com/codex-app-prod/ChatGPT-x64.msix"
+            return (url == "https://persistent.oaistatic.com/codex-app-prod/ChatGPT-x64.msix"
+                    or (architecture == "x86_64" and version == "26.1007.21434"
+                        and entry.get("digest") == "sha256:36770adda59f71027e94d3d18ff7087da45a41990d1a1575080cd3149dcab30a"
+                        and url == "https://persistent.oaistatic.com/codex-app-prod/releases/26.1007.2314.0/ChatGPT-x64.msix"))
         return url == f"https://persistent.oaistatic.com/codex-app-prod/ChatGPT-darwin-arm64-{version}.zip"
     if app == "claude-desktop":
         if platform == "linux":
