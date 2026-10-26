@@ -396,7 +396,7 @@ async function driveDom() {
         if (!users[0].isConnected || !input.button.isConnected) return { state: 'pending' };
         if (input.button.closest('[role="alert"]') !== alert
             || input.button.closest('[data-slot="aui_turn-pair"]') !== pair) return { state: 'invalid' };
-        return { state: 'ready', alert, pair, user: users[0], document, button: input.button };
+        return { state: 'ready', alert, pair, group, user: users[0], document, button: input.button };
       }, { prompt: request.prompt, button, originalDocument }, { timeout: Math.max(1, settleDeadline - Date.now()) });
       const state = await candidate.evaluate(value => value.state);
       if (state === 'ready') { retryScope = candidate; retryHandle = button; break; }
@@ -408,40 +408,60 @@ async function driveDom() {
       if (!facts.retryScopeFailure) scopeFailure('initial-scope-incomplete');
       facts.errorCategory = 'send-unavailable'; saveFacts(); return;
     }
-    retainedScope = async () => {
+    retainedScope = async phase => {
       if (await errorCards.count() !== 1) return scopeFailure('error-turn');
-      const reason = await errorCards.evaluate((alert, held) => {
+      const result = await errorCards.evaluate((alert, held) => {
         const pair = alert.closest('[data-slot="aui_turn-pair"]');
         const users = pair?.querySelectorAll('[data-role="user"]');
-        if (alert.ownerDocument !== held.document || held.document !== document) return 'document-changed';
-        if (pair !== held.pair || !pair?.isConnected) return 'pair-changed';
-        if (users?.length !== 1 || users[0] !== held.user || !held.user.isConnected) return 'user-changed';
-        if (alert !== held.alert || !alert.isConnected) return 'alert-changed';
-        return null;
+        let reason = null;
+        if (alert.ownerDocument !== held.document || held.document !== document) reason = 'document-changed';
+        else if (pair !== held.pair || !pair?.isConnected) reason = 'pair-changed';
+        else if (users?.length !== 1 || users[0] !== held.user || !held.user.isConnected) reason = 'user-changed';
+        else if (alert !== held.alert || !alert.isConnected) reason = 'alert-changed';
+        let observation;
+        // This matrix describes the same refusal snapshot. It grants no input
+        // and an unavailable advisory observation must not change the verdict.
+        if (reason !== null) try {
+          observation = {
+            documentSame: alert.ownerDocument === held.document && held.document === document,
+            currentPairPresent: Boolean(pair), currentPairSame: pair === held.pair,
+            currentPairConnected: Boolean(pair?.isConnected), heldPairConnected: Boolean(held.pair.isConnected),
+            currentGroupSame: pair?.closest('[data-slot="aui_message-group"]') === held.group,
+            heldGroupConnected: Boolean(held.group.isConnected),
+            currentUserSame: users?.length === 1 && users[0] === held.user,
+            heldUserConnected: Boolean(held.user.isConnected),
+            currentAlertSame: alert === held.alert, heldAlertConnected: Boolean(held.alert.isConnected),
+            heldRetryConnected: Boolean(held.button.isConnected), currentUserCount: Math.min(users?.length ?? 0, 2),
+          };
+        } catch { /* Diagnostics cannot change the original identity refusal. */ }
+        return { reason, observation };
       }, retryScope);
-      return reason === null || scopeFailure(reason);
+      if (result.reason !== null && result.observation && !facts.retryScopeObservation) try {
+        facts.retryScopeObservation = { phase, ...result.observation };
+      } catch { /* Diagnostics cannot grant or prevent an action. */ }
+      return result.reason === null || scopeFailure(result.reason);
     };
     let first;
     let second;
     let revealAttempted = false;
-    const reprove = async () => {
+    const reprove = async phase => {
       if (!ownedEndpoint()) return scopeFailure('endpoint');
       if (await send.count() !== 1) return scopeFailure('retry-count');
       if (!await send.isEnabled()) return scopeFailure('retry-disabled');
       if (await retryUser.count() !== 1) return scopeFailure('user-count');
       if (!await retryUser.evaluate((e, prompt) => e.innerText.trim() === prompt, request.prompt)) return scopeFailure('user-text');
       if (!await errorProof()) return scopeFailure('error-turn');
-      if (!await retainedScope()) return false;
+      if (!await retainedScope(phase)) return false;
       if (!await send.evaluate((button, sampled) => button === sampled, retryHandle)) return scopeFailure('retry-changed');
       return true;
     };
-    if (!await reprove()) { facts.errorCategory = 'send-unavailable'; saveFacts(); return; }
+    if (!await reprove('initial-reproof')) { facts.errorCategory = 'send-unavailable'; saveFacts(); return; }
     await delay(Math.min(100, Math.max(0, settleDeadline - Date.now())));
-    if (Date.now() >= settleDeadline || !await reprove()) {
+    if (Date.now() >= settleDeadline || !await reprove('initial-stability')) {
       facts.errorCategory = 'send-unavailable'; saveFacts(); return;
     }
     while (Date.now() < settleDeadline) {
-      if (!await reprove()) { facts.errorCategory = 'send-unavailable'; saveFacts(); return; }
+      if (!await reprove('sampling')) { facts.errorCategory = 'send-unavailable'; saveFacts(); return; }
       first = await retryHandle.evaluate(sampleRetryInterior);
       await delay(Math.min(100, Math.max(0, settleDeadline - Date.now())));
       second = await retryHandle.evaluate(sampleRetryInterior);
@@ -450,7 +470,7 @@ async function driveDom() {
       if (first.closed.status === 'owned' && second.closed.status === 'detached'
           && !samplingRemountUsed && Date.now() < settleDeadline) {
         samplingRemountUsed = true;
-        if (!ownedEndpoint() || !await retainedScope() || !await errorProof()
+        if (!ownedEndpoint() || !await retainedScope('sampling-remount') || !await errorProof()
             || await send.count() !== 1 || !await send.isEnabled()) {
           facts.errorCategory = 'send-unavailable'; saveFacts(); return;
         }
@@ -472,10 +492,10 @@ async function driveDom() {
         const cover = page.locator('[data-glass-opaque][class~="z-(--z-onboarding)"]');
         const choice = cover.getByRole('button', { name: "I'll choose a provider later", exact: true });
         while (Date.now() < settleDeadline && await choice.count() === 0) {
-          if (!await reprove()) { facts.errorCategory = 'send-unavailable'; saveFacts(); return; }
+          if (!await reprove('onboarding-readiness')) { facts.errorCategory = 'send-unavailable'; saveFacts(); return; }
           await delay(100);
         }
-        if (!await reprove() || await cover.count() !== 1 || !await cover.isVisible()
+        if (!await reprove('onboarding-readiness') || await cover.count() !== 1 || !await cover.isVisible()
             || await choice.count() !== 1 || !await choice.isEnabled()) {
           facts.errorCategory = 'send-unavailable'; saveFacts(); return;
         }
@@ -484,7 +504,7 @@ async function driveDom() {
         await delay(Math.min(100, Math.max(0, settleDeadline - Date.now())));
         const choiceSecond = await choiceHandle.evaluate(sampleRetryInterior);
         const choicePosition = stableCandidate(choiceFirst, choiceSecond);
-        if (!choicePosition || !await reprove() || await cover.count() !== 1 || await choice.count() !== 1
+        if (!choicePosition || !await reprove('onboarding-readiness') || await cover.count() !== 1 || await choice.count() !== 1
             || !await choice.isEnabled() || !await choice.evaluate((button, sampled) => button === sampled, choiceHandle)
             || await readiness() !== null) {
           facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return;
@@ -512,7 +532,7 @@ async function driveDom() {
       }
       if (second.closed.frontRegion === 'command-backdrop' && !revealAttempted) {
         revealAttempted = true;
-        if (!await reprove()) { facts.errorCategory = 'send-unavailable'; saveFacts(); return; }
+        if (!await reprove('command-readiness')) { facts.errorCategory = 'send-unavailable'; saveFacts(); return; }
         // Exact source CommandPalette backdrop only; one ordinary dismissal.
         // Rejection or uncertain input stops here, never another action.
         const liveFront = await retryHandle.evaluate(sampleRetryInterior);
@@ -538,7 +558,7 @@ async function driveDom() {
           if (absent) break;
           await delay(20);
         }
-        if (!absent || !await reprove()) { facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return; }
+        if (!absent || !await reprove('command-readiness')) { facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return; }
         facts.retryReveal = 'command-dismissed';
       }
     }
@@ -557,7 +577,7 @@ async function driveDom() {
     facts.retryRectInViewport = second.closed.rectInViewport;
     facts.retryPointerEventsNone = second.closed.pointerEventsNone;
     if (!retryPosition && second.closed.status === 'no-owned-point' && second.closed.frontRegion === 'other'
-        && await reprove()) await recordUnknownFront(retryHandle);
+        && await reprove('sampling')) await recordUnknownFront(retryHandle);
     if (!retryPosition || !ownedEndpoint() || Date.now() >= deadline) {
       facts.sendBlocker = 'other'; facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return;
     }
@@ -576,7 +596,7 @@ async function driveDom() {
     if (!ownedEndpoint() || await send.count() !== 1 || !await send.isEnabled()
         || await retryUser.count() !== 1
         || !await retryUser.evaluate((e, prompt) => e.innerText.trim() === prompt, request.prompt)
-        || !await errorProof() || !await retainedScope()) {
+        || !await errorProof() || !await retainedScope('final-reproof')) {
       facts.errorCategory = 'send-unavailable'; saveFacts(); return;
     }
     facts.sendBlocker = await readiness();
@@ -590,7 +610,7 @@ async function driveDom() {
       const current = async () => ownedEndpoint() && Date.now() < settleDeadline
         && await send.count() === 1 && await send.isEnabled() && await retryUser.count() === 1
         && await retryUser.evaluate((e, prompt) => e.innerText.trim() === prompt, request.prompt)
-        && await errorProof() && await retainedScope()
+        && await errorProof() && await retainedScope('final-remount')
         && await send.evaluate((button, sampled) => button === sampled, replacement);
       if (!replacement || !await current()
           || !await retryHandle.evaluate((old, next) => old.ownerDocument === next.ownerDocument, replacement)) {

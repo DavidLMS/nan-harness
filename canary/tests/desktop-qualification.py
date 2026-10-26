@@ -5094,6 +5094,71 @@ class WindowsCleanupProgressTests(unittest.TestCase):
                     path.write_text(json.dumps(good))
                     with self.assertRaises(ValueError):q.semantic_observations(root,'zed-desktop')
 
+class WindowsLauncherObservationTests(unittest.TestCase):
+    def test_wrapper_failure_and_child_exit_are_distinct_closed_records(self):
+        value = dict(schemaVersion=1, mechanism='windows-launcher', diagnosticsOnly=True,
+            app='chatgpt-desktop', stage='connection-create', cause='already-exists',
+            childStarted=True, childExitCode=None, osCode=183)
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'windows-launcher-1.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop', 'windows'), [value])
+            exited = value | dict(stage='child-exit', cause='child-nonzero', childExitCode=1, osCode=None)
+            path.write_text(json.dumps(exited))
+            self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop', 'windows'), [exited])
+            for code in (-1073741819, -1, 7, 2147483647):
+                path.write_text(json.dumps(exited | {'childExitCode': code}))
+                self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop', 'windows')[0]['childExitCode'], code)
+            for changed in [value | dict(rawError='PRIVATE'), value | dict(diagnosticsOnly=False),
+                    value | dict(app='hermes-desktop'), value | dict(childStarted=False),
+                    value | dict(stage='PRIVATE'), value | dict(cause='PRIVATE'),
+                    value | dict(childExitCode=1), value | dict(cause='child-nonzero'),
+                    value | dict(osCode=True), value | dict(osCode=2 ** 31),
+                    exited | dict(childExitCode=0), exited | dict(childExitCode=True),
+                    exited | dict(osCode=183), exited | dict(cause='other')]:
+                path.write_text(json.dumps(changed))
+                with self.subTest(changed=changed), self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'chatgpt-desktop', 'windows')
+            path.write_text(json.dumps(value))
+            for platform in (None, 'linux', 'macos'):
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'chatgpt-desktop', platform)
+            for app in ('hermes-desktop', 'zed-desktop'):
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, app, 'windows')
+
+
+class HermesRetryScopeObservationTests(unittest.TestCase):
+    def test_actual_refusal_fixture_is_closed_and_keeps_legacy_receipts_valid(self):
+        value = json.loads((ROOT / 'canary/tests/fixtures/hermes-retry-scope.json').read_text())
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'hermes.json'
+            path.write_text(json.dumps(value))
+            record = q.semantic_observations(root, 'hermes-desktop', 'windows')[0]
+            self.assertEqual(record['retryScopeObservation'], value['retryScopeObservation'])
+            self.assertFalse(record['inputSubmitted'])
+            self.assertEqual(record['retryScopeFailure'], 'pair-changed')
+            for change in [dict(phase='PRIVATE'), dict(documentSame=1), dict(rawText='PRIVATE'),
+                    dict(currentUserCount=True), dict(currentUserCount=-1), dict(currentUserCount=3),
+                    dict(currentPairPresent=False), dict(currentPairConnected=False),
+                    dict(currentUserSame=True), dict(currentAlertSame=True)]:
+                changed = value | {'retryScopeObservation': value['retryScopeObservation'] | change}
+                path.write_text(json.dumps(changed))
+                with self.subTest(change=change), self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'hermes-desktop', 'windows')
+            for observation in (None, [], {}):
+                path.write_text(json.dumps(value | {'retryScopeObservation': observation}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'hermes-desktop', 'windows')
+            for reason in (None, 'alert-changed', 'retry-changed'):
+                path.write_text(json.dumps(value | {'retryScopeFailure': reason}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'hermes-desktop', 'windows')
+            del value['retryScopeObservation']
+            path.write_text(json.dumps(value))
+            self.assertNotIn('retryScopeObservation', q.semantic_observations(root, 'hermes-desktop')[0])
+
+
 class CodexFreshLinuxHomeTests(unittest.TestCase):
     def test_renderer_fact_keeps_platform_and_parent_confirmation_context(self):
         value = dict(schemaVersion=1, mechanism='renderer-inventory', diagnosticsOnly=True,

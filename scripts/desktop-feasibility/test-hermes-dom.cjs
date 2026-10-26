@@ -30,6 +30,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   let focuses = 0;
   let settleTimerObserved = false;
   let scopeCaptures = 0, capturingScope = false;
+  let scopeChecks = 0, scopeChanged = false, heldUserDetached = false, currentAlert;
   const unwrap = value => value && Object.hasOwn(value, 'scopeValue') ? value.scopeValue : value;
   const scopeHandle = value => ({ scopeValue: value,
     async evaluate(callback, argument) { return callback(value, unwrap(argument)); }, async dispose() {} });
@@ -48,8 +49,10 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
       if (capturingScope && scenario === 'initial-scope-duplicate-user') return [boundUser, { ...boundUser }];
       return [scenario === 'sampling-remount-user' && sampleCount >= 2 ? { ...boundUser } : boundUser]; } };
   const replacementPair = { ...turnPair };
-  const currentPair = () => scenario === 'initial-scope-valid-pair-changed' && scopeCaptures > 0 && !capturingScope ? replacementPair : turnPair;
-  const boundUser = { get isConnected() { return !scopeIncomplete('disconnected-user'); }, closest() { return currentPair(); }, get innerText() {
+  const currentPair = () => scopeChanged && scenario === 'scope-pair-missing' ? null
+    : scopeChanged && ['scope-user-reparented', 'scope-whole-tuple-remounted', 'scope-stability-pair-remounted', 'scope-diagnostic-failed'].includes(scenario)
+      || scenario === 'initial-scope-valid-pair-changed' && scopeCaptures > 0 && !capturingScope ? replacementPair : turnPair;
+  const boundUser = { get isConnected() { return !heldUserDetached && !scopeIncomplete('disconnected-user'); }, closest() { return currentPair(); }, get innerText() {
     if (capturingScope && scenario === 'initial-scope-foreign-user') return 'Foreign synthetic prompt';
     return (['foreign-error-turn', 'delayed-foreign-error'].includes(scenario)
       || scenario === 'foreign-card-after-settle' && frames === 2
@@ -63,6 +66,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
     closest(selector) { return selector.includes('assistant-message-root')
       ? assistantRoot : scopeIncomplete('missing-pair') ? null
         : scenario === 'sampling-remount-pair' && sampleCount >= 2 ? { ...turnPair } : currentPair(); } };
+  currentAlert = boundAlert;
   const ancestorFront = { tagName: 'DIV', privateValue: 'PRIVATE_SYNTHETIC_VALUE',
     contains(element) { return element === hitButton || scenario === 'retry-composer-cover'; },
     closest(selector) { return selector === '[data-slot="aui_turn-pair"]' ? turnPair : null; } };
@@ -174,8 +178,34 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
       finally { capturingScope = false; }
     },
     async evaluate(callback, argument) {
+      if (callback.toString().includes('let reason = null')) {
+        scopeChecks++;
+        if (scenario?.startsWith('scope-') && scopeChecks === (scenario === 'scope-stability-pair-remounted' ? 2 : 1)) {
+          scopeChanged = true;
+          if (['scope-pair-detached', 'scope-user-reparented', 'scope-whole-tuple-remounted', 'scope-stability-pair-remounted', 'scope-diagnostic-failed'].includes(scenario)) turnPair.isConnected = false;
+          if (scenario === 'scope-pair-detached') {
+            turnPair.closest = () => null;
+            heldUserDetached = true; boundAlert.isConnected = false; hitButton.isConnected = false;
+          }
+          if (['scope-whole-tuple-remounted', 'scope-stability-pair-remounted'].includes(scenario)) {
+            heldUserDetached = true; boundAlert.isConnected = false; hitButton.isConnected = false;
+            replacementPair.querySelectorAll = () => [{ ...boundUser, isConnected: true }];
+            currentAlert = { ...boundAlert, isConnected: true };
+          }
+          if (scenario === 'scope-alert-changed') { boundAlert.isConnected = false; currentAlert = { ...boundAlert, isConnected: true }; }
+          if (scenario === 'scope-document-changed') currentAlert = { ...boundAlert, ownerDocument: {} };
+          if (scenario === 'scope-user-changed') {
+            heldUserDetached = true; turnPair.querySelectorAll = () => [{ ...boundUser, isConnected: true }];
+          }
+          if (scenario === 'scope-user-multiple') turnPair.querySelectorAll = () => [boundUser, { ...boundUser }, { ...boundUser }];
+          if (scenario === 'scope-group-changed') turnPair.closest = () => ({ isConnected: true });
+          if (scenario === 'scope-diagnostic-failed') Object.defineProperty(messageGroup, 'isConnected', {
+            get() { throw Error('PRIVATE_SYNTHETIC_VALUE'); },
+          });
+        }
+      }
       if (scenario === 'sampling-remount-alert' && sampleCount >= 2) return callback({ ...boundAlert }, unwrap(argument));
-      return callback(boundAlert, unwrap(argument));
+      return callback(currentAlert, unwrap(argument));
     },
     async count() { return ['failure-appears', 'delayed-foreign-error'].includes(scenario) && submits === 0 ? 0 : scenario === 'missing-error' ? 0 : scenario === 'duplicate-error' ? 2 : 1; },
     getByRole(role, options) { assert.equal(role, 'button'); assert.equal(options.name, 'Retry'); return { ...send, async count() { return scenario === 'missing-retry' ? 0 : scenario === 'duplicate-retry' ? 2 : 1; } }; },
@@ -438,6 +468,55 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   assert.equal(changedCandidate.clicks, 0);
   assert.equal(changedCandidate.keys, 0);
   assert.equal(changedCandidate.facts.retryScopeFailure, 'pair-changed');
+  assert.equal(changedCandidate.facts.retryScopeObservation.phase, 'initial-reproof');
+  const scopeFixtures = [];
+  const scopeBooleans = ['documentSame', 'currentPairPresent', 'currentPairSame', 'currentPairConnected',
+    'heldPairConnected', 'currentGroupSame', 'heldGroupConnected', 'currentUserSame',
+    'heldUserConnected', 'currentAlertSame', 'heldAlertConnected', 'heldRetryConnected'];
+  for (const [scenario, reason, changes] of [
+    ['scope-pair-missing', 'pair-changed', { currentPairPresent: false, currentPairSame: false,
+      currentPairConnected: false, currentGroupSame: false, currentUserSame: false, currentUserCount: 0 }],
+    ['scope-pair-detached', 'pair-changed', { currentPairConnected: false, heldPairConnected: false,
+      currentGroupSame: false, heldUserConnected: false, heldAlertConnected: false, heldRetryConnected: false }],
+    ['scope-user-reparented', 'pair-changed', { currentPairSame: false, heldPairConnected: false }],
+    ['scope-whole-tuple-remounted', 'pair-changed', { currentPairSame: false, heldPairConnected: false,
+      currentUserSame: false, heldUserConnected: false, currentAlertSame: false,
+      heldAlertConnected: false, heldRetryConnected: false }],
+    ['scope-stability-pair-remounted', 'pair-changed', { currentPairSame: false, heldPairConnected: false,
+      currentUserSame: false, heldUserConnected: false, currentAlertSame: false,
+      heldAlertConnected: false, heldRetryConnected: false, phase: 'initial-stability' }],
+    ['scope-user-changed', 'user-changed', { currentUserSame: false, heldUserConnected: false }],
+    ['scope-user-multiple', 'user-changed', { currentUserSame: false, currentUserCount: 2 }],
+    ['scope-alert-changed', 'alert-changed', { currentAlertSame: false, heldAlertConnected: false }],
+    ['scope-document-changed', 'document-changed', { documentSame: false, currentAlertSame: false }],
+  ]) {
+    const refused = await trial(retryRequest, {}, scenario, true);
+    assert.equal(refused.facts.retryScopeFailure, reason, scenario);
+    assert.deepEqual(refused.facts.retryScopeObservation, {
+      phase: 'initial-reproof', ...Object.fromEntries(scopeBooleans.map(key => [key, true])),
+      currentUserCount: 1, ...changes,
+    }, scenario);
+    assert.equal(refused.facts.errorCategory, 'send-unavailable', scenario);
+    for (const key of ['submits', 'fills', 'clicks', 'keys', 'skips', 'escapes']) assert.equal(refused[key], 0, scenario);
+    assert.equal(refused.facts.inputSubmitted, false, scenario);
+    assert.ok(!JSON.stringify(refused.facts).includes('PRIVATE'), scenario);
+    if (scenario === 'scope-whole-tuple-remounted') assert.deepEqual(refused.facts,
+      JSON.parse(fs.readFileSync(`${__dirname}/../../canary/tests/fixtures/hermes-retry-scope.json`, 'utf8')),
+      'actual emitter matches the full shared Rust/Python receipt');
+    scopeFixtures.push({ scenario, facts: refused.facts });
+  }
+  const unavailableScope = await trial(retryRequest, {}, 'scope-diagnostic-failed', true);
+  assert.equal(unavailableScope.facts.retryScopeFailure, 'pair-changed');
+  assert.equal(unavailableScope.facts.errorCategory, 'send-unavailable');
+  assert.equal(unavailableScope.facts.retryScopeObservation, undefined);
+  assert.equal(unavailableScope.clicks, 0);
+  assert.equal(unavailableScope.keys, 0);
+  assert.equal(retry.facts.retryScopeObservation, undefined, 'success has no identity refusal');
+  const diagnosticGroup = await trial(retryRequest, {}, 'scope-group-changed', true);
+  assert.equal(diagnosticGroup.facts.responseVerified, true, 'group witness adds no acceptance guard');
+  assert.equal(diagnosticGroup.clicks, 1);
+  assert.equal(diagnosticGroup.facts.retryScopeObservation, undefined);
+  if (process.argv[2]) fs.writeFileSync(process.argv[2], JSON.stringify(scopeFixtures) + '\n', { mode: 0o600 });
   const remount = await trial({ ...retryRequest, timeoutMs: 900 }, {}, 'sampling-remount', true);
   assert.equal(remount.clicks, 1);
   assert.equal(remount.retryHandles, 2);
@@ -449,6 +528,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
     assert.equal(rejected.clicks, 0, scenario);
     assert.equal(rejected.keys, 0, scenario);
     if (scopeReasons[scenario]) assert.equal(rejected.facts.retryScopeFailure, scopeReasons[scenario], scenario);
+    if (scopeReasons[scenario]) assert.equal(rejected.facts.retryScopeObservation.phase, 'sampling-remount', scenario);
   }
   const expiredRemount = await trial({ ...retryRequest, timeoutMs: 150 }, {}, 'sampling-remount', true);
   assert.equal(expiredRemount.clicks, 0);

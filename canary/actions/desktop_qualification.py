@@ -372,6 +372,71 @@ def folder_trust_observation(trust):
             raise ValueError('invalid folder trust guard failure')
 
 
+def windows_launcher_observation(value, app, platform):
+    fields = set('schemaVersion mechanism diagnosticsOnly app stage cause '
+                 'childStarted childExitCode osCode'.split())
+    before_child = {'real-binary', 'host-policy', 'port-bind', 'port-address', 'child-spawn'}
+    after_child = {'facts-root', 'connection-create', 'connection-write',
+                   'connection-sync', 'child-wait', 'child-exit'}
+    causes = {'not-found', 'permission-denied', 'already-exists', 'invalid-input',
+              'interrupted', 'timed-out', 'address-in-use', 'address-not-available',
+              'other', 'child-nonzero'}
+    if (platform != 'windows' or app not in {'hermes-desktop', 'chatgpt-desktop', 'claude-desktop', 'pen-desktop'}
+            or type(value) is not dict or set(value) != fields
+            or type(value['schemaVersion']) is not int or value['schemaVersion'] != 1
+            or value['mechanism'] != 'windows-launcher' or value['diagnosticsOnly'] is not True
+            or value['app'] != app or type(value['stage']) is not str
+            or value['stage'] not in before_child | after_child
+            or type(value['cause']) is not str or value['cause'] not in causes
+            or type(value['childStarted']) is not bool
+            or value['childStarted'] != (value['stage'] in after_child)):
+        raise ValueError('invalid Windows launcher diagnostic')
+    for key in ('childExitCode', 'osCode'):
+        if value[key] is not None and (type(value[key]) is not int or not -(2 ** 31) <= value[key] < 2 ** 31):
+            raise ValueError('invalid Windows launcher code')
+    exited = value['stage'] == 'child-exit'
+    if (exited and (value['cause'] != 'child-nonzero' or value['childExitCode'] in {None, 0}
+                   or value['osCode'] is not None)
+            or not exited and (value['cause'] == 'child-nonzero' or value['childExitCode'] is not None)):
+        raise ValueError('inconsistent Windows launcher exit')
+    return dict(value)
+
+
+def hermes_retry_scope_observation(value, failure):
+    flags = set('documentSame currentPairPresent currentPairSame currentPairConnected '
+                'heldPairConnected currentGroupSame heldGroupConnected currentUserSame '
+                'heldUserConnected currentAlertSame heldAlertConnected heldRetryConnected'.split())
+    phases = set('initial-reproof initial-stability sampling sampling-remount '
+                 'onboarding-readiness command-readiness final-reproof final-remount'.split())
+    if (type(value) is not dict or set(value) != flags | {'phase', 'currentUserCount'}
+            or type(value['phase']) is not str or value['phase'] not in phases
+            or any(type(value[key]) is not bool for key in flags)
+            or type(value['currentUserCount']) is not int or not 0 <= value['currentUserCount'] <= 2):
+        raise ValueError('invalid Hermes retry scope observation')
+    if not value['documentSame']:
+        reason = 'document-changed'
+    elif not value['currentPairSame'] or not value['currentPairConnected']:
+        reason = 'pair-changed'
+    elif value['currentUserCount'] != 1 or not value['currentUserSame'] or not value['heldUserConnected']:
+        reason = 'user-changed'
+    elif not value['currentAlertSame'] or not value['heldAlertConnected']:
+        reason = 'alert-changed'
+    else:
+        raise ValueError('Hermes retry scope observation has no refusal')
+    if (failure != reason
+            or not value['currentPairPresent'] and (any(value[key] for key in (
+                'currentPairSame', 'currentPairConnected', 'currentGroupSame', 'currentUserSame'))
+                or value['currentUserCount'] != 0)
+            or value['currentPairSame'] and value['currentPairConnected'] != value['heldPairConnected']
+            or value['currentGroupSame'] and value['currentPairConnected'] != value['heldGroupConnected']
+            or value['currentUserSame'] and value['currentUserCount'] != 1
+            or value['currentUserSame'] and value['currentPairConnected'] != value['heldUserConnected']
+            or value['currentAlertSame'] and value['currentPairPresent']
+                and value['currentPairConnected'] != value['heldAlertConnected']):
+        raise ValueError('inconsistent Hermes retry scope observation')
+    return dict(value)
+
+
 def codex_fresh_home_proof(value):
     fixed = {
         'sourceVersion': '26.930.41038',
@@ -1032,10 +1097,10 @@ def semantic_observations(directory, app, platform=None):
         if type(value) is not dict:
             raise ValueError('invalid semantic observation')
         mechanism = value.get('mechanism')
-        if mechanism not in {'renderer-inventory-failure', 'codex-renderer-qualification', 'qualification-runner-failure', 'qualification-reduction-failure', 'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-atspi-retry', 'windows-foreground-session', 'zed-retry-entry-counts', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'codex-static-dialog-title', 'codex-linux-startup-dialog', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'windows-process-correlation', 'windows-owned-descendant-cleanup', 'windows-owned-cleanup-preflight', 'windows-owned-cleanup-preflight-progress', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-cli-prelaunch', 'claude-config-persist-owners', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-native-chat', 'claude-windows-native-chat', 'claude-linux-native-chat', 'claude-initial-window-rejection','claude-window-fit', 'claude-windows-fit', 'claude-windows-uia', 'claude-windows-fit-rejection', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-windows-profile-seal', 'codex-windows-profile-prepare', 'claude-native-composer', 'claude-linux-mode-roles', 'claude-linux-classic-visibility', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
+        if mechanism not in {'renderer-inventory-failure', 'codex-renderer-qualification', 'qualification-runner-failure', 'qualification-reduction-failure', 'windows-launcher', 'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-atspi-retry', 'windows-foreground-session', 'zed-retry-entry-counts', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'codex-static-dialog-title', 'codex-linux-startup-dialog', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'windows-process-correlation', 'windows-owned-descendant-cleanup', 'windows-owned-cleanup-preflight', 'windows-owned-cleanup-preflight-progress', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-cli-prelaunch', 'claude-config-persist-owners', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-native-chat', 'claude-windows-native-chat', 'claude-linux-native-chat', 'claude-initial-window-rejection','claude-window-fit', 'claude-windows-fit', 'claude-windows-uia', 'claude-windows-fit-rejection', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-windows-profile-seal', 'codex-windows-profile-prepare', 'claude-native-composer', 'claude-linux-mode-roles', 'claude-linux-classic-visibility', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
             continue
         expected = 'hermes-renderer-qualification' if app == 'hermes-desktop' else 'zed-native-copy'
-        if (mechanism != expected and mechanism not in {'renderer-inventory-failure', 'codex-renderer-qualification', 'qualification-runner-failure', 'qualification-reduction-failure', 'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-atspi-retry', 'windows-foreground-session', 'zed-retry-entry-counts', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'codex-static-dialog-title', 'codex-linux-startup-dialog', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'windows-process-correlation', 'windows-owned-descendant-cleanup', 'windows-owned-cleanup-preflight', 'windows-owned-cleanup-preflight-progress', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-cli-prelaunch', 'claude-config-persist-owners', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-native-chat', 'claude-windows-native-chat', 'claude-linux-native-chat', 'claude-initial-window-rejection','claude-window-fit', 'claude-windows-fit', 'claude-windows-uia', 'claude-windows-fit-rejection', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-windows-profile-seal', 'codex-windows-profile-prepare', 'claude-native-composer', 'claude-linux-mode-roles', 'claude-linux-classic-visibility', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
+        if (mechanism != expected and mechanism not in {'renderer-inventory-failure', 'codex-renderer-qualification', 'qualification-runner-failure', 'qualification-reduction-failure', 'windows-launcher', 'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-atspi-retry', 'windows-foreground-session', 'zed-retry-entry-counts', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'codex-static-dialog-title', 'codex-linux-startup-dialog', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'windows-process-correlation', 'windows-owned-descendant-cleanup', 'windows-owned-cleanup-preflight', 'windows-owned-cleanup-preflight-progress', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-cli-prelaunch', 'claude-config-persist-owners', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-native-chat', 'claude-windows-native-chat', 'claude-linux-native-chat', 'claude-initial-window-rejection','claude-window-fit', 'claude-windows-fit', 'claude-windows-uia', 'claude-windows-fit-rejection', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-windows-profile-seal', 'codex-windows-profile-prepare', 'claude-native-composer', 'claude-linux-mode-roles', 'claude-linux-classic-visibility', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
             raise ValueError('semantic observation identity differs')
         record = {'schemaVersion': 1, 'mechanism': mechanism}
         if mechanism == 'codex-project-preflight':
@@ -1046,6 +1111,8 @@ def semantic_observations(directory, app, platform=None):
                         'profile-binding', 'fixture', 'executable-hash'}):
                 raise ValueError('invalid Codex project preflight')
             record.update(diagnosticsOnly=True, stage=value['stage'])
+        elif mechanism == 'windows-launcher':
+            record = windows_launcher_observation(value, app, platform)
         elif mechanism == 'hermes-windows-catalog-readiness':
             booleans = {'menuOpened', 'refreshAttempted', 'catalogVerified', 'modelRowVerified',
                         'menuDismissed', 'composerReverified'}
@@ -3351,6 +3418,9 @@ def semantic_observations(directory, app, platform=None):
                     raise ValueError('invalid renderer HTTP status')
                 record['apiErrorStatus'] = status
             enum(record, value, 'retryScopeFailure', {'initial-scope-incomplete', 'initial-scope-invalid', 'endpoint', 'retry-count', 'retry-disabled', 'retry-missing', 'retry-changed', 'user-count', 'user-text', 'error-turn', 'document-changed', 'pair-changed', 'user-changed', 'alert-changed'})
+            if 'retryScopeObservation' in value:
+                record['retryScopeObservation'] = hermes_retry_scope_observation(
+                    value['retryScopeObservation'], value.get('retryScopeFailure'))
             enum(record, value, 'retryReveal', {'none', 'command-dismissed', 'onboarding-skipped'})
             enum(record, value, 'retrySampleStatus', {'unmeasured', 'native-control-invalid', 'detached', 'hidden', 'disabled', 'inert', 'foreign-document', 'clipped', 'pointer-events-none', 'transformed', 'outside-viewport', 'no-owned-point', 'owned'})
             if 'retryHitOwnedPoints' in value:
