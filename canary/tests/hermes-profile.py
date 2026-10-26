@@ -32,6 +32,63 @@ spec.loader.exec_module(frame_diagnostics)
 
 
 class Qualification(unittest.TestCase):
+    def test_namespace_observation_preserves_native_names_without_exporting_home(self):
+        from hermes_diagnostics import managed_namespace_diagnostics
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory)
+            home = config / "hermes-profiles/owned"
+            home.mkdir(parents=True)
+            control = ModuleType("gateway.control_socket")
+            original = lambda path: "synthetic-pipe-" + str(path)
+            control.windows_pipe_name = original
+            gateway = ModuleType("gateway")
+            gateway.control_socket = control
+            identity = "d" * 32
+            calls = {"control": control}
+            exec(compile("def _create_pipe(home):\n    return control.windows_pipe_name(home)\n"
+                         "def query_runtime_control(home):\n    return control.windows_pipe_name(home)\n",
+                         "/private/synthetic/gateway/runtime_bootstrap_windows.py", "exec"), calls)
+            with patch.dict(sys.modules, {"gateway": gateway, "gateway.control_socket": control}), \
+                    patch.dict(os.environ, {"NAN_HARNESS_HERMES_DIAGNOSTICS": identity}):
+                frame_diagnostics.trace_control_namespace(home, "owner")
+                self.assertEqual(calls["_create_pipe"](home), original(home))
+                # A fresh process gets a fresh module; restore the original for this fixture.
+                control.windows_pipe_name = original
+                frame_diagnostics.trace_control_namespace(home, "ready")
+                self.assertEqual(calls["query_runtime_control"](home), original(home))
+                values = managed_namespace_diagnostics(config, identity)
+                self.assertIn("NH-HERMES-CONTROL-READY-NAMESPACE-MATCH", values)
+                self.assertIn("NH-HERMES-CONTROL-OWNER-HOME-MATCH", values)
+                self.assertTrue(set(values) <= set(cell.HERMES_PROFILE_DIAGNOSTICS))
+                self.assertNotIn(str(home), json.dumps(values))
+                with patch.object(frame_diagnostics, "private_receipt", side_effect=OSError("private payload")):
+                    self.assertEqual(calls["query_runtime_control"](config), original(config))
+
+    def test_namespace_timing_is_closed_and_unknown_metadata_is_rejected(self):
+        from hermes_diagnostics import managed_namespace_diagnostics
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory)
+            home = config / "hermes-profiles/owned"
+            home.mkdir(parents=True)
+            identity = "e" * 32
+            base = {"schemaVersion": 1, "identity": identity, "matchesManagedName": True,
+                    "samePhysicalHome": True, "verbatimHome": False, "observedNs": 100_000_000_000}
+            for action, role, digest in (("owner", "server", "a" * 64), ("ready", "client", "b" * 64)):
+                (home / (".nanh-namespace-" + action + "-" + role + ".json")).write_text(json.dumps(
+                    {**base, "action": action, "role": role, "digest": digest}))
+            error = {"schemaVersion": 1, "identity": identity, "kind": "missing", "errno": 2, "winerror": 2,
+                     "frames": [], "deadlineNs": 98_000_000_000, "observedNs": 38_000_000_000}
+            (home / ".nanh-control-error.json").write_text(json.dumps(error))
+            values = managed_namespace_diagnostics(config, identity)
+            self.assertIn("NH-HERMES-CONTROL-READY-NAMESPACE-MISMATCH", values)
+            self.assertIn("NH-HERMES-CONTROL-SERVER-NAME-LATE-UNDER-5S", values)
+            self.assertTrue(set(values) <= set(cell.HERMES_PROFILE_DIAGNOSTICS))
+            path = home / ".nanh-namespace-owner-server.json"
+            invalid = json.loads(path.read_text())
+            invalid["private"] = "payload"
+            path.write_text(json.dumps(invalid))
+            self.assertNotIn("NH-HERMES-CONTROL-READY-NAMESPACE-MISMATCH", managed_namespace_diagnostics(config, identity))
+
     def test_control_exception_preserves_the_throw_site_and_only_numeric_os_codes(self):
         from hermes_diagnostics import managed_profile_frames, safe_frames
         with tempfile.TemporaryDirectory() as directory:

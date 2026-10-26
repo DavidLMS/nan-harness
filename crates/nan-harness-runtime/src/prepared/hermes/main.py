@@ -41,7 +41,7 @@ def ready(home, pid):
         try:
             identity = query_identify(home, timeout=0.2)
         except (OSError, ValueError) as error:
-            record_exception(error)
+            record_exception(error, deadline)
             if isinstance(error, FileNotFoundError):
                 reason = "control-absent"
             elif isinstance(error, PermissionError):
@@ -179,6 +179,9 @@ def main(arguments):
     os.environ["HERMES_PROFILE"] = "default"
     os.environ["GATEWAY_MULTIPLEX_PROFILES"] = "false"
     os.environ.pop("HERMES_TUI_GATEWAY_URL", None)
+    if os.name == "nt":
+        from frame_diagnostics import trace_control_namespace
+        trace_control_namespace(home, action)
     if os.name != "nt":
         os.umask(0o077)
     if action == "absent":

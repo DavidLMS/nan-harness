@@ -1,5 +1,6 @@
 """Opt-in source-position samples for the disposable native qualification only."""
 from contextlib import contextmanager
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -7,6 +8,7 @@ import re
 import sys
 import tempfile
 import threading
+import time
 
 MODULES = json.loads(Path(__file__).with_name("frame_modules.json").read_text(encoding="utf-8"))
 ACTIONS = {"owner", "ready", "frontend"}
@@ -63,7 +65,7 @@ def private_receipt(home, name, value):
             pass
 
 
-def record_exception(error):
+def record_exception(error, deadline=None):
     """Keep only public throw sites and bounded OS codes; never retain the error."""
     global _last_error
     identity = os.environ.get("NAN_HARNESS_HERMES_DIAGNOSTICS", "")
@@ -93,9 +95,12 @@ def record_exception(error):
                     if type(value) is int and 0 <= value <= 65535:
                         codes[name] = value
             cause = cause.__cause__ or cause.__context__
-        value = {"schemaVersion": 1, "identity": identity, "kind": kind, **codes, "frames": positions[-3:]}
+        deadline_ns = int(deadline * 1_000_000_000) if type(deadline) in (int, float) and 0 <= deadline < 9_223_372_036 else None
+        value = {"schemaVersion": 1, "identity": identity, "kind": kind, **codes,
+                 "frames": positions[-3:], "deadlineNs": deadline_ns}
         signature = (identity, str(home), json.dumps(value, sort_keys=True))
         if signature != _last_error:
+            value["observedNs"] = time.monotonic_ns()
             private_receipt(home, ".nanh-control-error.json", value)
             _last_error = signature
     except Exception:
@@ -111,6 +116,48 @@ def clear_exception():
         _last_error = None
     except Exception:
         pass
+
+
+def trace_control_namespace(managed_home, action):
+    """Observe name calculations without changing the native name or inspecting locals."""
+    identity = os.environ.get("NAN_HARNESS_HERMES_DIAGNOSTICS", "")
+    if action not in ACTIONS or not re.fullmatch(r"[0-9a-f]{32}", identity):
+        return
+    from gateway import control_socket
+    original = control_socket.windows_pipe_name
+    if getattr(original, "_nanh_namespace_trace", False):
+        return
+    seen = set()
+
+    def observed(home):
+        name = original(home)
+        try:
+            caller = sys._getframe(1).f_code
+            role = {"_create_pipe": "server", "query_runtime_control": "client"}.get(caller.co_name)
+            if role is None or module_identifier(caller.co_filename) != "runtime_windows":
+                return name
+            digest = hashlib.sha256(name.encode("utf-8")).hexdigest()
+            key = (role, digest)
+            if key not in seen:
+                # Supported SDK Python3.11+ shares this monotonic clock across processes.
+                observed_ns = time.monotonic_ns()
+                try:
+                    physical_match = Path(home).samefile(managed_home)
+                except OSError:
+                    physical_match = None
+                value = {"schemaVersion": 1, "identity": identity, "action": action, "role": role,
+                         "digest": digest, "matchesManagedName": name == original(managed_home),
+                         "samePhysicalHome": physical_match,
+                         "verbatimHome": str(home).replace(chr(92), "/").startswith("//?/"),
+                         "observedNs": observed_ns}
+                private_receipt(managed_home, ".nanh-namespace-" + action + "-" + role + ".json", value)
+                seen.add(key)
+        except Exception:
+            pass  # Always return the exact native value, even when observation fails.
+        return name
+
+    observed._nanh_namespace_trace = True
+    control_socket.windows_pipe_name = observed
 
 
 @contextmanager

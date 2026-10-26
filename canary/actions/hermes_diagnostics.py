@@ -55,6 +55,15 @@ DIAGNOSTIC_CODES = tuple(PREFIX + code for code in (
     "EXCEPTION-VALUE", "EXCEPTION-RUNTIME", "EXCEPTION-OS",
     *SIGNATURES, *PHASES,
 ))
+DIAGNOSTIC_CODES += tuple("NH-HERMES-CONTROL-" + code for code in (
+    "OWNER-HOME-MATCH", "OWNER-HOME-MISMATCH", "OWNER-HOME-UNKNOWN", "OWNER-VERBATIM",
+    "READY-HOME-MATCH", "READY-HOME-MISMATCH", "READY-HOME-UNKNOWN", "READY-VERBATIM",
+    "FRONTEND-HOME-MATCH", "FRONTEND-HOME-MISMATCH", "FRONTEND-HOME-UNKNOWN", "FRONTEND-VERBATIM",
+    "OWNER-NAME-MATCH", "OWNER-NAME-MISMATCH", "READY-NAME-MATCH", "READY-NAME-MISMATCH",
+    "FRONTEND-NAME-MATCH", "FRONTEND-NAME-MISMATCH",
+    "READY-NAMESPACE-MATCH", "READY-NAMESPACE-MISMATCH", "FRONTEND-NAMESPACE-MATCH", "FRONTEND-NAMESPACE-MISMATCH",
+    "SERVER-NAME-BEFORE-DEADLINE", "SERVER-NAME-LATE-UNDER-5S", "SERVER-NAME-LATE-UNDER-10S", "SERVER-NAME-LATE-OVER-10S",
+))
 
 
 def bounded_tail(stream):
@@ -163,10 +172,64 @@ def managed_profile_frames(config, identity):
     try:
         if not path.is_symlink() and path.resolve().is_relative_to(profile) and path.stat().st_size <= 16384:
             value = json.loads(path.read_bytes())
-            if (isinstance(value, dict) and set(value) == {"schemaVersion", "identity", "kind", "errno", "winerror", "frames"}
+            fields = {"schemaVersion", "identity", "kind", "errno", "winerror", "frames"}
+            if (isinstance(value, dict) and set(value) in (fields, fields | {"deadlineNs", "observedNs"})
                     and type(value["schemaVersion"]) is int and value["schemaVersion"] == 1 and value["identity"] == identity):
                 records.extend(safe_frames([{"action": "control-error", "sequence": 0, "stacks": [value["frames"]],
                     "errorKind": value["kind"], "errno": value["errno"], "winerror": value["winerror"]}]))
     except (OSError, ValueError, TypeError):
         pass
     return records
+
+
+def managed_namespace_diagnostics(config, identity):
+    parent = (config / "hermes-profiles").resolve()
+    profiles = list(parent.glob("*"))
+    if len(profiles) != 1 or profiles[0].is_symlink() or not profiles[0].resolve().is_relative_to(parent):
+        return []
+    profile = profiles[0].resolve()
+
+    def read(name):
+        path = profile / name
+        try:
+            if path.is_symlink() or not path.resolve().is_relative_to(profile) or path.stat().st_size > 16384:
+                return None
+            value = json.loads(path.read_bytes())
+            if (isinstance(value, dict) and type(value.get("schemaVersion")) is int
+                    and value["schemaVersion"] == 1 and value.get("identity") == identity):
+                return value
+        except (OSError, ValueError, TypeError):
+            pass
+        return None
+
+    names, codes = {}, []
+    fields = {"schemaVersion", "identity", "action", "role", "digest", "matchesManagedName", "samePhysicalHome", "verbatimHome", "observedNs"}
+    for action, role in (("owner", "server"), ("ready", "client"), ("frontend", "client")):
+        value = read(".nanh-namespace-" + action + "-" + role + ".json")
+        if (not value or set(value) != fields or value["action"] != action or value["role"] != role
+                or not isinstance(value["digest"], str) or not re.fullmatch(r"[0-9a-f]{64}", value["digest"])
+                or type(value["matchesManagedName"]) is not bool or type(value["verbatimHome"]) is not bool
+                or value["samePhysicalHome"] is not None and type(value["samePhysicalHome"]) is not bool
+                or type(value["observedNs"]) is not int or not 0 <= value["observedNs"] < 2**63):
+            continue
+        names[action] = value
+        match = "UNKNOWN" if value["samePhysicalHome"] is None else "MATCH" if value["samePhysicalHome"] else "MISMATCH"
+        codes.append("NH-HERMES-CONTROL-" + action.upper() + "-HOME-" + match)
+        codes.append("NH-HERMES-CONTROL-" + action.upper() + "-NAME-"
+                     + ("MATCH" if value["matchesManagedName"] else "MISMATCH"))
+        if value["verbatimHome"]:
+            codes.append("NH-HERMES-CONTROL-" + action.upper() + "-VERBATIM")
+    if "owner" in names:
+        for action in ("ready", "frontend"):
+            if action in names:
+                match = "MATCH" if names["owner"]["digest"] == names[action]["digest"] else "MISMATCH"
+                codes.append("NH-HERMES-CONTROL-" + action.upper() + "-NAMESPACE-" + match)
+        error = read(".nanh-control-error.json")
+        error_fields = {"schemaVersion", "identity", "kind", "errno", "winerror", "frames", "deadlineNs", "observedNs"}
+        deadline = error.get("deadlineNs") if error and set(error) == error_fields else None
+        if type(deadline) is int and 0 <= deadline < 2**63:
+            delta = names["owner"]["observedNs"] - deadline
+            timing = ("BEFORE-DEADLINE" if delta <= 0 else "LATE-UNDER-5S" if delta <= 5_000_000_000
+                      else "LATE-UNDER-10S" if delta <= 10_000_000_000 else "LATE-OVER-10S")
+            codes.append("NH-HERMES-CONTROL-SERVER-NAME-" + timing)
+    return codes

@@ -20,7 +20,7 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "actions"))
 from cell import HERMES_PROFILE_DIAGNOSTICS, ensure_private_directory, private_command, protect_private
 from hermes_diagnostics import (PREFIX, bounded_tail, closed_frontend_diagnostics, frontend_phase,
-                                managed_profile_diagnostics, managed_profile_frames)
+                                managed_profile_diagnostics, managed_profile_frames, managed_namespace_diagnostics)
 from processes import Gateways
 
 KEY = "synthetic-hermes-native-key"
@@ -174,6 +174,7 @@ def run(args):
                 try:
                     diagnostics.extend(managed_profile_diagnostics(config))
                     frames.extend(managed_profile_frames(config, trace_identity))
+                    diagnostics.extend(managed_namespace_diagnostics(config, trace_identity))
                 except (OSError, ValueError, TypeError):
                     pass  # Advisory evidence cannot mask process-cleanup uncertainty.
                 diagnostics.append(PREFIX + ("PROVIDER-OBSERVED" if server.requests else "PROVIDER-ABSENT"))
