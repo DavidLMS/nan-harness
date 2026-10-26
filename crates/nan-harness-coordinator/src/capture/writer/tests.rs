@@ -83,6 +83,28 @@ async fn completes<T>(future: impl Future<Output = T>) -> T {
         .expect("capture operation should complete")
 }
 
+async fn assert_lock_released(path: &Path) {
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .unwrap();
+    // A concurrent Unix fork can briefly retain the finished writer's file
+    // description until exec. Persistent contention still fails the same bound.
+    completes(async {
+        loop {
+            match lock.try_lock() {
+                Ok(()) => return,
+                Err(std::fs::TryLockError::WouldBlock) => {
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+                Err(error) => panic!("capture lock release failed: {error}"),
+            }
+        }
+    })
+    .await;
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn slow_storage_allows_async_progress_and_preserves_order_across_batches() {
     let directory = tempfile::tempdir().unwrap();
@@ -104,12 +126,16 @@ async fn slow_storage_allows_async_progress_and_preserves_order_across_batches()
     .unwrap();
     assert_eq!(heartbeat, 42);
     assert!(credits.load(Ordering::Relaxed) > 0);
-    assert!(
-        std::fs::File::open(directory.path().join("lock"))
-            .unwrap()
-            .try_lock()
-            .is_err()
-    );
+    let locked = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(directory.path().join("lock"))
+        .unwrap();
+    assert!(matches!(
+        locked.try_lock(),
+        Err(std::fs::TryLockError::WouldBlock)
+    ));
+    drop(locked);
     drop(request);
     drop(release);
     completes(task).await.unwrap();
@@ -126,10 +152,7 @@ async fn slow_storage_allows_async_progress_and_preserves_order_across_batches()
         assert_eq!(record["schema_version"], 1);
     }
     assert!(!directory.path().join("output.incomplete").exists());
-    std::fs::File::open(directory.path().join("lock"))
-        .unwrap()
-        .try_lock()
-        .unwrap();
+    assert_lock_released(&directory.path().join("lock")).await;
 }
 
 #[tokio::test]
@@ -162,10 +185,7 @@ async fn write_and_flush_failures_finalize_and_release_credits() {
             std::fs::read(directory.path().join("output.incomplete")).unwrap(),
             b"capture incomplete\n"
         );
-        std::fs::File::open(directory.path().join("lock"))
-            .unwrap()
-            .try_lock()
-            .unwrap();
+        assert_lock_released(&directory.path().join("lock")).await;
     }
 }
 
