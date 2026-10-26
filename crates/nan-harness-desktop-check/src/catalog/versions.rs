@@ -207,7 +207,9 @@ pub(super) fn windows_package_output(
     command: &mut Command,
     app: DesktopHarnessKind,
 ) -> Result<String, DiscoveryError> {
-    command_output_detailed(command, Duration::from_secs(5)).map_err(|error| {
+    // Cold PowerShell/AppX inventory on a hosted runner can exceed five seconds.
+    // This passive preparation query has its own bound, outside native action budgets.
+    command_output_detailed(command, Duration::from_secs(20)).map_err(|error| {
         diagnostic::emit_command(app, diagnostic::Source::WindowsPackageEnumeration, &error);
         DiscoveryError::RootEnumeration
     })

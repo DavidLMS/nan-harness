@@ -5,6 +5,8 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
+import subprocess
 
 spec = importlib.util.spec_from_file_location('freeze_codex', Path(__file__).with_name('freeze-inspected.py'))
 module = importlib.util.module_from_spec(spec)
@@ -12,6 +14,21 @@ spec.loader.exec_module(module)
 
 
 class InspectedCodex(unittest.TestCase):
+    def test_download_failures_are_closed_without_urls_or_process_output(self):
+        for status, code in {22: 'http', 23: 'local-io', 28: 'timeout',
+                             63: 'size-limit', 99: 'unavailable'}.items():
+            error = subprocess.CalledProcessError(status, ['curl', 'PRIVATE'], stderr='PRIVATE')
+            with patch.object(module.subprocess, 'run', side_effect=error):
+                with self.assertRaises(ValueError) as caught:
+                    module.download('https://private.invalid/value', Path('private-output'))
+            self.assertEqual(module.failure_code(caught.exception), 'inspected-desktop-download-' + code)
+        with patch.object(module.subprocess, 'run', side_effect=subprocess.TimeoutExpired('PRIVATE', 190)):
+            with self.assertRaises(ValueError) as caught:
+                module.download('https://private.invalid/value', Path('private-output'))
+        self.assertEqual(module.failure_code(caught.exception), 'inspected-desktop-download-timeout')
+        self.assertEqual(module.failure_code(ValueError('PRIVATE')), 'inspected-desktop-freeze-manifest')
+        self.assertEqual(module.failure_code(OSError('PRIVATE')), 'inspected-desktop-freeze-local-io')
+
     def test_all_platform_manifests_match_existing_install_contract(self):
         for platform in ('linux', 'macos', 'windows'):
             value = module.manifest(platform)
