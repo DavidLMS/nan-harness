@@ -225,6 +225,89 @@ class SpotlightAuxiliaryContractTests(unittest.TestCase):
                 q.spotlight_auxiliary(rejected | dict(toastAnnouncerCount=count), 'windows')
 
 
+class CodexRetryRefusalContractTests(unittest.TestCase):
+    @staticmethod
+    def sample(owned=9, tested=9):
+        return dict(blocked=None, ownedHitCount=owned, testedViewportCount=tested)
+
+    @classmethod
+    def refusal(cls):
+        return dict(reason='guard-rejected', remainingMs=0,
+                    first=cls.sample(), second=cls.sample(), final=None)
+
+    @staticmethod
+    def record():
+        return dict(schemaVersion=1, mechanism='codex-renderer-qualification', diagnosticsOnly=True,
+            endpointOwned=True, targetVerified=True, attached=True, bindingVerified=True,
+            auxiliaryInert=True, codingComposerReady=True, uniqueComposer=True,
+            inputReadback=False, inputSubmitted=False, userTurnObserved=False,
+            responseVerified=False, errorObserved=False, retryControl=True,
+            retryAttempted=False, retryCompleted=False, providerResponseVerified=False,
+            assistantTurnCount=0, providerGenerationCount=4, errorCategory='action-uncertain',
+            retryClickPhase='sample-second')
+
+    def test_retry_refusal_is_optional_and_does_not_certify_a_delivered_action(self):
+        base = self.record()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'fact.json'
+            for value in [base, base | dict(retryClickRefusal=self.refusal())]:
+                path.write_text(json.dumps(value))
+                self.assertEqual(q.semantic_observations(tmp, 'chatgpt-desktop', 'windows'), [value])
+                self.assertFalse(value['retryAttempted'])
+            for change in [dict(errorCategory=None), dict(retryControl=False),
+                           dict(retryAttempted=True, retryCompleted=True), dict(retryClickPhase='complete')]:
+                path.write_text(json.dumps(base | dict(retryClickRefusal=self.refusal()) | change))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(tmp, 'chatgpt-desktop', 'windows')
+
+    def test_retry_samples_reject_private_untyped_and_impossible_hit_counts(self):
+        for sample in [self.sample() | change for change in [dict(rect=[0, 0, 1, 1]),
+                dict(blocked='PRIVATE'), dict(ownedHitCount=True), dict(testedViewportCount=True),
+                dict(ownedHitCount=10), dict(testedViewportCount=-1), dict(ownedHitCount=2, testedViewportCount=1),
+                dict(blocked='hidden')]] + [[], {}, True]:
+            with self.assertRaises(ValueError):
+                q.codex_retry_click_refusal(self.refusal() | dict(second=sample), 'sample-second')
+        for reason in ['unsupported-control', 'detached-or-inert', 'disabled', 'hidden',
+                       'foreign-overlay', 'pointer-disabled', 'ancestor-limit']:
+            blocked = dict(blocked=reason, ownedHitCount=None, testedViewportCount=None)
+            q.codex_retry_click_refusal(self.refusal() | dict(reason='sample-blocked', second=blocked), 'sample-second')
+
+    def test_retry_refusal_reasons_match_the_exact_phase_and_failed_predicate(self):
+        for reason, phase in [('guard-rejected', 'sample-second'), ('deadline', 'sample-final'),
+                             ('control-count', 'admission'), ('control-disabled', 'revalidate'),
+                             ('missing-handle', 'capture'), ('control-replaced', 'revalidate'),
+                             ('stationary-hit-changed', 'sample-second'),
+                             ('final-sample-changed', 'sample-final'), ('final-point-lost', 'sample-final')]:
+            q.codex_retry_click_refusal(self.refusal() | dict(reason=reason), phase)
+        for reason, name in [('first-hit-missing', 'first'), ('second-hit-missing', 'second')]:
+            q.codex_retry_click_refusal(self.refusal() | {'reason': reason, name: self.sample(0, 9)}, 'sample-second')
+            with self.assertRaises(ValueError):
+                q.codex_retry_click_refusal(self.refusal() | dict(reason=reason), 'sample-second')
+        for change in [dict(reason='PRIVATE'), dict(remainingMs=True), dict(remainingMs=-1),
+                       dict(remainingMs=600001), dict(reason='deadline', remainingMs=1),
+                       dict(reason='sample-blocked'), dict(rawError='PRIVATE')]:
+            with self.assertRaises(ValueError):
+                q.codex_retry_click_refusal(self.refusal() | change, 'sample-second')
+
+    def test_cached_spotlight_receipt_is_only_available_for_a_guard_refusal(self):
+        base = self.record() | dict(retryClickRefusal=self.refusal())
+        witness = SpotlightAuxiliaryContractTests.observation() | dict(toastAnnouncerCount=1)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'fact.json'
+            for observation in [witness, witness | dict(status='rejected', failure='deadline')]:
+                value = base | dict(retryGuardSpotlight=observation)
+                path.write_text(json.dumps(value))
+                self.assertEqual(q.semantic_observations(tmp, 'chatgpt-desktop', 'windows'), [value])
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(tmp, 'chatgpt-desktop', 'linux')
+            for value in [self.record() | dict(retryGuardSpotlight=witness),
+                          base | dict(retryClickRefusal=self.refusal() | dict(reason='deadline'),
+                                      retryGuardSpotlight=witness)]:
+                path.write_text(json.dumps(value))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(tmp, 'chatgpt-desktop', 'windows')
+
+
 class RendererCheckpointTests(unittest.TestCase):
     def test_unknown_auxiliary_shape_is_closed_and_bound_to_its_refused_read(self):
         shape = dict(protocolKind='app', ownedAppHost=True, entryKind='index',

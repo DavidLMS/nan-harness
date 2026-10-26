@@ -427,6 +427,48 @@ def spotlight_auxiliary(value, platform):
             raise ValueError('invalid closed Spotlight toast announcer count')
 
 
+def codex_retry_click_refusal(value, phase):
+    phases = {
+        'guard-rejected': {'admission', 'revalidate', 'sample-second', 'sample-final', 'post-guard'},
+        'deadline': {'admission', 'revalidate', 'sample-second', 'sample-final', 'post-guard'},
+        'control-count': {'admission', 'revalidate'},
+        'control-disabled': {'admission', 'revalidate'},
+        'missing-handle': {'capture'}, 'control-replaced': {'revalidate'},
+        'sample-blocked': {'sample-first', 'sample-second'},
+        'first-hit-missing': {'sample-second'}, 'second-hit-missing': {'sample-second'},
+        'stationary-hit-changed': {'sample-second'},
+        'final-sample-changed': {'sample-final'}, 'final-point-lost': {'sample-final'},
+    }
+    if (type(value) is not dict or set(value) != {'reason', 'remainingMs', 'first', 'second', 'final'}
+            or type(value['reason']) is not str or value['reason'] not in phases
+            or type(phase) is not str or phase not in phases[value['reason']]
+            or type(value['remainingMs']) is not int or not 0 <= value['remainingMs'] <= 600000
+            or value['reason'] == 'deadline' and value['remainingMs'] != 0):
+        raise ValueError('invalid closed Codex Retry refusal')
+    blocked = {'unsupported-control', 'detached-or-inert', 'disabled', 'hidden',
+               'foreign-overlay', 'pointer-disabled', 'ancestor-limit'}
+    for name in ('first', 'second', 'final'):
+        sample = value[name]
+        if sample is None:
+            continue
+        if (type(sample) is not dict or set(sample) != {'blocked', 'ownedHitCount', 'testedViewportCount'}
+                or sample['blocked'] is not None and (type(sample['blocked']) is not str
+                    or sample['blocked'] not in blocked)
+                or sample['blocked'] is not None and (sample['ownedHitCount'] is not None
+                    or sample['testedViewportCount'] is not None)
+                or sample['blocked'] is None and (type(sample['ownedHitCount']) is not int
+                    or type(sample['testedViewportCount']) is not int
+                    or not 0 <= sample['ownedHitCount'] <= sample['testedViewportCount'] <= 9)):
+            raise ValueError('invalid closed Codex Retry hit sample')
+    if value['reason'] == 'sample-blocked' and not any(
+            value[name] is not None and value[name]['blocked'] is not None for name in ('first', 'second')):
+        raise ValueError('missing blocked Codex Retry sample')
+    for reason, name in [('first-hit-missing', 'first'), ('second-hit-missing', 'second')]:
+        if value['reason'] == reason and (value[name] is None or value[name]['blocked'] is not None
+                or value[name]['ownedHitCount'] != 0):
+            raise ValueError('contradictory missing Codex Retry hit')
+
+
 def codex_unknown_route_shapes(shapes, routes):
     if (type(shapes) is not dict or set(shapes) != {'initial', 'settle'}
             or not any(routes[key + 'Route'] == 'unknown' for key in shapes)):
@@ -2902,7 +2944,9 @@ def semantic_observations(directory, app, platform=None):
             flags = set('endpointOwned targetVerified attached bindingVerified auxiliaryInert codingComposerReady uniqueComposer inputReadback inputSubmitted userTurnObserved responseVerified errorObserved retryControl retryAttempted retryCompleted providerResponseVerified'.split())
             fields = flags | set('schemaVersion mechanism diagnosticsOnly assistantTurnCount providerGenerationCount errorCategory'.split())
             errors = {None, 'ownership-lost', 'composer-unavailable', 'stale-turn', 'input-mismatch', 'action-uncertain', 'retry-unavailable', 'response-timeout', 'query-failed', 'invalid-request'}
-            if (app != 'chatgpt-desktop' or set(value) - {'preAttachFailure', 'composerAdmissionFailure', 'composerReadinessObservation', 'retryClickPhase'} != fields or value['diagnosticsOnly'] is not True
+            optional = {'preAttachFailure', 'composerAdmissionFailure', 'composerReadinessObservation',
+                        'retryClickPhase', 'retryClickRefusal', 'retryGuardSpotlight'}
+            if (app != 'chatgpt-desktop' or set(value) - optional != fields or value['diagnosticsOnly'] is not True
                     or any(type(value[key]) is not bool for key in flags)
                     or type(value['assistantTurnCount']) is not int or not 0 <= value['assistantTurnCount'] <= 4096
                     or value['providerGenerationCount'] is not None and (type(value['providerGenerationCount']) is not int or not 0 <= value['providerGenerationCount'] <= 4096)
@@ -2914,6 +2958,16 @@ def semantic_observations(directory, app, platform=None):
             if 'retryClickPhase' in value:
                 enum(record, value, 'retryClickPhase', {'admission','capture','sample-first',
                      'revalidate','sample-second','sample-final','dispatch','post-guard','complete'})
+            if 'retryClickRefusal' in value:
+                if value['errorCategory'] != 'action-uncertain' or not value['retryControl'] or value['retryCompleted']:
+                    raise ValueError('unexpected Codex Retry refusal')
+                codex_retry_click_refusal(value['retryClickRefusal'], value.get('retryClickPhase'))
+                record['retryClickRefusal'] = value['retryClickRefusal']
+            if 'retryGuardSpotlight' in value:
+                if value.get('retryClickRefusal', {}).get('reason') != 'guard-rejected':
+                    raise ValueError('unexpected Codex Retry guard observation')
+                spotlight_auxiliary(value['retryGuardSpotlight'], platform)
+                record['retryGuardSpotlight'] = value['retryGuardSpotlight']
             if 'preAttachFailure' in value:
                 if value['errorCategory'] != 'invalid-request' or value['attached']:
                     raise ValueError('unexpected Codex preattach failure')

@@ -122,55 +122,85 @@ function sampleEditor(control,kind='editor') {
     if(++depth>64)return blocked('ancestor-limit');
     if(!e.isConnected||e.ownerDocument!==document)return blocked('detached-or-inert');
   }
-  const r=control.getBoundingClientRect(),points=[];
+  const r=control.getBoundingClientRect(),points=[];let testedViewportCount=0;
   for(const fy of [0.25,0.5,0.75])for(const fx of [0.25,0.5,0.75]) {
     const x=r.left+control.clientLeft+control.clientWidth*fx;
     const y=r.top+control.clientTop+control.clientHeight*fy;
     if(x<0||y<0||x>=innerWidth||y>=innerHeight)continue;
+    testedViewportCount++;
     const front=document.elementFromPoint(x,y);
     if(front===control||control.contains(front))points.push({x:x-r.left-control.clientLeft,y:y-r.top-control.clientTop});
   }
-  return {rect:[r.left,r.top,r.width,r.height],points};
+  return {rect:[r.left,r.top,r.width,r.height],points,testedViewportCount};
 }
 
-async function ordinaryClick(locator,guard,deadline,attempt,after=guard,observe=()=>{}) {
+async function ordinaryClick(locator,guard,deadline,attempt,after=guard,observe=()=>{},observeRefusal=()=>{}) {
   const phase=value=>{try {observe(value);}catch {}};
+  let firstSample=null,secondSample=null,finalSample=null;
+  const sampleFact=value=>{
+    try {
+      if(!value)return null;
+      if(['unsupported-control','detached-or-inert','disabled','hidden','foreign-overlay','pointer-disabled','ancestor-limit'].includes(value.blocked))
+        return {blocked:value.blocked,ownedHitCount:null,testedViewportCount:null};
+      const tested=value.testedViewportCount,owned=value.points?.length;
+      if(value.blocked||!Number.isInteger(tested)||tested<0||tested>9||!Number.isInteger(owned)||owned<0||owned>tested)return null;
+      return {blocked:null,ownedHitCount:owned,testedViewportCount:tested};
+    } catch {return null;}
+  };
+  const refuse=reason=>{
+    try {observeRefusal({reason,remainingMs:reason==='deadline'?0:Math.max(0,Math.min(600000,Math.floor(deadline-Date.now()))),
+      first:sampleFact(firstSample),second:sampleFact(secondSample),final:sampleFact(finalSample)});}catch {}
+    return false;
+  };
   phase('admission');
-  if(!await guard()||Date.now()>=deadline||await locator.count()!==1||!await locator.isEnabled())return false;
+  if(!await guard())return refuse('guard-rejected');
+  if(Date.now()>=deadline)return refuse('deadline');
+  if(await locator.count()!==1)return refuse('control-count');
+  if(!await locator.isEnabled())return refuse('control-disabled');
   phase('capture');
-  const handle=await locator.elementHandle();if(!handle)return false;
+  const handle=await locator.elementHandle();if(!handle)return refuse('missing-handle');
   try {
     phase('sample-first');
-    let first=await handle.evaluate(sampleEditor,'button');if(first.blocked)return false;
+    let first=await handle.evaluate(sampleEditor,'button');firstSample=first;
+    if(first.blocked)return refuse('sample-blocked');
     let point;
     while(!point) {
       await pause(Math.min(100,Math.max(0,deadline-Date.now())));
       phase('revalidate');
-      if(!await guard()||Date.now()>=deadline||await locator.count()!==1
-          ||!await locator.isEnabled()||!await locator.evaluate((e,held)=>e===held,handle))return false;
+      if(!await guard())return refuse('guard-rejected');
+      if(Date.now()>=deadline)return refuse('deadline');
+      if(await locator.count()!==1)return refuse('control-count');
+      if(!await locator.isEnabled())return refuse('control-disabled');
+      if(!await locator.evaluate((e,held)=>e===held,handle))return refuse('control-replaced');
       phase('sample-second');
-      const second=await handle.evaluate(sampleEditor,'button');
+      const second=await handle.evaluate(sampleEditor,'button');secondSample=second;
       point=candidate(first,second);
       if(point)break;
       // A retained button may move while its transcript row settles. Only
       // geometry changes with owned hit points may wait; replacement, overlays
       // and lost hit authority remain terminal. No input has been attempted.
-      if(second.blocked||!first.points.length||!second.points.length
-          ||JSON.stringify(first.rect)===JSON.stringify(second.rect))return false;
-      first=second;
+      if(second.blocked)return refuse('sample-blocked');
+      if(!first.points.length)return refuse('first-hit-missing');
+      if(!second.points.length)return refuse('second-hit-missing');
+      if(JSON.stringify(first.rect)===JSON.stringify(second.rect))return refuse('stationary-hit-changed');
+      first=second;firstSample=first;secondSample=null;
     }
-    if(!await guard()||Date.now()>=deadline)return false;
+    if(!await guard())return refuse('guard-rejected');
+    if(Date.now()>=deadline)return refuse('deadline');
     phase('sample-final');
-    const final=await handle.evaluate(sampleEditor,'button');
-    if(!candidate(first,final)||!final.points.some(p=>p.x===point.x&&p.y===point.y))return false;
-    if(!await guard()||Date.now()>=deadline)return false;
+    const final=await handle.evaluate(sampleEditor,'button');finalSample=final;
+    if(!candidate(first,final))return refuse('final-sample-changed');
+    if(!final.points.some(p=>p.x===point.x&&p.y===point.y))return refuse('final-point-lost');
+    if(!await guard())return refuse('guard-rejected');
+    if(Date.now()>=deadline)return refuse('deadline');
     phase('dispatch');
     await attempt();
     // The response loop owns transition verification. Do not let Playwright's
     // implicit post-click navigation wait obscure a delivered single action.
     await handle.click({noWaitAfter:true,position:point,timeout:Math.max(1,Math.min(2000,deadline-Date.now()))});
     phase('post-guard');
-    if(!await after()||Date.now()>=deadline)return false;
+    if(!await after())return refuse('guard-rejected');
+    if(Date.now()>=deadline)return refuse('deadline');
     phase('complete');return true;
   } finally {await handle.dispose();}
 }
@@ -197,7 +227,7 @@ function homeComposerScope() {
       ||e.getAttribute('aria-modal')==='true'||e.getAttribute('data-thread-find-target')==='conversation');
 }
 
-async function runTurn(page,guard,request,deadline=Date.now()+request.timeoutMs,releaseRecovery=async()=>{throw Error('recovery barrier required');}) {
+async function runTurn(page,guard,request,deadline=Date.now()+request.timeoutMs,releaseRecovery=async()=>{throw Error('recovery barrier required');},guardSpotlight=()=>null) {
   const facts={schemaVersion:1,mechanism:'codex-renderer-qualification',diagnosticsOnly:true,
     endpointOwned:false,targetVerified:false,attached:true,bindingVerified:false,auxiliaryInert:false,
     codingComposerReady:false,uniqueComposer:false,inputReadback:false,inputSubmitted:false,
@@ -301,7 +331,12 @@ async function runTurn(page,guard,request,deadline=Date.now()+request.timeoutMs,
       if(!await ordinaryClick(retry,targetOwned,deadline,async()=>{
         await releaseRecovery(deadline,targetOwned);
         facts.retryAttempted=true;
-      },retryOwned,phase=>{facts.retryClickPhase=phase;}))return stop('action-uncertain');
+      },retryOwned,phase=>{facts.retryClickPhase=phase;},refusal=>{
+        facts.retryClickRefusal=refusal;
+        if(refusal.reason==='guard-rejected') {
+          try {const cached=guardSpotlight();if(cached)facts.retryGuardSpotlight=cached;}catch {}
+        }
+      }))return stop('action-uncertain');
       facts.retryCompleted=true;
     }
     while(Date.now()<deadline) {
@@ -499,7 +534,7 @@ async function main() {
       spotlight=require('./codex-spotlight.cjs').create({deadline});
     const page=await bindRecordedMain(browser,binding,owner,deadline,pageIdentity,directCDP,spotlight);
     if(!page)throw Error('main');
-    facts=await runTurn(page,async until=>await bindRecordedMain(browser,binding,owner,until,pageIdentity,directCDP,spotlight)===page,request,deadline,(until,guard)=>require('./codex-recovery-barrier.cjs').release(process.argv[3],until,guard));
+    facts=await runTurn(page,async until=>await bindRecordedMain(browser,binding,owner,until,pageIdentity,directCDP,spotlight)===page,request,deadline,(until,guard)=>require('./codex-recovery-barrier.cjs').release(process.argv[3],until,guard),()=>spotlight?.receipt()??null);
   } catch {
     if(facts.errorCategory==='invalid-request')facts.preAttachFailure=preAttachFailure;
     if(facts.errorCategory===null)facts.errorCategory='query-failed';
