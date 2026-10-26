@@ -179,6 +179,15 @@ validation rejects contradictory facts. Reassess if this wire schema gains
 another boolean or starts encoding action states. The scoped `expect` preserves
 the external contract and does not waive privacy, validation or other gates.
 
+`RetryScopeObservation` in
+`crates/nan-harness-desktop-check/src/gui/dom_probe.rs` contains twelve boolean
+fields, above the same threshold of three. These independent DOM identity and
+connectivity observations form a closed diagnostic matrix; they grant no input
+capability, and validation rejects contradictions or a mismatched refusal.
+Keep the direct wire fields rather than hiding their names in a map or splitting
+one atomic observation. Reassess if another witness or action state is added.
+The scoped `expect` does not waive privacy, validation or behavioral tests.
+
 `run_node_native_plugins` in
 `crates/nan-harness-cli/src/commands/configuration/tests/plugin_syntax.rs` has
 102 lines, mostly a three-entry table of generated JavaScript fixtures. Keep

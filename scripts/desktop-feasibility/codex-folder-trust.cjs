@@ -1,6 +1,7 @@
 'use strict';
 const fs=require('node:fs');
 const path=require('node:path');
+const unknownRoutes=require('./codex-unknown-route-shapes.cjs');
 function authority(ownedWorkspace, io=fs, platform=process.platform) {
   let fd;
   const paths=platform==='win32'?path.win32:path.posix;
@@ -101,11 +102,32 @@ async function run(page,guard,deadline,authority,seal=()=>{},progress=()=>{}) {
     checkpoint('authority-before');
     if(await authority.verify()!==true)return reject('authority');
     checkpoint('guard');
-    if(await guard()!==true) {
+    const guarded=await guard();
+    try {const spotlight=guard.spotlightAuxiliary?.();if(spotlight)receipt.spotlightAuxiliary=spotlight;}catch {}
+    if(guarded!==true) {
       const failure=typeof guard.failure==='function'?guard.failure():null;
       if(['deadline','native-ownership','page-set','main-identity','main-focus','main-scope',
         'auxiliary-route','auxiliary-identity','auxiliary-focus','auxiliary-controls','query-failed','unmeasured'].includes(failure))
         receipt.guardFailure=failure;
+      if(failure==='auxiliary-route'&&typeof guard.auxiliaryRouteFailure==='function') {
+        try {
+          const detail=guard.auxiliaryRouteFailure();
+          const routes=['blank','avatarOverlay','hotkeyWindow','quickChat','quickChatPrewarm',
+            'globalDictation','debug','detachedWindow','spotlight','unknown'];
+          if(detail&&Object.keys(detail).sort().join(',')==='initialRoute,samePage,settleRoute'
+            &&detail.initialRoute!=='avatarOverlay'&&routes.includes(detail.initialRoute)
+            &&(detail.settleRoute===null?detail.samePage===null:
+              routes.includes(detail.settleRoute)&&typeof detail.samePage==='boolean'))
+            receipt.auxiliaryRouteFailure={...detail};
+        } catch { /* Diagnostic failure never changes the retained guard refusal. */ }
+      }
+      if(receipt.auxiliaryRouteFailure&&typeof guard.unknownRouteShapes==='function') {
+        try {
+          const shapes=guard.unknownRouteShapes();
+          if(unknownRoutes.validPair(shapes,receipt.auxiliaryRouteFailure))
+            receipt.unknownRouteShapes=unknownRoutes.copyPair(shapes);
+        } catch { /* Closed diagnostics are advisory; the guard still refuses. */ }
+      }
       return reject('guard');
     }
     if(Date.now()>=deadline)return reject('deadline');

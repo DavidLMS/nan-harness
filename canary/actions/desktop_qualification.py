@@ -345,8 +345,8 @@ def public_mac_codex_home_state(value):
     return value
 
 
-def folder_trust_observation(trust):
-    if (type(trust) is not dict or set(trust) - {'rejectionStage','guardFailure'} != {'status', 'clickAttempted', 'clickCompleted'}
+def folder_trust_observation(trust, *, platform=None):
+    if (type(trust) is not dict or set(trust) - {'rejectionStage','guardFailure','auxiliaryRouteFailure','unknownRouteShapes','spotlightAuxiliary'} != {'status', 'clickAttempted', 'clickCompleted'}
             or type(trust['status']) is not str
             or trust['status'] not in {'absent', 'blocked', 'completed', 'action-uncertain'}
             or type(trust['clickAttempted']) is not bool or type(trust['clickCompleted']) is not bool
@@ -370,6 +370,198 @@ def folder_trust_observation(trust):
                 'deadline','native-ownership','page-set','main-identity','main-focus','main-scope',
                 'auxiliary-route','auxiliary-identity','auxiliary-focus','auxiliary-controls','query-failed','unmeasured'}):
             raise ValueError('invalid folder trust guard failure')
+    if 'auxiliaryRouteFailure' in trust:
+        observation = trust['auxiliaryRouteFailure']
+        routes = {'blank', 'avatarOverlay', 'spotlight', 'hotkeyWindow', 'quickChat', 'quickChatPrewarm',
+                  'globalDictation', 'debug', 'detachedWindow', 'unknown'}
+        if (trust.get('guardFailure') != 'auxiliary-route'
+                or type(observation) is not dict
+                or set(observation) != {'initialRoute', 'settleRoute', 'samePage'}
+                or type(observation['initialRoute']) is not str
+                or observation['initialRoute'] not in routes - {'avatarOverlay'}
+                or observation['settleRoute'] is not None and (
+                    type(observation['settleRoute']) is not str or observation['settleRoute'] not in routes)
+                or (observation['settleRoute'] is None) != (observation['samePage'] is None)
+                or observation['samePage'] is not None and type(observation['samePage']) is not bool):
+            raise ValueError('invalid folder trust auxiliary route observation')
+    if 'unknownRouteShapes' in trust:
+        if 'auxiliaryRouteFailure' not in trust:
+            raise ValueError('missing folder trust route refusal')
+        codex_unknown_route_shapes(trust['unknownRouteShapes'], trust['auxiliaryRouteFailure'])
+    if 'spotlightAuxiliary' in trust:
+        spotlight_auxiliary(trust['spotlightAuxiliary'], platform)
+
+
+def spotlight_auxiliary(value, platform):
+    counts = {'inputCount', 'listCount', 'editableCount'}
+    fields = counts | {'sourceVersion', 'rendererSha256', 'status', 'failure', 'stableSamples'}
+    failures = {'main-focus', 'auxiliary-focus', 'initial-scope', 'scope-changed', 'source-open',
+                'source-transition', 'foreign-controls', 'identity', 'ownership', 'deadline', 'query'}
+    optional = {'rejectionCheck', 'controlKind', 'toastAnnouncerCount'}
+    if (platform != 'windows' or type(value) is not dict or set(value) - optional != fields
+            or value['sourceVersion'] != '26.1007.21434'
+            or value['rendererSha256'] != '2b78662247051c8b0905e1afbe0839187b8267e9181e179bc422322e4010433b'
+            or type(value['status']) is not str or value['status'] not in {'verified', 'rejected'}
+            or type(value['stableSamples']) is not int or not 0 <= value['stableSamples'] <= 2
+            or any(value[key] is not None and (type(value[key]) is not int or not 0 <= value[key] <= 4096)
+                   for key in counts)
+            or value['status'] == 'verified' and (value['failure'] is not None
+                or value['stableSamples'] != 2 or any(value[key] != 1 for key in counts))
+            or value['status'] == 'rejected' and (type(value['failure']) is not str
+                or value['failure'] not in failures)):
+        raise ValueError('invalid closed Spotlight auxiliary observation')
+    checks = {'body-anchor', 'body-style', 'initial-controls', 'forbidden-nodes',
+              'control-location', 'control-pointer', 'editable-scope', 'main-controls', 'toast-announcer'}
+    if 'rejectionCheck' in value and (value['status'] != 'rejected'
+            or value['failure'] != 'foreign-controls'
+            or type(value['rejectionCheck']) is not str or value['rejectionCheck'] not in checks):
+        raise ValueError('invalid closed Spotlight rejection check')
+    kinds = {'command', 'input', 'list', 'disabled-button', 'button', 'anchor', 'select', 'other', 'radix-focus-guard'}
+    if 'controlKind' in value and (value.get('rejectionCheck') not in {'control-location', 'control-pointer'}
+            or type(value['controlKind']) is not str or value['controlKind'] not in kinds):
+        raise ValueError('invalid closed Spotlight rejected control kind')
+    if 'toastAnnouncerCount' in value:
+        count = value['toastAnnouncerCount']
+        if (count is not None and (type(count) is not int or count not in {0, 1})
+                or value['status'] == 'verified' and count != 1):
+            raise ValueError('invalid closed Spotlight toast announcer count')
+
+
+def codex_retry_click_refusal(value, phase):
+    phases = {
+        'guard-rejected': {'admission', 'viewport-reveal', 'revalidate', 'sample-second', 'sample-final', 'post-guard'},
+        'deadline': {'admission', 'viewport-reveal', 'revalidate', 'sample-second', 'sample-final', 'post-guard'},
+        'control-count': {'admission', 'viewport-reveal', 'revalidate'},
+        'control-disabled': {'admission', 'viewport-reveal', 'revalidate'},
+        'missing-handle': {'capture'}, 'control-replaced': {'viewport-reveal', 'revalidate'},
+        'reveal-failed': {'viewport-reveal'},
+        'sample-blocked': {'sample-first', 'sample-second'},
+        'first-hit-missing': {'sample-second'}, 'second-hit-missing': {'sample-second'},
+        'stationary-hit-changed': {'sample-second'},
+        'final-sample-changed': {'sample-final'}, 'final-point-lost': {'sample-final'},
+    }
+    if (type(value) is not dict or set(value) != {'reason', 'remainingMs', 'first', 'second', 'final'}
+            or type(value['reason']) is not str or value['reason'] not in phases
+            or type(phase) is not str or phase not in phases[value['reason']]
+            or type(value['remainingMs']) is not int or not 0 <= value['remainingMs'] <= 600000
+            or value['reason'] == 'deadline' and value['remainingMs'] != 0):
+        raise ValueError('invalid closed Codex Retry refusal')
+    blocked = {'unsupported-control', 'detached-or-inert', 'disabled', 'hidden',
+               'foreign-overlay', 'pointer-disabled', 'ancestor-limit'}
+    for name in ('first', 'second', 'final'):
+        sample = value[name]
+        if sample is None:
+            continue
+        if (type(sample) is not dict or set(sample) != {'blocked', 'ownedHitCount', 'testedViewportCount'}
+                or sample['blocked'] is not None and (type(sample['blocked']) is not str
+                    or sample['blocked'] not in blocked)
+                or sample['blocked'] is not None and (sample['ownedHitCount'] is not None
+                    or sample['testedViewportCount'] is not None)
+                or sample['blocked'] is None and (type(sample['ownedHitCount']) is not int
+                    or type(sample['testedViewportCount']) is not int
+                    or not 0 <= sample['ownedHitCount'] <= sample['testedViewportCount'] <= 9)):
+            raise ValueError('invalid closed Codex Retry hit sample')
+    if value['reason'] == 'sample-blocked' and not any(
+            value[name] is not None and value[name]['blocked'] is not None for name in ('first', 'second')):
+        raise ValueError('missing blocked Codex Retry sample')
+    for reason, name in [('first-hit-missing', 'first'), ('second-hit-missing', 'second')]:
+        if value['reason'] == reason and (value[name] is None or value[name]['blocked'] is not None
+                or value[name]['ownedHitCount'] != 0):
+            raise ValueError('contradictory missing Codex Retry hit')
+
+
+def codex_unknown_route_shapes(shapes, routes):
+    if (type(shapes) is not dict or set(shapes) != {'initial', 'settle'}
+            or not any(routes[key + 'Route'] == 'unknown' for key in shapes)):
+        raise ValueError('invalid Codex unknown route shapes')
+    enums = {
+        'protocolKind': {'app', 'about', 'data', 'devtools', 'http', 'https', 'file', 'other', 'invalid'},
+        'entryKind': {'index', 'detachedWindow', 'other'},
+        'initialRouteKind': {'absent', 'multiple', 'avatarOverlay', 'detachedWindow', 'hotkeyWindow',
+                             'globalDictation', 'debug', 'spotlight', 'spacePrewarm', 'other'},
+        'queryShape': {'none', 'initialRouteOnly', 'initialRouteWithSandbox', 'other'},
+    }
+    invalid = dict(protocolKind='invalid', ownedAppHost=False, entryKind='other',
+                   initialRouteKind='absent', queryShape='other', fragmentPresent=False)
+    for phase, shape in shapes.items():
+        if routes[phase + 'Route'] != 'unknown':
+            if shape is not None:
+                raise ValueError('unexpected Codex known route shape')
+            continue
+        if (type(shape) is not dict or set(shape) != set(enums) | {'ownedAppHost', 'fragmentPresent'}
+                or any(type(shape[key]) is not str or shape[key] not in values for key, values in enums.items())
+                or any(type(shape[key]) is not bool for key in ('ownedAppHost', 'fragmentPresent'))
+                or shape['ownedAppHost'] and shape['protocolKind'] != 'app'
+                or shape['protocolKind'] == 'invalid' and shape != invalid
+                or shape['queryShape'] == 'none' and shape['initialRouteKind'] != 'absent'
+                or shape['queryShape'] in {'initialRouteOnly', 'initialRouteWithSandbox'}
+                    and shape['initialRouteKind'] in {'absent', 'multiple'}):
+            raise ValueError('invalid Codex unknown route shape')
+
+
+def windows_launcher_observation(value, app, platform):
+    fields = set('schemaVersion mechanism diagnosticsOnly app stage cause '
+                 'childStarted childExitCode osCode'.split())
+    before_child = {'real-binary', 'host-policy', 'port-bind', 'port-address', 'child-spawn'}
+    after_child = {'facts-root', 'connection-create', 'connection-write',
+                   'connection-sync', 'child-wait', 'child-exit'}
+    causes = {'not-found', 'permission-denied', 'already-exists', 'invalid-input',
+              'interrupted', 'timed-out', 'address-in-use', 'address-not-available',
+              'other', 'child-nonzero'}
+    if (platform != 'windows' or app not in {'hermes-desktop', 'chatgpt-desktop', 'claude-desktop', 'pen-desktop'}
+            or type(value) is not dict or set(value) != fields
+            or type(value['schemaVersion']) is not int or value['schemaVersion'] != 1
+            or value['mechanism'] != 'windows-launcher' or value['diagnosticsOnly'] is not True
+            or value['app'] != app or type(value['stage']) is not str
+            or value['stage'] not in before_child | after_child
+            or type(value['cause']) is not str or value['cause'] not in causes
+            or type(value['childStarted']) is not bool
+            or value['childStarted'] != (value['stage'] in after_child)):
+        raise ValueError('invalid Windows launcher diagnostic')
+    for key in ('childExitCode', 'osCode'):
+        if value[key] is not None and (type(value[key]) is not int or not -(2 ** 31) <= value[key] < 2 ** 31):
+            raise ValueError('invalid Windows launcher code')
+    exited = value['stage'] == 'child-exit'
+    if (exited and (value['cause'] != 'child-nonzero' or value['childExitCode'] in {None, 0}
+                   or value['osCode'] is not None)
+            or not exited and (value['cause'] == 'child-nonzero' or value['childExitCode'] is not None)):
+        raise ValueError('inconsistent Windows launcher exit')
+    return dict(value)
+
+
+def hermes_retry_scope_observation(value, failure):
+    flags = set('documentSame currentPairPresent currentPairSame currentPairConnected '
+                'heldPairConnected currentGroupSame heldGroupConnected currentUserSame '
+                'heldUserConnected currentAlertSame heldAlertConnected heldRetryConnected'.split())
+    phases = set('initial-reproof initial-stability sampling sampling-remount '
+                 'onboarding-readiness command-readiness final-reproof final-remount'.split())
+    if (type(value) is not dict or set(value) != flags | {'phase', 'currentUserCount'}
+            or type(value['phase']) is not str or value['phase'] not in phases
+            or any(type(value[key]) is not bool for key in flags)
+            or type(value['currentUserCount']) is not int or not 0 <= value['currentUserCount'] <= 2):
+        raise ValueError('invalid Hermes retry scope observation')
+    if not value['documentSame']:
+        reason = 'document-changed'
+    elif not value['currentPairSame'] or not value['currentPairConnected']:
+        reason = 'pair-changed'
+    elif value['currentUserCount'] != 1 or not value['currentUserSame'] or not value['heldUserConnected']:
+        reason = 'user-changed'
+    elif not value['currentAlertSame'] or not value['heldAlertConnected']:
+        reason = 'alert-changed'
+    else:
+        raise ValueError('Hermes retry scope observation has no refusal')
+    if (failure != reason
+            or not value['currentPairPresent'] and (any(value[key] for key in (
+                'currentPairSame', 'currentPairConnected', 'currentGroupSame', 'currentUserSame'))
+                or value['currentUserCount'] != 0)
+            or value['currentPairSame'] and value['currentPairConnected'] != value['heldPairConnected']
+            or value['currentGroupSame'] and value['currentPairConnected'] != value['heldGroupConnected']
+            or value['currentUserSame'] and value['currentUserCount'] != 1
+            or value['currentUserSame'] and value['currentPairConnected'] != value['heldUserConnected']
+            or value['currentAlertSame'] and value['currentPairPresent']
+                and value['currentPairConnected'] != value['heldAlertConnected']):
+        raise ValueError('inconsistent Hermes retry scope observation')
+    return dict(value)
 
 
 def codex_fresh_home_proof(value):
@@ -706,7 +898,7 @@ def public_onboarding(setup, app, *, platform=None, initial_confirmation=None):
     if 'taskScopeObservation' in setup:
         task_scope_observation(setup['taskScopeObservation'])
     if 'folderTrust' in setup:
-        folder_trust_observation(setup['folderTrust'])
+        folder_trust_observation(setup['folderTrust'], platform=platform)
     if 'mainGuardFailure' in setup:
         failure = setup['mainGuardFailure']
         if (type(failure) is not str or failure not in {
@@ -746,10 +938,11 @@ def public_onboarding(setup, app, *, platform=None, initial_confirmation=None):
                     or (source['status'] == 'unavailable' and set(source) != {'status'})
                     or (source['status'] == 'complete' and (
                         set(source) != {'status', 'routes', 'visibility'}
-                        or any(type(source.get(key)) is not dict or set(source[key]) != fields
+                        or any(type(source.get(key)) is not dict or set(source[key]) not in allowed
                                or any(type(count) is not int or not 0 <= count <= 32 for count in source[key].values())
                                or sum(source[key].values()) != inventory['total']
-                               for key, fields in (('routes', routes), ('visibility', visibility)))))):
+                               for key, allowed in (('routes', (routes, routes | {'spotlight'})),
+                                                    ('visibility', (visibility,))))))):
                 raise ValueError('invalid rejected renderer source inventory')
     if 'taskScopeProved' in setup:
         if type(setup['taskScopeProved']) is not bool:
@@ -984,13 +1177,68 @@ def validate_occlusion_profile(item):
         raise ValueError('invalid occluding hitbox')
 
 
+def semantic_fact_paths(directory, app, platform):
+    """Read one controlled run root and its three exact Windows probe roots."""
+    scoped = platform == 'windows' and app in APPS and app != 'zed-desktop'
+    if not scoped:
+        return sorted(directory.glob('*.json'))
+    names = {f'{app}-deterministic-{index}' for index in range(3)}
+    paths = []
+    entries = 0
+    controls = 0
+    def native_control(entry):
+        nonlocal controls
+        if app != 'chatgpt-desktop' or not re.fullmatch(r'codex-restart-[A-Za-z0-9]{6}', entry.name):
+            return False
+        controls += 1
+        if controls > 3:
+            raise ValueError('too many native control directories')
+        return True
+    for entry in directory.iterdir():
+        entries += 1
+        if entries > 1024:
+            raise ValueError('too many semantic directory entries')
+        if (entry.is_symlink() or getattr(entry, 'is_junction', lambda: False)()
+                or getattr(entry.lstat(), 'st_file_attributes', 0) & 0x400):
+            raise ValueError('semantic namespace links are forbidden')
+        if entry.is_dir():
+            if native_control(entry):
+                continue
+            if entry.name not in names:
+                raise ValueError('unknown semantic probe namespace')
+            for child in entry.iterdir():
+                entries += 1
+                if entries > 1024:
+                    raise ValueError('too many semantic directory entries')
+                if (child.is_symlink()
+                        or getattr(child, 'is_junction', lambda: False)()
+                        or getattr(child.lstat(), 'st_file_attributes', 0) & 0x400):
+                    raise ValueError('invalid semantic probe entry')
+                if child.is_dir():
+                    # OwnedRestart keeps its private native handoff here. A
+                    # terminated CLI may leave it behind; its contents are never
+                    # evidence and must never be traversed or published.
+                    if native_control(child):
+                        continue
+                    raise ValueError('invalid semantic probe entry')
+                if not child.is_file():
+                    raise ValueError('invalid semantic probe entry')
+                if child.suffix == '.json':
+                    if child.name == 'native-diagnostics.json':
+                        raise ValueError('native diagnostic bundle belongs to the run root')
+                    paths.append(child)
+        elif entry.suffix == '.json':
+            paths.append(entry)
+    return sorted(paths)
+
+
 def semantic_observations(directory, app, platform=None):
     if directory is None:
         return []
     directory = Path(directory)
     if directory.is_symlink() or not directory.is_dir():
         raise ValueError('semantic facts directory is invalid')
-    all_paths = sorted(directory.glob('*.json'))
+    all_paths = semantic_fact_paths(directory, app, platform)
     private = [path for path in all_paths if path.name.startswith(('connection-', 'startup-', 'closed-startup-'))]
     # Three fresh profiles produce connection/startup metadata. Bound those
     # separately so they cannot consume or bypass the closed-record budget.
@@ -1032,10 +1280,10 @@ def semantic_observations(directory, app, platform=None):
         if type(value) is not dict:
             raise ValueError('invalid semantic observation')
         mechanism = value.get('mechanism')
-        if mechanism not in {'renderer-inventory-failure', 'codex-renderer-qualification', 'qualification-runner-failure', 'qualification-reduction-failure', 'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-atspi-retry', 'windows-foreground-session', 'zed-retry-entry-counts', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'codex-static-dialog-title', 'codex-linux-startup-dialog', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'windows-process-correlation', 'windows-owned-descendant-cleanup', 'windows-owned-cleanup-preflight', 'windows-owned-cleanup-preflight-progress', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-cli-prelaunch', 'claude-config-persist-owners', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-native-chat', 'claude-windows-native-chat', 'claude-linux-native-chat', 'claude-initial-window-rejection','claude-window-fit', 'claude-windows-fit', 'claude-windows-uia', 'claude-windows-fit-rejection', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-windows-profile-seal', 'codex-windows-profile-prepare', 'claude-native-composer', 'claude-linux-mode-roles', 'claude-linux-classic-visibility', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
+        if mechanism not in {'renderer-inventory-failure', 'codex-renderer-qualification', 'qualification-runner-failure', 'qualification-reduction-failure', 'windows-launcher', 'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-atspi-retry', 'windows-foreground-session', 'zed-retry-entry-counts', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'codex-static-dialog-title', 'codex-linux-startup-dialog', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'windows-process-correlation', 'windows-owned-descendant-cleanup', 'windows-owned-cleanup-preflight', 'windows-owned-cleanup-preflight-progress', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-cli-prelaunch', 'claude-config-persist-owners', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-native-chat', 'claude-windows-native-chat', 'claude-linux-native-chat', 'claude-initial-window-rejection','claude-window-fit', 'claude-windows-fit', 'claude-windows-uia', 'claude-windows-fit-rejection', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-windows-profile-seal', 'codex-windows-profile-prepare', 'claude-native-composer', 'claude-linux-mode-roles', 'claude-linux-classic-visibility', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
             continue
         expected = 'hermes-renderer-qualification' if app == 'hermes-desktop' else 'zed-native-copy'
-        if (mechanism != expected and mechanism not in {'renderer-inventory-failure', 'codex-renderer-qualification', 'qualification-runner-failure', 'qualification-reduction-failure', 'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-atspi-retry', 'windows-foreground-session', 'zed-retry-entry-counts', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'codex-static-dialog-title', 'codex-linux-startup-dialog', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'windows-process-correlation', 'windows-owned-descendant-cleanup', 'windows-owned-cleanup-preflight', 'windows-owned-cleanup-preflight-progress', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-cli-prelaunch', 'claude-config-persist-owners', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-native-chat', 'claude-windows-native-chat', 'claude-linux-native-chat', 'claude-initial-window-rejection','claude-window-fit', 'claude-windows-fit', 'claude-windows-uia', 'claude-windows-fit-rejection', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-windows-profile-seal', 'codex-windows-profile-prepare', 'claude-native-composer', 'claude-linux-mode-roles', 'claude-linux-classic-visibility', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
+        if (mechanism != expected and mechanism not in {'renderer-inventory-failure', 'codex-renderer-qualification', 'qualification-runner-failure', 'qualification-reduction-failure', 'windows-launcher', 'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-atspi-retry', 'windows-foreground-session', 'zed-retry-entry-counts', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'codex-static-dialog-title', 'codex-linux-startup-dialog', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'windows-process-correlation', 'windows-owned-descendant-cleanup', 'windows-owned-cleanup-preflight', 'windows-owned-cleanup-preflight-progress', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-cli-prelaunch', 'claude-config-persist-owners', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-native-chat', 'claude-windows-native-chat', 'claude-linux-native-chat', 'claude-initial-window-rejection','claude-window-fit', 'claude-windows-fit', 'claude-windows-uia', 'claude-windows-fit-rejection', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-windows-profile-seal', 'codex-windows-profile-prepare', 'claude-native-composer', 'claude-linux-mode-roles', 'claude-linux-classic-visibility', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
             raise ValueError('semantic observation identity differs')
         record = {'schemaVersion': 1, 'mechanism': mechanism}
         if mechanism == 'codex-project-preflight':
@@ -1046,12 +1294,15 @@ def semantic_observations(directory, app, platform=None):
                         'profile-binding', 'fixture', 'executable-hash'}):
                 raise ValueError('invalid Codex project preflight')
             record.update(diagnosticsOnly=True, stage=value['stage'])
+        elif mechanism == 'windows-launcher':
+            record = windows_launcher_observation(value, app, platform)
         elif mechanism == 'hermes-windows-catalog-readiness':
             booleans = {'menuOpened', 'refreshAttempted', 'catalogVerified', 'modelRowVerified',
                         'menuDismissed', 'composerReverified'}
             fields = booleans | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'stage', 'errorCategory'}
             diagnostics = {'composerObservation', 'guardFailure'}
-            optional = {'actionObservation', 'onboardingSkipped', 'onboardingObservation', 'queryFailure', 'frameTransitionWaited', 'catalogState'}
+            optional = {'actionObservation', 'onboardingSkipped', 'onboardingObservation', 'queryFailure',
+                        'frameTransitionWaited', 'catalogState', 'clickFailure'}
             stages = {'policy', 'onboarding', 'menu', 'refresh', 'catalog', 'dismiss', 'composer', 'ready'}
             errors = {None, 'policy-rejected', 'onboarding-unavailable', 'menu-unavailable', 'refresh-uncertain',
                       'catalog-unavailable', 'dismiss-uncertain', 'composer-changed', 'composer-unavailable'}
@@ -1112,6 +1363,36 @@ def semantic_observations(directory, app, platform=None):
                             'unmeasured', 'none', 'onboarding', 'modal', 'other'}):
                     raise ValueError('invalid Hermes action observation')
                 record['actionObservation'] = action
+            if 'clickFailure' in value:
+                failure = value['clickFailure']
+                timing = {'budgetMs', 'remainingBeforeMs', 'elapsedMs', 'remainingAfterMs'}
+                action = value.get('actionObservation', {})
+                if (value['stage'] != 'menu' or value['errorCategory'] != 'menu-unavailable'
+                        or action.get('action') != 'menu' or action.get('sampleStatus') != 'click-failed'
+                        or type(failure) is not dict
+                        or set(failure) != timing | {'errorFamily', 'postFailure'}
+                        or type(failure['errorFamily']) is not str
+                        or failure['errorFamily'] not in {'timeout', 'target-closed', 'protocol', 'error', 'other'}
+                        or any(type(failure[key]) is not int or not 0 <= failure[key] <= 120000 for key in timing)
+                        or failure['budgetMs'] != min(5000, max(1, failure['remainingBeforeMs']))):
+                    raise ValueError('invalid Hermes menu click failure')
+                post = failure['postFailure']
+                flags = {'documentSame', 'rootConnected', 'rootSame', 'controlConnected', 'controlSame'}
+                if type(post) is not dict or type(post.get('status')) is not str:
+                    raise ValueError('invalid Hermes post-click observation')
+                if post['status'] == 'unavailable':
+                    if set(post) != {'status'}:
+                        raise ValueError('invalid unavailable Hermes post-click observation')
+                elif post['status'] == 'observed':
+                    if (set(post) != flags | {'status', 'menuCount'}
+                            or any(type(post[key]) is not bool for key in flags)
+                            or type(post['menuCount']) is not int or not 0 <= post['menuCount'] <= 2
+                            or post['rootSame'] and not (post['documentSame'] and post['rootConnected'])
+                            or post['controlSame'] and not (post['documentSame'] and post['controlConnected'])):
+                        raise ValueError('invalid observed Hermes post-click observation')
+                else:
+                    raise ValueError('invalid Hermes post-click status')
+                record['clickFailure'] = failure
             if 'onboardingObservation' in value:
                 observation = value['onboardingObservation']
                 counts = {'coverCount', 'choiceCount'}
@@ -2664,7 +2945,9 @@ def semantic_observations(directory, app, platform=None):
             flags = set('endpointOwned targetVerified attached bindingVerified auxiliaryInert codingComposerReady uniqueComposer inputReadback inputSubmitted userTurnObserved responseVerified errorObserved retryControl retryAttempted retryCompleted providerResponseVerified'.split())
             fields = flags | set('schemaVersion mechanism diagnosticsOnly assistantTurnCount providerGenerationCount errorCategory'.split())
             errors = {None, 'ownership-lost', 'composer-unavailable', 'stale-turn', 'input-mismatch', 'action-uncertain', 'retry-unavailable', 'response-timeout', 'query-failed', 'invalid-request'}
-            if (app != 'chatgpt-desktop' or set(value) - {'preAttachFailure', 'composerAdmissionFailure', 'composerReadinessObservation', 'retryClickPhase'} != fields or value['diagnosticsOnly'] is not True
+            optional = {'preAttachFailure', 'composerAdmissionFailure', 'composerReadinessObservation',
+                        'retryClickPhase', 'retryClickRefusal', 'retryGuardSpotlight', 'retryViewportReveal'}
+            if (app != 'chatgpt-desktop' or set(value) - optional != fields or value['diagnosticsOnly'] is not True
                     or any(type(value[key]) is not bool for key in flags)
                     or type(value['assistantTurnCount']) is not int or not 0 <= value['assistantTurnCount'] <= 4096
                     or value['providerGenerationCount'] is not None and (type(value['providerGenerationCount']) is not int or not 0 <= value['providerGenerationCount'] <= 4096)
@@ -2674,8 +2957,23 @@ def semantic_observations(directory, app, platform=None):
                 raise ValueError('invalid Codex renderer qualification')
             record.update({key: value[key] for key in fields - {'schemaVersion', 'mechanism'}})
             if 'retryClickPhase' in value:
-                enum(record, value, 'retryClickPhase', {'admission','capture','sample-first',
+                enum(record, value, 'retryClickPhase', {'admission','capture','sample-first','viewport-reveal',
                      'revalidate','sample-second','sample-final','dispatch','post-guard','complete'})
+            if 'retryViewportReveal' in value:
+                if (not value['retryControl'] or type(value['retryViewportReveal']) is not str
+                        or value['retryViewportReveal'] != 'completed'):
+                    raise ValueError('unexpected Codex Retry viewport observation')
+                record['retryViewportReveal'] = value['retryViewportReveal']
+            if 'retryClickRefusal' in value:
+                if value['errorCategory'] != 'action-uncertain' or not value['retryControl'] or value['retryCompleted']:
+                    raise ValueError('unexpected Codex Retry refusal')
+                codex_retry_click_refusal(value['retryClickRefusal'], value.get('retryClickPhase'))
+                record['retryClickRefusal'] = value['retryClickRefusal']
+            if 'retryGuardSpotlight' in value:
+                if value.get('retryClickRefusal', {}).get('reason') != 'guard-rejected':
+                    raise ValueError('unexpected Codex Retry guard observation')
+                spotlight_auxiliary(value['retryGuardSpotlight'], platform)
+                record['retryGuardSpotlight'] = value['retryGuardSpotlight']
             if 'preAttachFailure' in value:
                 if value['errorCategory'] != 'invalid-request' or value['attached']:
                     raise ValueError('unexpected Codex preattach failure')
@@ -2859,7 +3157,7 @@ def semantic_observations(directory, app, platform=None):
                 if (app != 'chatgpt-desktop' or type(trust) is not dict
                         or type(trust.get('phase')) is not str or trust['phase'] not in phases):
                     raise ValueError('invalid folder trust progress')
-                folder_trust_observation({key: item for key, item in trust.items() if key != 'phase'})
+                folder_trust_observation({key: item for key, item in trust.items() if key != 'phase'}, platform=platform)
                 record['folderTrustObservation'] = trust
             if 'observerShutdown' in value:
                 if type(value['observerShutdown']) is not str:
@@ -3109,13 +3407,17 @@ def semantic_observations(directory, app, platform=None):
             if 'codexSession' in value:
                 session = value['codexSession']
                 flags = {'bindingVerified', 'codingComposerReady', 'auxiliaryInert'}
-                if (app != 'chatgpt-desktop' or type(session) is not dict or set(session) - {'inputChannel'} != flags | {'pageCount'}
+                if (app != 'chatgpt-desktop' or type(session) is not dict or set(session) - {'inputChannel', 'spotlightAuxiliary'} != flags | {'pageCount'}
                         or type(session.get('inputChannel', 'native-focused')) is not str
                         or session.get('inputChannel', 'native-focused') not in {'native-focused', 'cdp-dom'}
                         or any(type(session[key]) is not bool for key in flags)
                         or type(session['pageCount']) is not int or not 0 <= session['pageCount'] <= 32
                         or session['codingComposerReady'] and not (session['bindingVerified'] and session['auxiliaryInert'])):
                     raise ValueError('invalid Codex session observation')
+                if 'spotlightAuxiliary' in session:
+                    spotlight_auxiliary(session['spotlightAuxiliary'], platform)
+                    if value['errorCategory'] is None and session['spotlightAuxiliary']['status'] != 'verified':
+                        raise ValueError('incomplete closed Spotlight auxiliary observation')
                 record['codexSession'] = dict(session)
             if 'publicOnboarding' in value:
                 record['publicOnboarding'] = public_onboarding(value['publicOnboarding'], app,
@@ -3351,6 +3653,14 @@ def semantic_observations(directory, app, platform=None):
                     raise ValueError('invalid renderer HTTP status')
                 record['apiErrorStatus'] = status
             enum(record, value, 'retryScopeFailure', {'initial-scope-incomplete', 'initial-scope-invalid', 'endpoint', 'retry-count', 'retry-disabled', 'retry-missing', 'retry-changed', 'user-count', 'user-text', 'error-turn', 'document-changed', 'pair-changed', 'user-changed', 'alert-changed'})
+            if 'retryScopeObservation' in value:
+                record['retryScopeObservation'] = hermes_retry_scope_observation(
+                    value['retryScopeObservation'], value.get('retryScopeFailure'))
+            if 'retrySubtreeSettlement' in value:
+                status = value['retrySubtreeSettlement']
+                if type(status) is not str or status not in {'completed', 'rejected'}:
+                    raise ValueError('invalid Hermes retry subtree settlement')
+                record['retrySubtreeSettlement'] = status
             enum(record, value, 'retryReveal', {'none', 'command-dismissed', 'onboarding-skipped'})
             enum(record, value, 'retrySampleStatus', {'unmeasured', 'native-control-invalid', 'detached', 'hidden', 'disabled', 'inert', 'foreign-document', 'clipped', 'pointer-events-none', 'transformed', 'outside-viewport', 'no-owned-point', 'owned'})
             if 'retryHitOwnedPoints' in value:
@@ -3550,6 +3860,12 @@ def diagnose_pending(app, platform, architecture, source_sha, output, facts):
 
 
 REDUCTION_ERRORS = {
+    'too many native control directories': 'directory-budget',
+    'too many semantic directory entries': 'directory-budget',
+    'semantic namespace links are forbidden': 'namespace-link',
+    'unknown semantic probe namespace': 'namespace-identity',
+    'invalid semantic probe entry': 'namespace-entry',
+    'native diagnostic bundle belongs to the run root': 'namespace-diagnostics',
     'too many semantic observations': 'observation-budget',
     'too many private semantic metadata files': 'metadata-budget',
     'semantic observation identity differs': 'observation-identity',
@@ -3582,7 +3898,14 @@ def publish_reduction_failure(args, category):
             facts = Path(args.facts)
             if not facts.is_symlink() and facts.is_dir():
                 ordinary = metadata = 0
-                for index, path in enumerate(facts.glob('*.json')):
+                try:
+                    fact_paths = semantic_fact_paths(facts, args.app, args.platform)
+                except (OSError, ValueError):
+                    # Keep the original rejection; root-only counts are
+                    # explicitly incomplete when a namespace is unsafe.
+                    fact_paths = facts.glob('*.json')
+                    capped = True
+                for index, path in enumerate(fact_paths):
                     if index == 1024:
                         capped = True
                         break

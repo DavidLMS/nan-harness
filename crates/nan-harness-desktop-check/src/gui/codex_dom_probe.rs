@@ -11,6 +11,9 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+mod diagnostics;
+use diagnostics::{RetryClickPhase, RetryClickRefusal, SpotlightObservation, ViewportReveal};
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Request<'a> {
@@ -113,20 +116,6 @@ impl Evidence {
 }
 
 #[derive(Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
-enum RetryClickPhase {
-    Admission,
-    Capture,
-    SampleFirst,
-    Revalidate,
-    SampleSecond,
-    SampleFinal,
-    Dispatch,
-    PostGuard,
-    Complete,
-}
-
-#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Facts {
     schema_version: u8,
@@ -150,6 +139,24 @@ struct Facts {
     retry_completed: Evidence,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     retry_click_phase: Option<RetryClickPhase>,
+    #[serde(
+        default,
+        deserialize_with = "diagnostics::present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    retry_click_refusal: Option<RetryClickRefusal>,
+    #[serde(
+        default,
+        deserialize_with = "diagnostics::present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    retry_guard_spotlight: Option<SpotlightObservation>,
+    #[serde(
+        default,
+        deserialize_with = "diagnostics::present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    retry_viewport_reveal: Option<ViewportReveal>,
     error_category: Option<DriverError>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pre_attach_failure: Option<PreAttachFailure>,
@@ -179,6 +186,25 @@ impl Facts {
             && self.pre_attach_failure.is_none()
             && self.composer_admission_failure.is_none()
             && self.composer_readiness_observation.is_none()
+            && self.retry_click_refusal.is_none()
+            && self.retry_guard_spotlight.is_none()
+    }
+
+    fn diagnostics_valid(&self) -> bool {
+        (self.retry_viewport_reveal.is_none() || self.retry_control.confirmed())
+            && self.retry_click_refusal.as_ref().map_or_else(
+                || self.retry_guard_spotlight.is_none(),
+                |refusal| {
+                    matches!(self.error_category, Some(DriverError::ActionUncertain))
+                        && self.retry_control.confirmed()
+                        && !self.retry_completed.confirmed()
+                        && refusal.valid(self.retry_click_phase)
+                        && self
+                            .retry_guard_spotlight
+                            .as_ref()
+                            .is_none_or(|spotlight| refusal.guard_rejected() && spotlight.valid())
+                },
+            )
     }
 
     fn ui_verified(&self, turn: DomTurn<'_>) -> bool {
@@ -377,14 +403,10 @@ fn execute_turn(
     let recovery = matches!(turn.action, DomAction::Retry).then_some(provider);
     let outcome = run_driver(&driver, &request_path, &output_path, recovery, guard);
     std::fs::remove_file(request_path).map_err(|_| Reason::IsolationUnavailable)?;
-    let mut facts = read_facts(&output_path).map_err(|reason| outcome.err().unwrap_or(reason))?;
-    facts.provider_response_verified = provider.fixture_response_verified().into();
-    facts.provider_generation_count = Some(provider.generation_count()).filter(|n| *n <= 4096);
-    let closed = output_path.with_extension("closed");
-    open_private_new(&closed)
-        .and_then(|file| serde_json::to_writer(file, &facts).map_err(std::io::Error::other))
-        .and_then(|()| std::fs::rename(closed, output_path))
-        .map_err(|_| Reason::IsolationUnavailable)?;
+    let facts = read_facts(&output_path).map_err(|reason| outcome.err().unwrap_or(reason))?;
+    let provider_verified = provider.fixture_response_verified();
+    let generation_count = provider.generation_count();
+    let facts = close_facts(&output_path, facts, provider_verified, generation_count)?;
     outcome?;
     if facts.accepted(turn, provider) {
         Ok(())
@@ -431,7 +453,27 @@ fn read_facts(path: &Path) -> Result<Facts, Reason> {
     if bytes.len() > 16_384 {
         return Err(Reason::IsolationUnavailable);
     }
-    serde_json::from_slice(&bytes).map_err(|_| Reason::IsolationUnavailable)
+    let facts: Facts = serde_json::from_slice(&bytes).map_err(|_| Reason::IsolationUnavailable)?;
+    if !facts.diagnostics_valid() {
+        return Err(Reason::IsolationUnavailable);
+    }
+    Ok(facts)
+}
+
+fn close_facts(
+    path: &Path,
+    mut facts: Facts,
+    provider_verified: bool,
+    generation_count: usize,
+) -> Result<Facts, Reason> {
+    facts.provider_response_verified = provider_verified.into();
+    facts.provider_generation_count = Some(generation_count).filter(|n| *n <= 4096);
+    let closed = path.with_extension("closed");
+    open_private_new(&closed)
+        .and_then(|file| serde_json::to_writer(file, &facts).map_err(std::io::Error::other))
+        .and_then(|()| std::fs::rename(closed, path))
+        .map_err(|_| Reason::IsolationUnavailable)?;
+    Ok(facts)
 }
 
 fn run_driver(
@@ -585,5 +627,324 @@ mod tests {
         let mut malformed = value;
         malformed["rawResponse"] = "private".into();
         assert!(serde_json::from_value::<Facts>(malformed).is_err());
+    }
+
+    #[test]
+    fn retry_diagnostics_survive_the_closed_provider_transport() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../canary/tests/fixtures/codex-retry-click.json"
+        ))
+        .unwrap();
+        let raw = fixture["raw"].as_array().unwrap();
+        let closed = fixture["closed"].as_array().unwrap();
+        assert_eq!(raw.len(), 3);
+        assert_eq!(raw.len(), closed.len());
+        let directory = tempfile::tempdir().unwrap();
+        for (index, (input, expected)) in raw.iter().zip(closed).enumerate() {
+            let path = directory.path().join(format!("retry-{index}.json"));
+            serde_json::to_writer(open_private_new(&path).unwrap(), input).unwrap();
+            let facts = read_facts(&path).expect("actual Node Retry diagnostics must decode");
+            assert!(!facts.owned());
+            assert!(!facts.ui_verified(turn(DomAction::Retry, DomPurpose::Response)));
+            let facts = close_facts(&path, facts, false, 4).unwrap();
+            assert!(!facts.owned());
+            let bytes = std::fs::read(&path).unwrap();
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(&bytes).unwrap(),
+                *expected
+            );
+            assert!(!read_facts(&path).unwrap().owned());
+        }
+    }
+
+    #[test]
+    fn every_produced_retry_refusal_keeps_the_closed_transport() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../canary/tests/fixtures/codex-retry-click.json"
+        ))
+        .unwrap();
+        let ordinary = fixture["ordinary"].as_array().unwrap();
+        assert_eq!(ordinary.len(), 45);
+        let directory = tempfile::tempdir().unwrap();
+        for (index, value) in ordinary.iter().enumerate() {
+            let mut input = fixture["raw"][2].clone();
+            let mut refusal = value.clone();
+            input["retryClickPhase"] = refusal.as_object_mut().unwrap().remove("phase").unwrap();
+            input["retryAttempted"] = (input["retryClickPhase"] == "post-guard").into();
+            input["retryClickRefusal"] = refusal;
+            let path = directory.path().join(format!("refusal-{index}.json"));
+            serde_json::to_writer(open_private_new(&path).unwrap(), &input).unwrap();
+            let facts = read_facts(&path).expect("actual ordinary Retry refusal must decode");
+            let facts = close_facts(&path, facts, false, 4).unwrap();
+            assert!(!facts.ui_verified(turn(DomAction::Retry, DomPurpose::Response)));
+            input["providerResponseVerified"] = false.into();
+            input["providerGenerationCount"] = 4.into();
+            let output: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+            assert_eq!(output, input);
+        }
+    }
+
+    #[test]
+    fn retry_transport_rejects_private_fields_and_contradictory_diagnostics() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../canary/tests/fixtures/codex-retry-click.json"
+        ))
+        .unwrap();
+        let base = &fixture["raw"][0];
+        let directory = tempfile::tempdir().unwrap();
+        let mutations = [
+            ("/retryClickRefusal", serde_json::json!(null)),
+            ("/retryGuardSpotlight", serde_json::json!(null)),
+            (
+                "/retryClickRefusal/reason",
+                serde_json::json!("private-path"),
+            ),
+            ("/retryClickRefusal/remainingMs", serde_json::json!(600_001)),
+            (
+                "/retryClickRefusal/first/blocked",
+                serde_json::json!("private-output"),
+            ),
+            (
+                "/retryClickRefusal/first/ownedHitCount",
+                serde_json::json!(10),
+            ),
+            (
+                "/retryClickRefusal/first/testedViewportCount",
+                serde_json::json!(null),
+            ),
+            ("/retryClickPhase", serde_json::json!("complete")),
+            (
+                "/retryGuardSpotlight/sourceVersion",
+                serde_json::json!("private-value"),
+            ),
+            (
+                "/retryGuardSpotlight/rendererSha256",
+                serde_json::json!("private-value"),
+            ),
+            ("/retryGuardSpotlight/inputCount", serde_json::json!(4097)),
+            (
+                "/retryGuardSpotlight/toastAnnouncerCount",
+                serde_json::json!(2),
+            ),
+            ("/retryGuardSpotlight/stableSamples", serde_json::json!(1)),
+            ("/retryGuardSpotlight/failure", serde_json::json!("query")),
+            ("/errorCategory", serde_json::json!("query-failed")),
+            ("/retryControl", serde_json::json!(false)),
+            ("/retryCompleted", serde_json::json!(true)),
+        ];
+        let mut malformed: Vec<_> = mutations
+            .into_iter()
+            .map(|(pointer, value)| {
+                let mut changed = base.clone();
+                *changed.pointer_mut(pointer).unwrap() = value;
+                changed
+            })
+            .collect();
+        for pointer in [
+            "",
+            "/retryClickRefusal",
+            "/retryClickRefusal/first",
+            "/retryGuardSpotlight",
+        ] {
+            let mut changed = base.clone();
+            changed
+                .pointer_mut(pointer)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .insert("rawPrivateOutput".to_owned(), "private".into());
+            malformed.push(changed);
+        }
+        let mut missing = base.clone();
+        missing["retryClickRefusal"]
+            .as_object_mut()
+            .unwrap()
+            .remove("first");
+        malformed.push(missing);
+        let mut orphan = base.clone();
+        orphan.as_object_mut().unwrap().remove("retryClickRefusal");
+        malformed.push(orphan);
+        for (index, value) in malformed.iter().enumerate() {
+            let path = directory.path().join(format!("malformed-{index}.json"));
+            serde_json::to_writer(open_private_new(&path).unwrap(), value).unwrap();
+            assert!(read_facts(&path).is_err(), "malformed diagnostic {index}");
+        }
+    }
+
+    #[test]
+    fn viewport_reveal_is_a_preserved_witness_and_never_an_acceptance_oracle() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../canary/tests/fixtures/codex-retry-click.json"
+        ))
+        .unwrap();
+        let raw = fixture["viewport"]["raw"].as_array().unwrap();
+        let closed = fixture["viewport"]["closed"].as_array().unwrap();
+        assert_eq!(raw.len(), 2);
+        let directory = tempfile::tempdir().unwrap();
+        for (index, (input, expected)) in raw.iter().zip(closed).enumerate() {
+            let path = directory.path().join(format!("viewport-{index}.json"));
+            serde_json::to_writer(open_private_new(&path).unwrap(), input).unwrap();
+            let facts = read_facts(&path).unwrap();
+            let retry = turn(DomAction::Retry, DomPurpose::Response);
+            let mut without = input.clone();
+            without
+                .as_object_mut()
+                .unwrap()
+                .remove("retryViewportReveal");
+            let legacy: Facts = serde_json::from_value(without).unwrap();
+            assert_eq!(facts.ui_verified(retry), legacy.ui_verified(retry));
+            assert_eq!(facts.ui_verified(retry), index == 0);
+            let facts = close_facts(
+                &path,
+                facts,
+                expected["providerResponseVerified"].as_bool().unwrap(),
+                usize::try_from(expected["providerGenerationCount"].as_u64().unwrap()).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(facts.ui_verified(retry), index == 0);
+            let actual: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+            assert_eq!(actual, *expected);
+        }
+        for key in [
+            "endpointOwned",
+            "bindingVerified",
+            "responseVerified",
+            "retryAttempted",
+            "retryCompleted",
+            "userTurnObserved",
+        ] {
+            let mut missing = raw[0].clone();
+            missing[key] = false.into();
+            let facts: Facts = serde_json::from_value(missing).unwrap();
+            assert!(!facts.ui_verified(turn(DomAction::Retry, DomPurpose::Response)));
+        }
+        let mut unowned = raw[0].clone();
+        unowned["retryControl"] = false.into();
+        let path = directory.path().join("unexpected-witness.json");
+        serde_json::to_writer(open_private_new(&path).unwrap(), &unowned).unwrap();
+        assert!(read_facts(&path).is_err());
+    }
+
+    #[test]
+    fn retry_diagnostic_enums_require_strings_in_the_raw_transport() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../canary/tests/fixtures/codex-retry-click.json"
+        ))
+        .unwrap();
+        let mut malformed = Vec::new();
+        for (pointer, value) in [
+            (
+                "/retryClickPhase",
+                serde_json::json!({"sample-second":null}),
+            ),
+            (
+                "/retryClickRefusal/reason",
+                serde_json::json!({"guard-rejected":null}),
+            ),
+            (
+                "/retryGuardSpotlight/status",
+                serde_json::json!({"verified":null}),
+            ),
+            (
+                "/retryGuardSpotlight/sourceVersion",
+                serde_json::json!({"26.1007.21434":null}),
+            ),
+            (
+                "/retryGuardSpotlight/rendererSha256",
+                serde_json::json!({"2b78662247051c8b0905e1afbe0839187b8267e9181e179bc422322e4010433b":null}),
+            ),
+        ] {
+            let mut input = fixture["raw"][0].clone();
+            *input.pointer_mut(pointer).unwrap() = value;
+            malformed.push(input);
+        }
+        let mut blocked = fixture["raw"][2].clone();
+        blocked["retryClickRefusal"]["reason"] = "sample-blocked".into();
+        blocked["retryClickRefusal"]["second"] = serde_json::json!({
+            "blocked":{"foreign-overlay":null},"ownedHitCount":null,"testedViewportCount":null
+        });
+        malformed.push(blocked);
+        for (pointer, value) in [
+            (
+                "/retryGuardSpotlight/failure",
+                serde_json::json!({"foreign-controls":null}),
+            ),
+            (
+                "/retryGuardSpotlight/rejectionCheck",
+                serde_json::json!({"toast-announcer":null}),
+            ),
+        ] {
+            let mut input = fixture["raw"][1].clone();
+            *input.pointer_mut(pointer).unwrap() = value;
+            malformed.push(input);
+        }
+        let mut control = fixture["raw"][1].clone();
+        control["retryGuardSpotlight"]["rejectionCheck"] = "control-location".into();
+        control["retryGuardSpotlight"]["controlKind"] = serde_json::json!({"other":null});
+        malformed.push(control);
+        let mut reveal = fixture["viewport"]["raw"][0].clone();
+        reveal["retryViewportReveal"] = serde_json::json!({"completed":null});
+        malformed.push(reveal);
+        let directory = tempfile::tempdir().unwrap();
+        for (index, value) in malformed.iter().enumerate() {
+            let path = directory.path().join(format!("object-enum-{index}.json"));
+            serde_json::to_writer(open_private_new(&path).unwrap(), value).unwrap();
+            assert!(read_facts(&path).is_err(), "object-form enum {index}");
+        }
+    }
+
+    #[test]
+    fn retry_diagnostics_never_authorize_a_forged_success_and_legacy_stays_valid() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../canary/tests/fixtures/codex-retry-click.json"
+        ))
+        .unwrap();
+        let mut value = fixture["raw"][0].clone();
+        for key in [
+            "endpointOwned",
+            "targetVerified",
+            "attached",
+            "bindingVerified",
+            "auxiliaryInert",
+            "codingComposerReady",
+            "uniqueComposer",
+            "inputReadback",
+            "inputSubmitted",
+            "userTurnObserved",
+            "responseVerified",
+            "errorObserved",
+            "retryControl",
+            "retryAttempted",
+            "retryCompleted",
+        ] {
+            value[key] = true.into();
+        }
+        value["assistantTurnCount"] = 1.into();
+        value["errorCategory"] = serde_json::Value::Null;
+        for removed in [None, Some("retryClickRefusal"), Some("retryGuardSpotlight")] {
+            let mut forged = value.clone();
+            if let Some(key) = removed {
+                forged.as_object_mut().unwrap().remove(key);
+            }
+            let facts: Facts = serde_json::from_value(forged).unwrap();
+            assert!(!facts.owned());
+            for action in [DomAction::Ready, DomAction::Submit, DomAction::Retry] {
+                assert!(!facts.ui_verified(turn(action, DomPurpose::Response)));
+            }
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("legacy.json");
+        let mut legacy = fixture["raw"][0].clone();
+        legacy.as_object_mut().unwrap().remove("retryClickRefusal");
+        legacy
+            .as_object_mut()
+            .unwrap()
+            .remove("retryGuardSpotlight");
+        serde_json::to_writer(open_private_new(&path).unwrap(), &legacy).unwrap();
+        let decoded = read_facts(&path).unwrap();
+        assert!(decoded.retry_click_refusal.is_none());
+        assert!(decoded.retry_guard_spotlight.is_none());
     }
 }

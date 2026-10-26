@@ -345,7 +345,7 @@ enum RetryReveal {
     OnboardingSkipped,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 enum RetryScopeFailure {
     InitialScopeIncomplete,
@@ -364,6 +364,83 @@ enum RetryScopeFailure {
     AlertChanged,
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum RetryScopePhase {
+    InitialReproof,
+    InitialStability,
+    Sampling,
+    SamplingRemount,
+    OnboardingReadiness,
+    CommandReadiness,
+    FinalReproof,
+    FinalRemount,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum RetrySubtreeSettlement {
+    Completed,
+    Rejected,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "keep independent DOM identity observations explicit in the closed diagnostic contract"
+)]
+struct RetryScopeObservation {
+    phase: RetryScopePhase,
+    document_same: bool,
+    current_pair_present: bool,
+    current_pair_same: bool,
+    current_pair_connected: bool,
+    held_pair_connected: bool,
+    current_group_same: bool,
+    held_group_connected: bool,
+    current_user_same: bool,
+    held_user_connected: bool,
+    current_alert_same: bool,
+    held_alert_connected: bool,
+    held_retry_connected: bool,
+    current_user_count: u8,
+}
+
+impl RetryScopeObservation {
+    fn valid(&self, failure: Option<&RetryScopeFailure>) -> bool {
+        let reason = if !self.document_same {
+            RetryScopeFailure::DocumentChanged
+        } else if !self.current_pair_same || !self.current_pair_connected {
+            RetryScopeFailure::PairChanged
+        } else if self.current_user_count != 1
+            || !self.current_user_same
+            || !self.held_user_connected
+        {
+            RetryScopeFailure::UserChanged
+        } else if !self.current_alert_same || !self.held_alert_connected {
+            RetryScopeFailure::AlertChanged
+        } else {
+            return false;
+        };
+        failure == Some(&reason)
+            && self.current_user_count <= 2
+            && (self.current_pair_present
+                || !(self.current_pair_same
+                    || self.current_pair_connected
+                    || self.current_group_same
+                    || self.current_user_same
+                    || self.current_user_count != 0))
+            && (!self.current_pair_same || self.current_pair_connected == self.held_pair_connected)
+            && (!self.current_group_same
+                || self.current_pair_connected == self.held_group_connected)
+            && (!self.current_user_same || self.current_user_count == 1)
+            && (!self.current_user_same || self.current_pair_connected == self.held_user_connected)
+            && (!(self.current_alert_same && self.current_pair_present)
+                || self.current_pair_connected == self.held_alert_connected)
+    }
+}
+
 #[derive(Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RetrySampleFacts {
@@ -373,6 +450,18 @@ struct RetrySampleFacts {
         rename = "retryScopeFailure"
     )]
     scope_failure: Option<RetryScopeFailure>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "retryScopeObservation"
+    )]
+    scope_observation: Option<RetryScopeObservation>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "retrySubtreeSettlement"
+    )]
+    subtree_settlement: Option<RetrySubtreeSettlement>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -567,6 +656,12 @@ const DOM_QUALIFICATION_KEYS: &[&str] = &[
     "retryActiveRegion",
 ];
 
+const DOM_OPTIONAL_SCOPE_KEYS: &[&str] = &[
+    "retryScopeFailure",
+    "retryScopeObservation",
+    "retrySubtreeSettlement",
+];
+
 fn read_facts(path: &Path, qualification: bool) -> Result<Facts, Reason> {
     let mut bytes = Vec::new();
     open_private_read(path)
@@ -584,13 +679,19 @@ fn read_facts(path: &Path, qualification: bool) -> Result<Facts, Reason> {
         0
     };
     let count = (24 + extra)..=(26 + extra);
-    let optional_scope = usize::from(object.contains_key("retryScopeFailure"));
+    let optional_scope = DOM_OPTIONAL_SCOPE_KEYS
+        .iter()
+        .filter(|key| object.contains_key(**key))
+        .count();
     if (!qualification && optional_scope != 0)
+        || ["retryScopeObservation", "retrySubtreeSettlement"]
+            .iter()
+            .any(|key| object.get(*key).is_some_and(serde_json::Value::is_null))
         || !count.contains(&(object.len() - optional_scope))
         || object.keys().any(|key| {
             !DOM_FACT_KEYS.contains(&key.as_str())
                 && !DOM_QUALIFICATION_KEYS.contains(&key.as_str())
-                && key != "retryScopeFailure"
+                && !DOM_OPTIONAL_SCOPE_KEYS.contains(&key.as_str())
         })
     {
         return Err(Reason::IsolationUnavailable);
@@ -621,6 +722,12 @@ fn read_facts(path: &Path, qualification: bool) -> Result<Facts, Reason> {
         || !facts
             .qualification
             .valid_action(qualification, &facts.input, &facts.submission)
+        || facts
+            .qualification
+            .sample
+            .scope_observation
+            .as_ref()
+            .is_some_and(|value| !value.valid(facts.qualification.sample.scope_failure.as_ref()))
         || !version(&facts.playwright_version)
         || !version(&facts.observed_runtime_version)
         || facts.turns.assistant_turn_count > 4096
@@ -1520,6 +1627,87 @@ mod tests {
             .remove("retryScopeFailure");
         qualifier["retryControl"] = serde_json::Value::Null;
         assert!(read(&qualifier, true).is_err());
+    }
+
+    #[test]
+    fn retry_scope_observation_preserves_refusal_and_rejects_private_or_inconsistent_facts() {
+        let value: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../canary/tests/fixtures/hermes-retry-scope.json"
+        ))
+        .unwrap();
+        let facts = read(&value, true).unwrap();
+        assert!(!facts.input.input_submitted);
+        assert_eq!(
+            facts.qualification.sample.scope_failure,
+            Some(RetryScopeFailure::PairChanged)
+        );
+        assert!(read(&value, false).is_err());
+        for (key, invalid) in [
+            ("phase", json!("PRIVATE")),
+            ("currentUserCount", json!(true)),
+            ("currentUserCount", json!(3)),
+            ("documentSame", json!("PRIVATE")),
+            ("rawMessage", json!("PRIVATE")),
+            ("currentPairPresent", json!(false)),
+            ("currentPairConnected", json!(false)),
+            ("currentUserSame", json!(true)),
+            ("currentAlertSame", json!(true)),
+        ] {
+            let mut changed = value.clone();
+            changed["retryScopeObservation"][key] = invalid;
+            assert!(read(&changed, true).is_err(), "{key}");
+        }
+        for phase in [
+            "initial-reproof",
+            "initial-stability",
+            "sampling",
+            "sampling-remount",
+            "onboarding-readiness",
+            "command-readiness",
+            "final-reproof",
+            "final-remount",
+        ] {
+            let mut changed = value.clone();
+            changed["retryScopeObservation"]["phase"] = json!(phase);
+            assert!(read(&changed, true).is_ok());
+        }
+        for invalid in [serde_json::Value::Null, json!({}), json!([])] {
+            let mut changed = value.clone();
+            changed["retryScopeObservation"] = invalid;
+            assert!(read(&changed, true).is_err());
+        }
+        let mut changed = value.clone();
+        changed["retryScopeFailure"] = json!("alert-changed");
+        assert!(read(&changed, true).is_err());
+        changed.as_object_mut().unwrap().remove("retryScopeFailure");
+        assert!(read(&changed, true).is_err());
+        changed
+            .as_object_mut()
+            .unwrap()
+            .remove("retryScopeObservation");
+        assert!(read(&changed, true).is_ok(), "legacy facts remain valid");
+    }
+
+    #[test]
+    fn subtree_settlement_status_is_optional_closed_and_does_not_supply_action_proof() {
+        let value: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../canary/tests/fixtures/hermes-retry-scope.json"
+        ))
+        .unwrap();
+        assert!(read(&value, true).is_ok());
+        for status in ["completed", "rejected"] {
+            let mut changed = value.clone();
+            changed["retrySubtreeSettlement"] = json!(status);
+            let facts = read(&changed, true).unwrap();
+            assert!(!facts.input.input_submitted);
+            assert!(!facts.response.response_verified);
+            assert!(read(&changed, false).is_err());
+        }
+        for status in [json!(null), json!(true), json!({}), json!("PRIVATE")] {
+            let mut changed = value.clone();
+            changed["retrySubtreeSettlement"] = status;
+            assert!(read(&changed, true).is_err());
+        }
     }
 
     #[test]

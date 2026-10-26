@@ -122,55 +122,107 @@ function sampleEditor(control,kind='editor') {
     if(++depth>64)return blocked('ancestor-limit');
     if(!e.isConnected||e.ownerDocument!==document)return blocked('detached-or-inert');
   }
-  const r=control.getBoundingClientRect(),points=[];
+  const r=control.getBoundingClientRect(),points=[];let testedViewportCount=0;
   for(const fy of [0.25,0.5,0.75])for(const fx of [0.25,0.5,0.75]) {
     const x=r.left+control.clientLeft+control.clientWidth*fx;
     const y=r.top+control.clientTop+control.clientHeight*fy;
     if(x<0||y<0||x>=innerWidth||y>=innerHeight)continue;
+    testedViewportCount++;
     const front=document.elementFromPoint(x,y);
     if(front===control||control.contains(front))points.push({x:x-r.left-control.clientLeft,y:y-r.top-control.clientTop});
   }
-  return {rect:[r.left,r.top,r.width,r.height],points};
+  return {rect:[r.left,r.top,r.width,r.height],points,testedViewportCount};
 }
 
-async function ordinaryClick(locator,guard,deadline,attempt,after=guard,observe=()=>{}) {
-  const phase=value=>{try {observe(value);}catch {}};
+async function ordinaryClick(locator,guard,deadline,attempt,after=guard,observe=()=>{},options={}) {
+  const phase=(value,details)=>{try {observe(value,details);}catch {}};
+  let firstSample=null,secondSample=null,finalSample=null;
+  const sampleFact=value=>{
+    try {
+      if(!value)return null;
+      if(['unsupported-control','detached-or-inert','disabled','hidden','foreign-overlay','pointer-disabled','ancestor-limit'].includes(value.blocked))
+        return {blocked:value.blocked,ownedHitCount:null,testedViewportCount:null};
+      const tested=value.testedViewportCount,owned=value.points?.length;
+      if(value.blocked||!Number.isInteger(tested)||tested<0||tested>9||!Number.isInteger(owned)||owned<0||owned>tested)return null;
+      return {blocked:null,ownedHitCount:owned,testedViewportCount:tested};
+    } catch {return null;}
+  };
+  const refuse=reason=>{
+    try {options.onRefusal?.({reason,remainingMs:reason==='deadline'?0:Math.max(0,Math.min(600000,Math.floor(deadline-Date.now()))),
+      first:sampleFact(firstSample),second:sampleFact(secondSample),final:sampleFact(finalSample)});}catch {}
+    return false;
+  };
   phase('admission');
-  if(!await guard()||Date.now()>=deadline||await locator.count()!==1||!await locator.isEnabled())return false;
+  if(!await guard())return refuse('guard-rejected');
+  if(Date.now()>=deadline)return refuse('deadline');
+  if(await locator.count()!==1)return refuse('control-count');
+  if(!await locator.isEnabled())return refuse('control-disabled');
   phase('capture');
-  const handle=await locator.elementHandle();if(!handle)return false;
+  const handle=await locator.elementHandle();if(!handle)return refuse('missing-handle');
   try {
     phase('sample-first');
-    let first=await handle.evaluate(sampleEditor,'button');if(first.blocked)return false;
+    let first=await handle.evaluate(sampleEditor,'button');firstSample=first;
+    if(first.blocked)return refuse('sample-blocked');
+    if(options.revealRetryViewport===true&&first.points.length===0&&first.testedViewportCount===0) {
+      phase('viewport-reveal');
+      const revealOwned=async()=>{
+        if(!await guard())return refuse('guard-rejected');
+        if(Date.now()>=deadline)return refuse('deadline');
+        if(await locator.count()!==1)return refuse('control-count');
+        if(!await locator.isEnabled())return refuse('control-disabled');
+        if(!await locator.evaluate((e,held)=>e===held,handle))return refuse('control-replaced');
+        return true;
+      };
+      if(!await revealOwned())return false;
+      const remaining=deadline-Date.now();if(remaining<=0)return refuse('deadline');
+      try {await handle.scrollIntoViewIfNeeded({timeout:Math.min(2000,remaining)});}
+      catch {return refuse('reveal-failed');}
+      if(!await revealOwned())return false;
+      // A native retained-node reveal is not Retry. Discard the offscreen
+      // sample; all original stable/final hit proofs must start afresh.
+      first=await handle.evaluate(sampleEditor,'button');firstSample=first;
+      if(!first.blocked&&first.points.length===0&&first.testedViewportCount===0)return refuse('reveal-failed');
+      phase('sample-first',!first.blocked&&first.points.length?{retryViewportReveal:'completed'}:undefined);
+      if(first.blocked)return refuse('sample-blocked');
+    }
     let point;
     while(!point) {
       await pause(Math.min(100,Math.max(0,deadline-Date.now())));
       phase('revalidate');
-      if(!await guard()||Date.now()>=deadline||await locator.count()!==1
-          ||!await locator.isEnabled()||!await locator.evaluate((e,held)=>e===held,handle))return false;
+      if(!await guard())return refuse('guard-rejected');
+      if(Date.now()>=deadline)return refuse('deadline');
+      if(await locator.count()!==1)return refuse('control-count');
+      if(!await locator.isEnabled())return refuse('control-disabled');
+      if(!await locator.evaluate((e,held)=>e===held,handle))return refuse('control-replaced');
       phase('sample-second');
-      const second=await handle.evaluate(sampleEditor,'button');
+      const second=await handle.evaluate(sampleEditor,'button');secondSample=second;
       point=candidate(first,second);
       if(point)break;
       // A retained button may move while its transcript row settles. Only
       // geometry changes with owned hit points may wait; replacement, overlays
       // and lost hit authority remain terminal. No input has been attempted.
-      if(second.blocked||!first.points.length||!second.points.length
-          ||JSON.stringify(first.rect)===JSON.stringify(second.rect))return false;
-      first=second;
+      if(second.blocked)return refuse('sample-blocked');
+      if(!first.points.length)return refuse('first-hit-missing');
+      if(!second.points.length)return refuse('second-hit-missing');
+      if(JSON.stringify(first.rect)===JSON.stringify(second.rect))return refuse('stationary-hit-changed');
+      first=second;firstSample=first;secondSample=null;
     }
-    if(!await guard()||Date.now()>=deadline)return false;
+    if(!await guard())return refuse('guard-rejected');
+    if(Date.now()>=deadline)return refuse('deadline');
     phase('sample-final');
-    const final=await handle.evaluate(sampleEditor,'button');
-    if(!candidate(first,final)||!final.points.some(p=>p.x===point.x&&p.y===point.y))return false;
-    if(!await guard()||Date.now()>=deadline)return false;
+    const final=await handle.evaluate(sampleEditor,'button');finalSample=final;
+    if(!candidate(first,final))return refuse('final-sample-changed');
+    if(!final.points.some(p=>p.x===point.x&&p.y===point.y))return refuse('final-point-lost');
+    if(!await guard())return refuse('guard-rejected');
+    if(Date.now()>=deadline)return refuse('deadline');
     phase('dispatch');
     await attempt();
     // The response loop owns transition verification. Do not let Playwright's
     // implicit post-click navigation wait obscure a delivered single action.
     await handle.click({noWaitAfter:true,position:point,timeout:Math.max(1,Math.min(2000,deadline-Date.now()))});
     phase('post-guard');
-    if(!await after()||Date.now()>=deadline)return false;
+    if(!await after())return refuse('guard-rejected');
+    if(Date.now()>=deadline)return refuse('deadline');
     phase('complete');return true;
   } finally {await handle.dispose();}
 }
@@ -197,7 +249,7 @@ function homeComposerScope() {
       ||e.getAttribute('aria-modal')==='true'||e.getAttribute('data-thread-find-target')==='conversation');
 }
 
-async function runTurn(page,guard,request,deadline=Date.now()+request.timeoutMs,releaseRecovery=async()=>{throw Error('recovery barrier required');}) {
+async function runTurn(page,guard,request,deadline=Date.now()+request.timeoutMs,releaseRecovery=async()=>{throw Error('recovery barrier required');},guardSpotlight=()=>null) {
   const facts={schemaVersion:1,mechanism:'codex-renderer-qualification',diagnosticsOnly:true,
     endpointOwned:false,targetVerified:false,attached:true,bindingVerified:false,auxiliaryInert:false,
     codingComposerReady:false,uniqueComposer:false,inputReadback:false,inputSubmitted:false,
@@ -301,7 +353,16 @@ async function runTurn(page,guard,request,deadline=Date.now()+request.timeoutMs,
       if(!await ordinaryClick(retry,targetOwned,deadline,async()=>{
         await releaseRecovery(deadline,targetOwned);
         facts.retryAttempted=true;
-      },retryOwned,phase=>{facts.retryClickPhase=phase;}))return stop('action-uncertain');
+      },retryOwned,(phase,details)=>{
+        facts.retryClickPhase=phase;
+        if(details?.retryViewportReveal==='completed')facts.retryViewportReveal='completed';
+      },{revealRetryViewport:true,onRefusal:refusal=>{
+          facts.retryClickRefusal=refusal;
+          if(refusal.reason==='guard-rejected') {
+            try {const cached=guardSpotlight();if(cached)facts.retryGuardSpotlight=cached;}catch {}
+          }
+        },
+      }))return stop('action-uncertain');
       facts.retryCompleted=true;
     }
     while(Date.now()<deadline) {
@@ -365,25 +426,51 @@ function auxiliaryScope() {
   const controls=[...document.querySelectorAll('textarea,[contenteditable="true"],input:not([type="hidden"]),[role="dialog"],[aria-modal="true"],[role="alertdialog"],[role="menu"]')].filter(visible);
   return !document.hasFocus()&&controls.length===0;
 }
-async function bindRecordedMain(browser,binding,owner,deadline,identity=pageIdentity,directCDP=false) {
-  if(Date.now()>=deadline||!owner())return null;
+async function bindRecordedMain(browser,binding,owner,deadline,identity=pageIdentity,directCDP=false,spotlight=null) {
+  try {
+  if(spotlight?.failed())return null;
+  const reject=reason=>{spotlight?.fail(reason);return null;};
+  if(Date.now()>=deadline||!owner())return reject(Date.now()>=deadline?'deadline':'ownership');
   const pages=browser.contexts().flatMap(context=>context.pages());
-  if(pages.length!==1+(binding.auxiliary?1:0))return null;
+  if(pages.length!==1+(binding.auxiliary?1:0))return reject('identity');
   const identities=await Promise.all(pages.map(page=>identity(page,deadline)));
-  if(Date.now()>=deadline||!owner())return null;
+  if(Date.now()>=deadline||!owner())return reject(Date.now()>=deadline?'deadline':'ownership');
   const mainMatches=identities.map((value,index)=>sameIdentity(binding.main,value)?index:-1).filter(index=>index>=0);
-  if(mainMatches.length!==1)return null;
+  if(mainMatches.length!==1)return reject('identity');
   const main=pages[mainMatches[0]];
   const auxiliary=pages.find(page=>page!==main);
   if(auxiliary) {
     const aux=identities[pages.indexOf(auxiliary)];
-    if(!sameIdentity(binding.auxiliary,aux)||sourceRoute(aux.url)!=='avatarOverlay'
-      ||!await auxiliary.evaluate(auxiliaryScope))return null;
+    if(!sameIdentity(binding.auxiliary,aux))return reject('identity');
+    if(spotlight) {
+      // Each controller re-admits the original serialized document, then owns
+      // one private DOM tuple for its complete action window. Handles are never
+      // serialized between controllers and Spotlight never receives input.
+      const count=spotlight.receipt().stableSamples===2?1:2;
+      for(let sample=0;sample<count;sample++) {
+        if(Date.now()>=deadline||!owner())return reject(Date.now()>=deadline?'deadline':'ownership');
+        if(!sameIdentity(binding.main,await identity(main,deadline)))return reject('identity');
+        if(!await spotlight.within(main.evaluate(()=>document.visibilityState==='visible'&&document.hasFocus())))return reject('main-focus');
+        const current=sample===0?aux:await identity(auxiliary,deadline);
+        if(!sameIdentity(binding.auxiliary,current))return reject('identity');
+        const scope=await spotlight.read(auxiliary,current);
+        if(scope.spotlight.pending)return reject('initial-scope');
+        if(!sameIdentity(binding.main,await identity(main,deadline)))return reject('identity');
+        if(!await spotlight.within(main.evaluate(()=>document.visibilityState==='visible'&&document.hasFocus())))return reject('main-focus');
+        const currentPages=browser.contexts().flatMap(context=>context.pages());
+        if(Date.now()>=deadline||!owner())return reject(Date.now()>=deadline?'deadline':'ownership');
+        if(currentPages.length!==pages.length||!currentPages.every(page=>pages.includes(page)))return reject('identity');
+        spotlight.commit();
+        if(sample+1<count)await spotlight.within(new Promise(resolve=>setTimeout(resolve,Math.min(100,Math.max(0,deadline-Date.now())))));
+      }
+    } else if(sourceRoute(aux.url)!=='avatarOverlay'||!await auxiliary.evaluate(auxiliaryScope))return null;
   }
-  if(!await main.evaluate(scoped=>document.visibilityState==='visible'&&(scoped||document.hasFocus()),directCDP))return null;
+  const finalScope=main.evaluate(scoped=>document.visibilityState==='visible'&&(scoped||document.hasFocus()),directCDP&&!spotlight);
+  if(!await (spotlight?spotlight.within(finalScope):finalScope))return reject('main-focus');
   const after=browser.contexts().flatMap(context=>context.pages());
-  if(Date.now()>=deadline||!owner()||after.length!==pages.length||!after.every(page=>pages.includes(page)))return null;
+  if(Date.now()>=deadline||!owner()||after.length!==pages.length||!after.every(page=>pages.includes(page)))return reject(Date.now()>=deadline?'deadline':'identity');
   return main;
+  } catch(error) {spotlight?.fail(Date.now()>=deadline?'deadline':'query');throw error;}
 }
 function validRequest(request) {
   const keys=['connectionPath','ownerPid','prompt','expectedMarker','timeoutMs','action','purpose','mainBindingPath'];
@@ -414,7 +501,9 @@ function validBinding(binding,request,connection) {
     &&binding.schemaVersion===1&&binding.ownerPid===request.ownerPid
     &&binding.launcherPid===connection.launcherPid&&binding.port===connection.port
     &&identity(binding.main)&&(binding.auxiliary===null||identity(binding.auxiliary)
-      &&sourceRoute(binding.auxiliary.url)==='avatarOverlay');
+      &&(sourceRoute(binding.auxiliary.url)==='avatarOverlay'
+        ||require('./codex-spotlight.cjs').policy()&&require('./codex-spotlight.cjs').route(binding.auxiliary.url)
+          &&require('./codex-spotlight.cjs').route(binding.auxiliary.frameUrl)&&binding.auxiliary.fragment===''));
 }
 async function waitRetryReady(retry,guard,deadline,pause,now=Date.now) {
   while(now()<deadline) {
@@ -434,7 +523,7 @@ exports.waitRetryReady=waitRetryReady;
 async function main() {
   const fs=require('node:fs'),path=require('node:path');
   const output=process.argv[4];
-  let browser,facts={schemaVersion:1,mechanism:'codex-renderer-qualification',diagnosticsOnly:true,
+  let browser,spotlight,facts={schemaVersion:1,mechanism:'codex-renderer-qualification',diagnosticsOnly:true,
     endpointOwned:false,targetVerified:false,attached:false,bindingVerified:false,auxiliaryInert:false,
     codingComposerReady:false,uniqueComposer:false,inputReadback:false,inputSubmitted:false,
     userTurnObserved:false,assistantTurnCount:0,responseVerified:false,errorObserved:false,
@@ -466,14 +555,17 @@ async function main() {
     const deadline=Date.now()+request.timeoutMs;
     browser=await chromium.connectOverCDP(`http://127.0.0.1:${connection.port}`,{timeout:2000,noDefaults:true});
     const directCDP=directCDPPolicy();
-    const page=await bindRecordedMain(browser,binding,owner,deadline,pageIdentity,directCDP);
+    if(directCDP&&require('./codex-spotlight.cjs').policy()&&binding.auxiliary
+      &&require('./codex-spotlight.cjs').route(binding.auxiliary.url))
+      spotlight=require('./codex-spotlight.cjs').create({deadline});
+    const page=await bindRecordedMain(browser,binding,owner,deadline,pageIdentity,directCDP,spotlight);
     if(!page)throw Error('main');
-    facts=await runTurn(page,async until=>await bindRecordedMain(browser,binding,owner,until,pageIdentity,directCDP)===page,request,deadline,(until,guard)=>require('./codex-recovery-barrier.cjs').release(process.argv[3],until,guard));
+    facts=await runTurn(page,async until=>await bindRecordedMain(browser,binding,owner,until,pageIdentity,directCDP,spotlight)===page,request,deadline,(until,guard)=>require('./codex-recovery-barrier.cjs').release(process.argv[3],until,guard),()=>spotlight?.receipt()??null);
   } catch {
     if(facts.errorCategory==='invalid-request')facts.preAttachFailure=preAttachFailure;
     if(facts.errorCategory===null)facts.errorCategory='query-failed';
   }
-  finally {if(browser)await browser.close().catch(()=>{});}
+  finally {await spotlight?.close();if(browser)await browser.close().catch(()=>{});}
   fs.writeFileSync(output,JSON.stringify(facts)+'\n',{mode:0o600,flag:'wx'});
   process.exitCode=facts.errorCategory===null?0:1;
 }

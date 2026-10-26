@@ -39,6 +39,32 @@ function modelRowLabel(element) {
   }
   return name==='Qwen3.6';
 }
+function menuClickErrorFamily(error) {
+  try {
+    const name=error?.name;
+    if(name==='TimeoutError')return 'timeout';
+    if(name==='TargetClosedError')return 'target-closed';
+    if(name==='ProtocolError')return 'protocol';
+    return name==='Error'?'error':'other';
+  }
+  catch {return 'other';}
+}
+// Standalone passive browser callback. Fixed source labels are compared only
+// in memory; no application text, URL, identifier or coordinate is returned.
+function menuFailureSnapshot(root,control) {
+  const visible=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);
+    return e.isConnected&&e.ownerDocument===document&&r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};
+  const roots=[...document.querySelectorAll('[data-slot="composer-root"]')].filter(visible);
+  const controls=[...root.querySelectorAll('button[aria-label]')].filter(e=>visible(e)
+    &&/^Model · [^\n]+: qwen3\.6$/.test(e.getAttribute('aria-label')));
+  const menus=[...document.querySelectorAll('[data-slot="dropdown-menu-content"][role="menu"]')]
+    .filter(menu=>visible(menu)&&[...menu.querySelectorAll('[role="menuitem"]')]
+      .some(item=>visible(item)&&(item.getAttribute('aria-label')??item.innerText).trim()==='Refresh models'));
+  return {status:'observed',documentSame:root.ownerDocument===document&&control.ownerDocument===document,
+    rootConnected:root.isConnected,rootSame:roots.length===1&&roots[0]===root,
+    controlConnected:control.isConnected,controlSame:controls.length===1&&controls[0]===control,
+    menuCount:Math.min(2,menus.length)};
+}
 exports.run = async function run(page, session, ownedEndpoint, deadline, expectedProfile) {
   const facts={schemaVersion:1,mechanism:'hermes-windows-catalog-readiness',diagnosticsOnly:true,
     stage:'policy',errorCategory:'policy-rejected',menuOpened:false,refreshAttempted:false,
@@ -71,10 +97,10 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
     }
     return false;
   }
-  const guard=()=>{
+  const guard=callerDeadline=>{
     let query='ownership';
     try {
-      const owned=Date.now()<deadline && ownedEndpoint();
+      const owned=Date.now()<deadline && (callerDeadline===undefined?ownedEndpoint():ownedEndpoint(callerDeadline));
       // The native proof can block; read page identity only after it returns.
       query='page-set';
       const pages=page.context().browser().contexts().flatMap(context=>context.pages());
@@ -94,10 +120,10 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
     }
   };
   let evidence, documentIdentity;
-  async function frame() {
+  async function frame(callerDeadline) {
     let pendingIdentity=null;
     for (;;) {
-      if (!guard()) throw new Error('guard');
+      if (!guard(callerDeadline)) throw new Error('guard');
       let timer,query='frame-request';
       try {
         const reply=await Promise.race([session.send('Page.getFrameTree'), new Promise((_,reject)=>{
@@ -120,7 +146,7 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
         if (retained && (current.id!==retained.id || current.loaderId!==retained.loaderId)) {
           facts.guardFailure='url-changed';throw new Error('document changed');
         }
-        if (!guard()) throw new Error('guard');
+        if (!guard(callerDeadline)) throw new Error('guard');
         query='frame-transition';
         if (current.url+fragment!==page.url()) {
           if (!startup) throw new Error('frame');
@@ -228,10 +254,47 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
         await delay(Math.min(100,Math.max(0,deadline-Date.now())));
       }
       if (!last || !guard()) {observation.sampleStatus='guard-rejected';throw new Error('guard');}
+      let menuTiming;
       try {
         beforeDispatch();
-        await handle.click({position:{x:last.x,y:last.y},timeout:Math.min(5000,Math.max(1,deadline-Date.now()))});
-      } catch {observation.sampleStatus='click-failed';throw new Error('action');}
+        const started=Date.now(),remaining=deadline-started;
+        const budget=Math.min(5000,Math.max(1,remaining));
+        if(action==='menu')menuTiming={started,remaining,budget};
+        // Frozen ModelPill only changes controlled Radix dropdown state. Keep
+        // the single input independent of navigation waits; the exact menu,
+        // fresh catalog acknowledgment and retained composer still prove effect.
+        await handle.click({position:{x:last.x,y:last.y},timeout:budget,
+          ...(action==='menu'?{noWaitAfter:true}:{})});
+      } catch(error) {
+        observation.sampleStatus='click-failed';
+        if(action==='menu'&&menuTiming&&facts.stage==='menu'&&facts.errorCategory==='menu-unavailable') {
+          const bounded=value=>Math.min(120000,Math.max(0,Math.floor(value)));
+          const ended=Date.now();
+          const failure={errorFamily:menuClickErrorFamily(error),budgetMs:menuTiming.budget,
+            remainingBeforeMs:bounded(menuTiming.remaining),elapsedMs:bounded(ended-menuTiming.started),
+            remainingAfterMs:bounded(deadline-ended),postFailure:{status:'unavailable'}};
+          facts.clickFailure=failure;
+          const prior={guardFailure:facts.guardFailure,queryFailure:facts.queryFailure,
+            frameTransitionWaited:facts.frameTransitionWaited};
+          let timer;
+          try {
+            await frame(deadline);
+            if(!guard(deadline))throw new Error('guard');
+            const post=await Promise.race([originalRoot.evaluate(menuFailureSnapshot,handle),
+              new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('observation deadline')),
+                Math.max(1,deadline-Date.now()));})]);
+            if(!guard(deadline))throw new Error('guard');
+            failure.postFailure=post;
+          } catch { /* Unavailable diagnostics never change the failed input verdict. */ }
+          finally {
+            clearTimeout(timer);
+            for(const [key,value] of Object.entries(prior)) {
+              if(value===undefined)delete facts[key];else facts[key]=value;
+            }
+          }
+        }
+        throw new Error('action');
+      }
       return true;
     }
     for (;;) {
@@ -363,3 +426,5 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
 };
 exports.sample=sample;
 exports.modelRowLabel=modelRowLabel;
+exports.menuClickErrorFamily=menuClickErrorFamily;
+exports.menuFailureSnapshot=menuFailureSnapshot;

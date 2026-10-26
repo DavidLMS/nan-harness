@@ -32,6 +32,7 @@ ZED_HELPERS = {'FEASIBILITY_ZED_INPUT_DRIVER', 'FEASIBILITY_ZED_INPUT_DRIVER_MOD
                'FEASIBILITY_ZED_RESPONSE_METHOD', 'NANH_ZED_ICON_TEMPLATES', 'FEASIBILITY_ZED_INPUT_SCRIPT'}
 WINDOWS_PROOF = {'FEASIBILITY_WINDOWS_PROOF_PYTHON', 'FEASIBILITY_WINDOWS_PROOF_SCRIPT'}
 HERMES_RUNTIME = {'HERMES_DESKTOP_HERMES_ROOT', 'HERMES_DESKTOP_HERMES'}
+HERMES_RETRY_SUBTREE_SOURCE = '0.17.6:f97608f178d1ffeca59860195ab7da295f7c8e5f'
 CLAUDE_WINDOWS_BOOTSTRAP_SHA256 = '97910a0668710a80315da1ab12d215c4b8d58d9f159886493e37848feb92351e'
 CLAUDE_BOOTSTRAP_SHA256 = '83126565df48e98691a3845f27bb7ee78d0632aa14b5881adad8c7ac4f0a3adf'
 
@@ -135,6 +136,16 @@ def validate_zed_panel_release(release, executable_hash):
         raise ValueError('Zed panel layout source differs')
 
 
+def hermes_retry_subtree_policy(app, platform, release):
+    expected = dict(version='0.17.6', revision='f97608f178d1ffeca59860195ab7da295f7c8e5f',
+        channel='github-source:NousResearch/hermes-agent', format='source',
+        url='https://github.com/NousResearch/hermes-agent.git')
+    if (app == 'hermes-desktop' and platform == 'windows'
+            and all(release.get(key) == value for key, value in expected.items())):
+        return HERMES_RETRY_SUBTREE_SOURCE
+    return None
+
+
 def qualification_environment(app, facts, real_nanh, executable, inherited=None):
     source = os.environ if inherited is None else inherited
     if source.get('GITHUB_ACTIONS') != 'true' or source.get('RUNNER_ENVIRONMENT') != 'github-hosted':
@@ -177,6 +188,8 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
             raise ValueError('Claude Windows native trial is unavailable')
     if source.get('NANH_CLAUDE_WINDOWS_SOURCE_POLICY') is not None:
         raise ValueError('Claude Windows source policy must be derived')
+    if source.get('FEASIBILITY_HERMES_RETRY_SUBTREE_SOURCE') is not None:
+        raise ValueError('Hermes retry subtree source policy must be derived')
     layout = source.get('NANH_ZED_LAYOUT_POLICY')
     if layout is not None and (app != 'zed-desktop' or source.get('RUNNER_OS') != 'Linux' or layout != 'zoom-before-send'):
         raise ValueError('Zed layout trial is unavailable')
@@ -498,6 +511,9 @@ def run(args):
             raise ValueError('Zed diagnostic point policy differs')
         environment['NANH_ZED_RETRY_POINT'] = placement
     release = manifest['apps'][0]
+    subtree_policy = hermes_retry_subtree_policy(args.app, args.platform, release)
+    if subtree_policy is not None:
+        environment['FEASIBILITY_HERMES_RETRY_SUBTREE_SOURCE'] = subtree_policy
     if environment.get('NANH_CLAUDE_WINDOWS_FRESH_PROFILE') == '1':
         # Frozen release, prepared executable and bootstrap have all been checked.
         environment['NANH_CLAUDE_WINDOWS_SOURCE_POLICY'] = 'official-2.19675.0-97910a066871'

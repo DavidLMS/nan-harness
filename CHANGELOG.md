@@ -9,6 +9,18 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Bring the retained Codex Retry button into view before click verification
+  during Desktop qualification, preserving ownership and single-action checks.
+- Verify Codex's preloaded Spotlight palette stays closed and unfocused while
+  Desktop qualification uses the retained main window.
+- Reprove the same owned Codex auxiliary window when its avatar route commits
+  between startup observations.
+- Verify the native Hermes catalog menu transition directly during Windows
+  qualification without waiting for unrelated page navigation.
+- Allow one passive Hermes error subtree settlement within its retained Windows
+  conversation before Retry, preserving native ownership and single-input checks.
+- Isolate Windows Desktop probe artifacts so reused process IDs cannot collide
+  with connection or renderer records from earlier probes.
 - Keep the MiMo native-configuration canary compatible with deferred MCP dispatch
   in MiMo Code 0.1.16 while retaining the previous tool-discovery routes.
 - Recognize the inspected Linux Codex fresh-profile home startup during Desktop

@@ -136,7 +136,309 @@ class CodexRetainedCustodyTests(unittest.TestCase):
                 with self.assertRaises(ValueError):q.semantic_observations(tmp, 'chatgpt-desktop')
 
 
+class SpotlightAuxiliaryContractTests(unittest.TestCase):
+    @staticmethod
+    def observation():
+        return dict(sourceVersion='26.1007.21434',
+            rendererSha256='2b78662247051c8b0905e1afbe0839187b8267e9181e179bc422322e4010433b',
+            status='verified', failure=None, stableSamples=2, inputCount=1, listCount=1, editableCount=1)
+
+    def test_closed_source_witness_is_optional_and_does_not_prove_main_binding(self):
+        witness = self.observation()
+        base = dict(schemaVersion=1, mechanism='renderer-inventory', diagnosticsOnly=True,
+            app='chatgpt-desktop', endpointOwned=True, launcherOwned=True, attached=True,
+            pageCount=1, textareaCount=0, editableCount=0, sendCount=0, retryCount=0,
+            newThreadCount=0, loginCount=0, dialogCount=0, errorCategory='target-invalid')
+        session = dict(pageCount=2, bindingVerified=False, codingComposerReady=False,
+                       auxiliaryInert=False, inputChannel='cdp-dom', spotlightAuxiliary=witness)
+        trust = dict(phase='guard', status='absent', clickAttempted=False, clickCompleted=False,
+                     spotlightAuxiliary=witness)
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'fact.json'
+            for field, detail in [('codexSession', session), ('folderTrustObservation', trust)]:
+                item = base | {field: detail}
+                path.write_text(json.dumps(item))
+                record = q.semantic_observations(root, 'chatgpt-desktop', 'windows')[0]
+                self.assertEqual(record, item)
+                self.assertEqual(record['errorCategory'], 'target-invalid')
+                for platform in [None, 'linux', 'macos']:
+                    with self.assertRaises(ValueError):
+                        q.semantic_observations(root, 'chatgpt-desktop', platform)
+            rejected = witness | dict(status='rejected', failure='source-open', stableSamples=0,
+                                      inputCount=None, listCount=None, editableCount=None)
+            item = base | {'codexSession': session | {'spotlightAuxiliary': rejected}}
+            path.write_text(json.dumps(item))
+            self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop', 'windows'), [item])
+            item['errorCategory'] = None
+            path.write_text(json.dumps(item))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'chatgpt-desktop', 'windows')
+
+    def test_source_witness_rejects_untyped_private_or_contradictory_facts(self):
+        witness = self.observation()
+        for change in [{'sourceVersion': 'PRIVATE'}, {'rendererSha256': 'a' * 64}, {'url': 'PRIVATE'},
+                       {'status': True}, {'failure': 'query'}, {'stableSamples': True}, {'stableSamples': 3},
+                       {'inputCount': True}, {'inputCount': None}, {'listCount': 0}, {'editableCount': 2},
+                       {'status': 'rejected', 'failure': None}, {'status': 'rejected', 'failure': 'PRIVATE'}]:
+            with self.assertRaises(ValueError):
+                q.spotlight_auxiliary(witness | change, 'windows')
+        for failure in ['main-focus', 'auxiliary-focus', 'initial-scope', 'scope-changed', 'source-open',
+                        'source-transition', 'foreign-controls', 'identity', 'ownership', 'deadline', 'query']:
+            q.spotlight_auxiliary(witness | dict(status='rejected', failure=failure), 'windows')
+
+    def test_rejection_check_is_closed_optional_and_never_certifies_admission(self):
+        rejected = self.observation() | dict(status='rejected', failure='foreign-controls', stableSamples=0)
+        checks = ['body-anchor', 'body-style', 'initial-controls', 'forbidden-nodes',
+                  'control-location', 'control-pointer', 'editable-scope', 'main-controls', 'toast-announcer']
+        for check in checks:
+            q.spotlight_auxiliary(rejected | dict(rejectionCheck=check), 'windows')
+        for check in [None, True, [], {}, 'PRIVATE']:
+            with self.assertRaises(ValueError):
+                q.spotlight_auxiliary(rejected | dict(rejectionCheck=check), 'windows')
+        for observation in [self.observation(), rejected | dict(failure='query')]:
+            with self.assertRaises(ValueError):
+                q.spotlight_auxiliary(observation | dict(rejectionCheck='body-anchor'), 'windows')
+
+    def test_control_kind_is_closed_and_bound_to_the_rejecting_control_predicate(self):
+        rejected = self.observation() | dict(status='rejected', failure='foreign-controls', stableSamples=0)
+        for check in ['control-location', 'control-pointer']:
+            for kind in ['command', 'input', 'list', 'disabled-button', 'button', 'anchor', 'select', 'other', 'radix-focus-guard']:
+                q.spotlight_auxiliary(rejected | dict(rejectionCheck=check, controlKind=kind), 'windows')
+        for change in [dict(controlKind='button'), dict(rejectionCheck='body-style', controlKind='button'),
+                       *[dict(rejectionCheck='control-pointer', controlKind=kind)
+                         for kind in [None, True, [], {}, 'PRIVATE']]]:
+            with self.assertRaises(ValueError):
+                q.spotlight_auxiliary(rejected | change, 'windows')
+
+    def test_toast_count_is_optional_descriptive_and_cannot_certify_an_empty_region(self):
+        witness = self.observation()
+        q.spotlight_auxiliary(witness | dict(toastAnnouncerCount=1), 'windows')
+        rejected = witness | dict(status='rejected', failure='foreign-controls', stableSamples=0,
+                                  rejectionCheck='toast-announcer')
+        for count in [None, 0, 1]:
+            q.spotlight_auxiliary(rejected | dict(toastAnnouncerCount=count), 'windows')
+        for count in [None, 0, True, -1, 2, 'PRIVATE', []]:
+            with self.assertRaises(ValueError):
+                q.spotlight_auxiliary(witness | dict(toastAnnouncerCount=count), 'windows')
+        for count in [True, -1, 2, 'PRIVATE', []]:
+            with self.assertRaises(ValueError):
+                q.spotlight_auxiliary(rejected | dict(toastAnnouncerCount=count), 'windows')
+
+
+class CodexRetryRefusalContractTests(unittest.TestCase):
+    @staticmethod
+    def sample(owned=9, tested=9):
+        return dict(blocked=None, ownedHitCount=owned, testedViewportCount=tested)
+
+    @classmethod
+    def refusal(cls):
+        return dict(reason='guard-rejected', remainingMs=0,
+                    first=cls.sample(), second=cls.sample(), final=None)
+
+    @staticmethod
+    def record():
+        return dict(schemaVersion=1, mechanism='codex-renderer-qualification', diagnosticsOnly=True,
+            endpointOwned=True, targetVerified=True, attached=True, bindingVerified=True,
+            auxiliaryInert=True, codingComposerReady=True, uniqueComposer=True,
+            inputReadback=False, inputSubmitted=False, userTurnObserved=False,
+            responseVerified=False, errorObserved=False, retryControl=True,
+            retryAttempted=False, retryCompleted=False, providerResponseVerified=False,
+            assistantTurnCount=0, providerGenerationCount=4, errorCategory='action-uncertain',
+            retryClickPhase='sample-second')
+
+    def test_retry_refusal_is_optional_and_does_not_certify_a_delivered_action(self):
+        base = self.record()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'fact.json'
+            for value in [base, base | dict(retryClickRefusal=self.refusal())]:
+                path.write_text(json.dumps(value))
+                self.assertEqual(q.semantic_observations(tmp, 'chatgpt-desktop', 'windows'), [value])
+                self.assertFalse(value['retryAttempted'])
+            for change in [dict(errorCategory=None), dict(retryControl=False),
+                           dict(retryAttempted=True, retryCompleted=True), dict(retryClickPhase='complete')]:
+                path.write_text(json.dumps(base | dict(retryClickRefusal=self.refusal()) | change))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(tmp, 'chatgpt-desktop', 'windows')
+
+    def test_retry_samples_reject_private_untyped_and_impossible_hit_counts(self):
+        for sample in [self.sample() | change for change in [dict(rect=[0, 0, 1, 1]),
+                dict(blocked='PRIVATE'), dict(ownedHitCount=True), dict(testedViewportCount=True),
+                dict(ownedHitCount=10), dict(testedViewportCount=-1), dict(ownedHitCount=2, testedViewportCount=1),
+                dict(blocked='hidden')]] + [[], {}, True]:
+            with self.assertRaises(ValueError):
+                q.codex_retry_click_refusal(self.refusal() | dict(second=sample), 'sample-second')
+        for reason in ['unsupported-control', 'detached-or-inert', 'disabled', 'hidden',
+                       'foreign-overlay', 'pointer-disabled', 'ancestor-limit']:
+            blocked = dict(blocked=reason, ownedHitCount=None, testedViewportCount=None)
+            q.codex_retry_click_refusal(self.refusal() | dict(reason='sample-blocked', second=blocked), 'sample-second')
+
+    def test_retry_refusal_reasons_match_the_exact_phase_and_failed_predicate(self):
+        for reason, phase in [('guard-rejected', 'sample-second'), ('deadline', 'sample-final'),
+                             ('control-count', 'admission'), ('control-disabled', 'revalidate'),
+                             ('missing-handle', 'capture'), ('control-replaced', 'revalidate'),
+                             ('stationary-hit-changed', 'sample-second'),
+                             ('final-sample-changed', 'sample-final'), ('final-point-lost', 'sample-final'),
+                             ('reveal-failed', 'viewport-reveal')]:
+            q.codex_retry_click_refusal(self.refusal() | dict(reason=reason), phase)
+        for reason in ['guard-rejected', 'deadline', 'control-count', 'control-disabled', 'control-replaced']:
+            q.codex_retry_click_refusal(self.refusal() | dict(reason=reason), 'viewport-reveal')
+        for reason, name in [('first-hit-missing', 'first'), ('second-hit-missing', 'second')]:
+            q.codex_retry_click_refusal(self.refusal() | {'reason': reason, name: self.sample(0, 9)}, 'sample-second')
+            with self.assertRaises(ValueError):
+                q.codex_retry_click_refusal(self.refusal() | dict(reason=reason), 'sample-second')
+        for change in [dict(reason='PRIVATE'), dict(remainingMs=True), dict(remainingMs=-1),
+                       dict(remainingMs=600001), dict(reason='deadline', remainingMs=1),
+                       dict(reason='sample-blocked'), dict(rawError='PRIVATE')]:
+            with self.assertRaises(ValueError):
+                q.codex_retry_click_refusal(self.refusal() | change, 'sample-second')
+
+    def test_cached_spotlight_receipt_is_only_available_for_a_guard_refusal(self):
+        base = self.record() | dict(retryClickRefusal=self.refusal())
+        witness = SpotlightAuxiliaryContractTests.observation() | dict(toastAnnouncerCount=1)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'fact.json'
+            for observation in [witness, witness | dict(status='rejected', failure='deadline')]:
+                value = base | dict(retryGuardSpotlight=observation)
+                path.write_text(json.dumps(value))
+                self.assertEqual(q.semantic_observations(tmp, 'chatgpt-desktop', 'windows'), [value])
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(tmp, 'chatgpt-desktop', 'linux')
+            for value in [self.record() | dict(retryGuardSpotlight=witness),
+                          base | dict(retryClickRefusal=self.refusal() | dict(reason='deadline'),
+                                      retryGuardSpotlight=witness)]:
+                path.write_text(json.dumps(value))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(tmp, 'chatgpt-desktop', 'windows')
+
+    def test_shared_node_to_rust_closed_wire_fixture_reaches_the_reducer(self):
+        fixture = json.loads((ROOT / 'canary/tests/fixtures/codex-retry-click.json').read_text())
+        self.assertEqual(set(fixture), {'raw', 'closed', 'ordinary', 'viewport'})
+        self.assertEqual(len(fixture['raw']), 3)
+        self.assertEqual(len(fixture['ordinary']), 45)
+        for observation in fixture['ordinary']:
+            refusal = dict(observation)
+            phase = refusal.pop('phase')
+            q.codex_retry_click_refusal(refusal, phase)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'fact.json'
+            for raw, closed in zip(fixture['raw'], fixture['closed'], strict=True):
+                self.assertNotIn('providerResponseVerified', raw)
+                self.assertNotIn('providerGenerationCount', raw)
+                self.assertEqual(closed, raw | dict(providerResponseVerified=False, providerGenerationCount=4))
+                path.write_text(json.dumps(closed))
+                self.assertEqual(q.semantic_observations(tmp, 'chatgpt-desktop', 'windows'), [closed])
+                self.assertEqual(closed['errorCategory'], 'action-uncertain')
+                self.assertFalse(closed['retryAttempted'])
+                self.assertFalse(closed['retryCompleted'])
+            viewport = fixture['viewport']
+            self.assertEqual(set(viewport), {'raw', 'closed'})
+            self.assertEqual(len(viewport['raw']), 2)
+            for raw, closed, (verified, generation) in zip(viewport['raw'], viewport['closed'],
+                                                          [(True, 5), (False, 4)], strict=True):
+                self.assertEqual(closed, raw | dict(providerResponseVerified=verified,
+                                                   providerGenerationCount=generation))
+                self.assertEqual(closed['retryViewportReveal'], 'completed')
+                self.assertEqual(closed['retryCompleted'], verified)
+                path.write_text(json.dumps(closed))
+                self.assertEqual(q.semantic_observations(tmp, 'chatgpt-desktop', 'windows'), [closed])
+
+    def test_viewport_observation_is_closed_and_does_not_certify_retry(self):
+        value = self.record() | dict(retryViewportReveal='completed')
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'fact.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(tmp, 'chatgpt-desktop', 'windows'), [value])
+            self.assertFalse(value['retryAttempted'])
+            self.assertFalse(value['retryCompleted'])
+            completed = value | dict(errorCategory=None, retryAttempted=True, retryCompleted=True,
+                userTurnObserved=True, assistantTurnCount=1, responseVerified=True,
+                providerResponseVerified=True, providerGenerationCount=5, retryClickPhase='complete')
+            path.write_text(json.dumps(completed))
+            self.assertEqual(q.semantic_observations(tmp, 'chatgpt-desktop', 'windows'), [completed])
+            for change in [dict(retryControl=False), *[dict(retryViewportReveal=state)
+                           for state in [None, True, {}, [], 'PRIVATE']]]:
+                path.write_text(json.dumps(value | change))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(tmp, 'chatgpt-desktop', 'windows')
+
+
 class RendererCheckpointTests(unittest.TestCase):
+    def test_unknown_auxiliary_shape_is_closed_and_bound_to_its_refused_read(self):
+        shape = dict(protocolKind='app', ownedAppHost=True, entryKind='index',
+                     initialRouteKind='spacePrewarm', queryShape='initialRouteOnly', fragmentPresent=False)
+        trust = dict(phase='guard', status='blocked', clickAttempted=False, clickCompleted=False,
+            rejectionStage='guard', guardFailure='auxiliary-route',
+            auxiliaryRouteFailure=dict(initialRoute='unknown', settleRoute='unknown', samePage=True),
+            unknownRouteShapes=dict(initial=shape, settle=shape))
+        value = dict(schemaVersion=1, mechanism='renderer-inventory', diagnosticsOnly=True,
+            app='chatgpt-desktop', endpointOwned=True, launcherOwned=True, attached=True,
+            pageCount=1, textareaCount=0, editableCount=0, sendCount=0, retryCount=0,
+            newThreadCount=0, loginCount=0, dialogCount=0, errorCategory='target-invalid',
+            folderTrustObservation=trust)
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'fact.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop'), [value])
+            for change in [{'url': 'PRIVATE'}, {'protocolKind': 'PRIVATE'}, {'ownedAppHost': 'PRIVATE'},
+                           {'entryKind': True}, {'initialRouteKind': 'PRIVATE'}, {'fragmentPresent': 1},
+                           {'protocolKind': 'file'}, {'queryShape': 'none'}, {'initialRouteKind': 'multiple'},
+                           {'protocolKind': 'invalid'}]:
+                item = copy.deepcopy(value)
+                item['folderTrustObservation']['unknownRouteShapes']['initial'] = shape | change
+                path.write_text(json.dumps(item))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'chatgpt-desktop')
+            for phase in ('initial', 'settle'):
+                item = copy.deepcopy(value)
+                item['folderTrustObservation']['unknownRouteShapes'][phase] = None
+                path.write_text(json.dumps(item))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'chatgpt-desktop')
+                item = copy.deepcopy(value)
+                item['folderTrustObservation']['auxiliaryRouteFailure'][phase + 'Route'] = 'blank'
+                path.write_text(json.dumps(item))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'chatgpt-desktop')
+                item['folderTrustObservation']['unknownRouteShapes'][phase] = None
+                path.write_text(json.dumps(item))
+                self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop'), [item])
+            item = copy.deepcopy(value)
+            del item['folderTrustObservation']['auxiliaryRouteFailure']
+            path.write_text(json.dumps(item))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'chatgpt-desktop')
+
+    def test_auxiliary_route_refusal_reports_only_closed_existing_read_categories(self):
+        route = dict(initialRoute='blank', settleRoute='avatarOverlay', samePage=True)
+        trust = dict(status='blocked', clickAttempted=False, clickCompleted=False,
+                     rejectionStage='guard', guardFailure='auxiliary-route', auxiliaryRouteFailure=route)
+        value = dict(schemaVersion=1, mechanism='renderer-inventory', diagnosticsOnly=True,
+            app='chatgpt-desktop', endpointOwned=True, launcherOwned=True, attached=True,
+            pageCount=1, textareaCount=0, editableCount=0, sendCount=0, retryCount=0,
+            newThreadCount=0, loginCount=0, dialogCount=0, errorCategory='target-invalid',
+            folderTrustObservation={'phase': 'guard', **trust})
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'fact.json'
+            for observation in [route, dict(initialRoute='unknown', settleRoute=None, samePage=None),
+                                dict(initialRoute='hotkeyWindow', settleRoute='quickChat', samePage=False)]:
+                item = copy.deepcopy(value)
+                item['folderTrustObservation']['auxiliaryRouteFailure'] = observation
+                path.write_text(json.dumps(item))
+                self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop'), [item])
+            for change in [{'initialRoute': 'PRIVATE'}, {'initialRoute': 'avatarOverlay'},
+                           {'settleRoute': 'PRIVATE'}, {'samePage': 'PRIVATE'}, {'samePage': None},
+                           {'settleRoute': None}, {'url': 'PRIVATE'}]:
+                item = copy.deepcopy(value)
+                item['folderTrustObservation']['auxiliaryRouteFailure'] = route | change
+                path.write_text(json.dumps(item))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'chatgpt-desktop')
+            item = copy.deepcopy(value)
+            item['folderTrustObservation']['guardFailure'] = 'main-identity'
+            path.write_text(json.dumps(item))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'chatgpt-desktop')
+
     def test_parent_failure_boundaries_are_closed(self):
         value = dict(schemaVersion=1, mechanism='renderer-inventory-failure',
                      diagnosticsOnly=True, stage='process-custody', reason='isolation-unavailable')
@@ -1848,6 +2150,47 @@ class QualificationTests(unittest.TestCase):
                 path.write_text(json.dumps({**value, 'actionObservation': changed}))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'hermes-desktop')
+
+    def test_hermes_menu_click_failure_is_closed_and_never_proves_delivery(self):
+        post = dict(status='observed', documentSame=True, rootConnected=True, rootSame=True,
+                    controlConnected=True, controlSame=True, menuCount=1)
+        failure = dict(errorFamily='timeout', budgetMs=5000, remainingBeforeMs=10000,
+                       elapsedMs=5001, remainingAfterMs=4999, postFailure=post)
+        value = dict(schemaVersion=1, mechanism='hermes-windows-catalog-readiness', diagnosticsOnly=True,
+                     stage='menu', errorCategory='menu-unavailable', menuOpened=False,
+                     refreshAttempted=False, catalogVerified=False, modelRowVerified=False,
+                     menuDismissed=False, composerReverified=False, composerObservation=None, guardFailure=None,
+                     actionObservation=dict(action='menu', sampleStatus='click-failed', blocker='none'),
+                     clickFailure=failure)
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'fact.json'
+            for observation in [post, {'status': 'unavailable'}, post | {'menuCount': 0}, post | {'menuCount': 2}]:
+                item = copy.deepcopy(value)
+                item['clickFailure']['postFailure'] = observation
+                path.write_text(json.dumps(item))
+                record = q.semantic_observations(root, 'hermes-desktop')[0]
+                self.assertEqual(record, item)
+                self.assertFalse(record['menuOpened'])
+                self.assertFalse(record['catalogVerified'])
+            for change in [{'errorFamily': 'PRIVATE'}, {'message': 'PRIVATE'}, {'budgetMs': True},
+                           {'budgetMs': 4999}, {'remainingBeforeMs': 120001}, {'elapsedMs': -1},
+                           {'remainingAfterMs': None}, {'postFailure': None},
+                           {'postFailure': {'status': 'unavailable', 'menuCount': 0}},
+                           {'postFailure': post | {'url': 'PRIVATE'}},
+                           {'postFailure': post | {'rootConnected': False}},
+                           {'postFailure': post | {'controlConnected': False}},
+                           {'postFailure': post | {'menuCount': True}},
+                           {'postFailure': post | {'documentSame': False}}]:
+                item = copy.deepcopy(value)
+                item['clickFailure'].update(change)
+                path.write_text(json.dumps(item))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'hermes-desktop')
+            item = copy.deepcopy(value)
+            item['actionObservation']['action'] = 'refresh'
+            path.write_text(json.dumps(item))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'hermes-desktop')
 
     def test_retained_zed_post_target_state_is_advisory_and_closed(self):
         facts = dict(schemaVersion=1, mechanism='zed-atspi-retry', diagnosticsOnly=True,
@@ -3829,8 +4172,13 @@ class QualificationTests(unittest.TestCase):
         source = dict(status='complete', routes=route_counts, visibility=dict(visible=1, hidden=1, unavailable=0))
         measured = {**inventory, 'source': source}
         self.assertEqual(q.public_onboarding({**setup, 'rejectedPageInventory': measured}, 'chatgpt-desktop')['rejectedPageInventory'], measured)
+        expanded = {**source, 'routes': {**route_counts, 'unknown': 0, 'spotlight': 1}}
+        spotlight = {**inventory, 'source': expanded}
+        self.assertEqual(q.public_onboarding({**setup, 'rejectedPageInventory': spotlight}, 'chatgpt-desktop')['rejectedPageInventory'], spotlight)
         for invalid in ({**source, 'url': 'PRIVATE'}, {**source, 'status': []},
                         {**source, 'routes': {**route_counts, 'unknown': True}},
+                        {**expanded, 'routes': {**expanded['routes'], 'spotlight': True}},
+                        {**expanded, 'routes': {**expanded['routes'], 'PRIVATE': 0}},
                         {**source, 'visibility': dict(visible=2, hidden=1, unavailable=0)}):
             with self.assertRaises(ValueError):
                 q.public_onboarding({**setup, 'rejectedPageInventory': {**inventory, 'source': invalid}}, 'chatgpt-desktop')
@@ -5093,6 +5441,189 @@ class WindowsCleanupProgressTests(unittest.TestCase):
                         with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
                     path.write_text(json.dumps(good))
                     with self.assertRaises(ValueError):q.semantic_observations(root,'zed-desktop')
+
+class HermesRetrySubtreePolicyTests(unittest.TestCase):
+    def test_policy_is_derived_only_from_the_verified_windows_source(self):
+        release = dict(version='0.17.6', revision='f97608f178d1ffeca59860195ab7da295f7c8e5f',
+            channel='github-source:NousResearch/hermes-agent', format='source',
+            url='https://github.com/NousResearch/hermes-agent.git')
+        self.assertEqual(runner.hermes_retry_subtree_policy('hermes-desktop', 'windows', release),
+                         runner.HERMES_RETRY_SUBTREE_SOURCE)
+        for key in release:
+            for changed in (release | {key: 'OTHER'}, {k: v for k, v in release.items() if k != key}):
+                self.assertIsNone(runner.hermes_retry_subtree_policy('hermes-desktop', 'windows', changed))
+        for app, platform in [('chatgpt-desktop', 'windows'), ('hermes-desktop', 'linux'),
+                              ('hermes-desktop', 'macos')]:
+            self.assertIsNone(runner.hermes_retry_subtree_policy(app, platform, release))
+        source = dict(GITHUB_ACTIONS='true', RUNNER_ENVIRONMENT='github-hosted', RUNNER_OS='Linux',
+                      FEASIBILITY_HERMES_RETRY_SUBTREE_SOURCE=runner.HERMES_RETRY_SUBTREE_SOURCE)
+        with self.assertRaisesRegex(ValueError, 'must be derived'):
+            runner.qualification_environment('hermes-desktop', Path('/facts'), Path('/nanh'), '/app', source)
+
+    def test_optional_settlement_status_never_certifies_input_or_response(self):
+        value = json.loads((ROOT / 'canary/tests/fixtures/hermes-retry-scope.json').read_text())
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'hermes.json'
+            for status in ('completed', 'rejected'):
+                path.write_text(json.dumps(value | {'retrySubtreeSettlement': status}))
+                record = q.semantic_observations(root, 'hermes-desktop', 'windows')[0]
+                self.assertEqual(record['retrySubtreeSettlement'], status)
+                self.assertFalse(record['inputSubmitted'])
+                self.assertFalse(record['responseVerified'])
+            for status in (None, {}, [], True, 'PRIVATE'):
+                path.write_text(json.dumps(value | {'retrySubtreeSettlement': status}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'hermes-desktop', 'windows')
+
+
+class WindowsProbeNamespaceTests(unittest.TestCase):
+    def test_codex_restart_controls_are_opaque_and_never_public_evidence(self):
+        value = dict(schemaVersion=1, mechanism='windows-launcher', diagnosticsOnly=True,
+            app='chatgpt-desktop', stage='connection-create', cause='already-exists',
+            childStarted=True, childExitCode=None, osCode=183)
+        with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as outside:
+            directory = Path(root) / 'chatgpt-desktop-deterministic-0'
+            directory.mkdir()
+            (directory / 'closed.json').write_text(json.dumps(value))
+            control = directory / 'codex-restart-aB12z9'
+            control.mkdir()
+            (control / 'request.json').write_text('PRIVATE_NOT_PUBLIC_JSON')
+            (control / 'nested').mkdir()
+            self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop', 'windows'), [value])
+            control.rename(directory / 'codex-restart-foreign')
+            with self.assertRaisesRegex(ValueError, 'invalid semantic probe entry'):
+                q.semantic_observations(root, 'chatgpt-desktop', 'windows')
+            (directory / 'codex-restart-foreign').rename(control)
+            target = Path(outside) / 'private'
+            control.rename(target)
+            control.symlink_to(target, target_is_directory=True)
+            with self.assertRaisesRegex(ValueError, 'invalid semantic probe entry'):
+                q.semantic_observations(root, 'chatgpt-desktop', 'windows')
+
+    def test_legacy_root_native_controls_share_a_global_three_directory_budget(self):
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            for index in range(3):
+                control = root / f'codex-restart-abcde{index}'
+                control.mkdir()
+                (control / 'request.json').write_text('PRIVATE_NOT_PUBLIC_JSON')
+            self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop', 'windows'), [])
+            namespace = root / 'chatgpt-desktop-deterministic-0'
+            namespace.mkdir()
+            (namespace / 'codex-restart-abcde3').mkdir()
+            with self.assertRaisesRegex(ValueError, 'too many native control directories'):
+                q.semantic_observations(root, 'chatgpt-desktop', 'windows')
+            with self.assertRaisesRegex(ValueError, 'unknown semantic probe namespace'):
+                q.semantic_observations(root, 'hermes-desktop', 'windows')
+
+    def test_same_pid_in_separate_probe_namespaces_keeps_all_closed_records(self):
+        value = json.loads((ROOT / 'canary/tests/fixtures/hermes-retry-scope.json').read_text())
+        with tempfile.TemporaryDirectory() as root:
+            for index in range(3):
+                directory = Path(root) / f'hermes-desktop-deterministic-{index}'
+                directory.mkdir()
+                (directory / 'connection-17.json').write_text('PRIVATE_NOT_A_PUBLIC_RECORD')
+                (directory / 'dom-17.json').write_text(json.dumps(value))
+            records = q.semantic_observations(root, 'hermes-desktop', 'windows')
+            self.assertEqual(len(records), 3)
+            self.assertTrue(all(record['retryScopeFailure'] == 'pair-changed' for record in records))
+            bad = Path(root) / 'hermes-desktop-deterministic-3'
+            bad.mkdir()
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'hermes-desktop', 'windows')
+
+    def test_namespace_budgets_are_global_and_links_nesting_and_foreign_apps_fail(self):
+        value = json.loads((ROOT / 'canary/tests/fixtures/hermes-retry-scope.json').read_text())
+        with tempfile.TemporaryDirectory() as root:
+            for index in range(3):
+                directory = Path(root) / f'hermes-desktop-deterministic-{index}'
+                directory.mkdir()
+                for item in range(22):
+                    (directory / f'dom-{item}.json').write_text(json.dumps(value))
+            with self.assertRaisesRegex(ValueError, 'too many semantic observations'):
+                q.semantic_observations(root, 'hermes-desktop', 'windows')
+            with self.assertRaisesRegex(ValueError, 'unknown semantic probe namespace'):
+                q.semantic_observations(root, 'chatgpt-desktop', 'windows')
+        with tempfile.TemporaryDirectory() as root:
+            directory = Path(root) / 'hermes-desktop-deterministic-0'
+            directory.mkdir()
+            (directory / 'nested').mkdir()
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'hermes-desktop', 'windows')
+            (directory / 'nested').rmdir()
+            (directory / 'native-diagnostics.json').write_text('{}')
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'hermes-desktop', 'windows')
+            (directory / 'native-diagnostics.json').unlink()
+            (directory / 'connection-17.json').symlink_to(Path(root) / 'private')
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'hermes-desktop', 'windows')
+
+
+class WindowsLauncherObservationTests(unittest.TestCase):
+    def test_wrapper_failure_and_child_exit_are_distinct_closed_records(self):
+        value = dict(schemaVersion=1, mechanism='windows-launcher', diagnosticsOnly=True,
+            app='chatgpt-desktop', stage='connection-create', cause='already-exists',
+            childStarted=True, childExitCode=None, osCode=183)
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'windows-launcher-1.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop', 'windows'), [value])
+            exited = value | dict(stage='child-exit', cause='child-nonzero', childExitCode=1, osCode=None)
+            path.write_text(json.dumps(exited))
+            self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop', 'windows'), [exited])
+            for code in (-1073741819, -1, 7, 2147483647):
+                path.write_text(json.dumps(exited | {'childExitCode': code}))
+                self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop', 'windows')[0]['childExitCode'], code)
+            for changed in [value | dict(rawError='PRIVATE'), value | dict(diagnosticsOnly=False),
+                    value | dict(app='hermes-desktop'), value | dict(childStarted=False),
+                    value | dict(stage='PRIVATE'), value | dict(cause='PRIVATE'),
+                    value | dict(childExitCode=1), value | dict(cause='child-nonzero'),
+                    value | dict(osCode=True), value | dict(osCode=2 ** 31),
+                    exited | dict(childExitCode=0), exited | dict(childExitCode=True),
+                    exited | dict(osCode=183), exited | dict(cause='other')]:
+                path.write_text(json.dumps(changed))
+                with self.subTest(changed=changed), self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'chatgpt-desktop', 'windows')
+            path.write_text(json.dumps(value))
+            for platform in (None, 'linux', 'macos'):
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'chatgpt-desktop', platform)
+            for app in ('hermes-desktop', 'zed-desktop'):
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, app, 'windows')
+
+
+class HermesRetryScopeObservationTests(unittest.TestCase):
+    def test_actual_refusal_fixture_is_closed_and_keeps_legacy_receipts_valid(self):
+        value = json.loads((ROOT / 'canary/tests/fixtures/hermes-retry-scope.json').read_text())
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'hermes.json'
+            path.write_text(json.dumps(value))
+            record = q.semantic_observations(root, 'hermes-desktop', 'windows')[0]
+            self.assertEqual(record['retryScopeObservation'], value['retryScopeObservation'])
+            self.assertFalse(record['inputSubmitted'])
+            self.assertEqual(record['retryScopeFailure'], 'pair-changed')
+            for change in [dict(phase='PRIVATE'), dict(documentSame=1), dict(rawText='PRIVATE'),
+                    dict(currentUserCount=True), dict(currentUserCount=-1), dict(currentUserCount=3),
+                    dict(currentPairPresent=False), dict(currentPairConnected=False),
+                    dict(currentUserSame=True), dict(currentAlertSame=True)]:
+                changed = value | {'retryScopeObservation': value['retryScopeObservation'] | change}
+                path.write_text(json.dumps(changed))
+                with self.subTest(change=change), self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'hermes-desktop', 'windows')
+            for observation in (None, [], {}):
+                path.write_text(json.dumps(value | {'retryScopeObservation': observation}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'hermes-desktop', 'windows')
+            for reason in (None, 'alert-changed', 'retry-changed'):
+                path.write_text(json.dumps(value | {'retryScopeFailure': reason}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'hermes-desktop', 'windows')
+            del value['retryScopeObservation']
+            path.write_text(json.dumps(value))
+            self.assertNotIn('retryScopeObservation', q.semantic_observations(root, 'hermes-desktop')[0])
+
 
 class CodexFreshLinuxHomeTests(unittest.TestCase):
     def test_renderer_fact_keeps_platform_and_parent_confirmation_context(self):
