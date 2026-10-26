@@ -776,7 +776,7 @@ fn codex_windows_immutable_url_requires_the_inspected_package_identity() {
         &|r| {
             r.url = r
                 .url
-                .replace("oaistatic.com", "oaistatic.com.attacker.example")
+                .replace("oaistatic.com", "oaistatic.com.attacker.example");
         },
         &|r| r.url.push_str("?download=1"),
         &|r| r.url.push_str("#fragment"),
