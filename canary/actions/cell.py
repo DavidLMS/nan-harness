@@ -1133,13 +1133,15 @@ def hermes_machine_frontend(version):
     return bool(parsed and tuple(map(int, parsed.groups())) >= (0, 22, 0))
 
 
-def conformance(args, state):
+def conformance(args, state, observe=None):
     """Deterministic conformance only certifies success; its failures stay blocked.
 
     The published report has one status per scenario, shared by workspace setup,
     scripted-provider startup, wrapper timeouts and contract assertions. Neither
     duration nor repetition separates those, so a failure is never a mismatch.
     A second attempt can still produce positive evidence after a transient error.
+    An optional local observer must project closed diagnostics before private
+    report removal; it does not change normal qualification or retry policy.
     """
     if args.harness == "gentle-shell":
         return gentle_probe(args)
@@ -1187,6 +1189,8 @@ def conformance(args, state):
                 raise ConformanceFailure("conformance-process-unavailable", attempt) from None
             result = json.loads(report.read_bytes())
             failed = conformance_result(result, args.harness)
+            if observe is not None:
+                observe(attempt, status, result)
         except StageTimeout:
             raise ConformanceFailure("conformance-process-timeout", attempt) from None
         except FileNotFoundError:

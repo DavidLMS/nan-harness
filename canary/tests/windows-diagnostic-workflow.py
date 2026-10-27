@@ -38,6 +38,11 @@ class WindowsDiagnosticWorkflowTests(unittest.TestCase):
             with self.subTest(observation_missing=key):
                 self.assertNotEqual(status({**observation, key: ""}), 0)
         self.assertNotEqual(status({"SELECTED_MODE": "mimo-inventory-observation"}), 0)
+        canonical = {**release, "SELECTED_MODE": "mimo-conformance-observation"}
+        self.assertEqual(status(canonical), 0)
+        for key in ("RELEASE_TAG", "RELEASE_COMMIT", "ASSET_RUN_ID", "MANIFEST_SHA256"):
+            self.assertNotEqual(status({**canonical, key: ""}), 0)
+        self.assertNotEqual(status({"SELECTED_MODE": "mimo-conformance-observation"}), 0)
         for key, value in [("OMP_COMPARISON", "true"), ("OMP_CANDIDATE", "true"),
                            ("SOURCE_OVERRIDE", "b" * 40), ("SELECTED_MODE", "live"),
                            ("SELECTED_HARNESSES", "omp"), ("RELEASE_COMMIT", ""),
@@ -46,9 +51,10 @@ class WindowsDiagnosticWorkflowTests(unittest.TestCase):
                 self.assertNotEqual(status({**release, key: value}), 0)
                 if key != "SELECTED_MODE":
                     self.assertNotEqual(status({**observation, key: value}), 0)
+                    self.assertNotEqual(status({**canonical, key: value}), 0)
         for mode, comparison in [("live", "false"), ("deterministic", "true"), ("native-diagnostic", "false")]:
             self.assertEqual(status(dict(SELECTED_MODE=mode, OMP_COMPARISON=comparison)), 0)
-        for name in ("approve-live", "diagnostic", "omp-usage-comparison", "mimo-inventory-observation"):
+        for name in ("approve-live", "diagnostic", "omp-usage-comparison", "mimo-inventory-observation", "mimo-conformance-observation"):
             job = re.split(r"\n  [a-z][a-z0-9-]*:\n", WORKFLOW.split(f"\n  {name}:\n", 1)[1], maxsplit=1)[0]
             # Only the job's first unindented sibling can end this block.
             self.assertIn("needs:", job)
@@ -96,7 +102,7 @@ class WindowsDiagnosticWorkflowTests(unittest.TestCase):
 
     def test_bounded_inputs_and_single_batch_entrypoint(self):
         for token in ("harnesses:", "mode:", "model:", "source_sha:",
-                      "options: [native-diagnostic, deterministic, live, codex-diagnostic, mimo-inventory-observation]", "--harnesses",
+                      "options: [native-diagnostic, deterministic, live, codex-diagnostic, mimo-inventory-observation, mimo-conformance-observation]", "--harnesses",
                       "--mode", "--model", "--source-sha", "--binary",
                       "--canary", "--output"):
             self.assertIn(token, WORKFLOW)
@@ -104,7 +110,7 @@ class WindowsDiagnosticWorkflowTests(unittest.TestCase):
         self.assertIn("if: always()", WORKFLOW)
 
     def test_observation_forwards_only_attested_selection_without_live_credentials(self):
-        job = WORKFLOW.split("\n  mimo-inventory-observation:\n", 1)[1].split("\n  diagnostic:\n", 1)[0]
+        job = WORKFLOW.split("\n  mimo-inventory-observation:\n", 1)[1].split("\n  mimo-conformance-observation:\n", 1)[0]
         self.assertIn("needs: validate-inputs", job)
         self.assertIn("needs.validate-inputs.result == 'success'", job)
         self.assertIn("inputs.mode == 'mimo-inventory-observation'", job)

@@ -55,6 +55,7 @@ for test_script in \
   windows-summary.py \
   windows-release-assets.py \
   mimo-inventory-diagnostic.py mimo-inventory-workflow.py \
+  mimo-conformance-diagnostic.py mimo-conformance-workflow.py \
   probe-harness.py \
   probe-harness-windows.py \
   codex-diagnostic.py \

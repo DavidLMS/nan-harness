@@ -142,6 +142,25 @@ failure fingerprint. They exclude credentials, prompts, responses, tool
 payloads, command output, and local paths. Raw output is retained only in
 private local logs when explicitly requested.
 
+### Canonical MiMo conformance observation
+
+The manual Native Windows CLI diagnostic accepts
+`mode=mimo-conformance-observation` with `harnesses=mimo-code` and all four
+immutable release asset inputs. It verifies the checksum attestation and both
+released binaries, freezes official metadata, and requires MiMo `0.1.16`.
+It uses the release gate's Windows runner, Bash entry point, hosted runtime,
+suite/cell directory layout, installer and conformance driver. It has no live
+credential, protected environment or publication authority.
+
+The collector preserves the original conformance attempt limit and private
+process custody. Before each private report is removed, it projects only the
+closed scenario statuses and the `contract` and `native-configuration` check
+statuses and durations. Executable resolution is recorded as closed location
+classes without paths. The artifact contains only that validated diagnostic
+envelope and public release provenance; it cannot qualify a release. The
+separate `mimo-inventory-observation` mode observes inventory output and does
+not diagnose either functional tool check.
+
 ### OMP usage incident comparison
 
 The manual Native Windows CLI diagnostic workflow accepts

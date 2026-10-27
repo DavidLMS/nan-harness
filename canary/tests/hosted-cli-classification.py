@@ -97,6 +97,41 @@ def scripted_conformance(reports):
 
 
 class ConformanceClassificationTests(unittest.TestCase):
+    def test_observer_sees_each_valid_attempt_before_private_report_removal(self):
+        reports = [conformance_report(failed=("tool-round-trip",)),
+                   conformance_report()]
+        observed = []
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args = argparse.Namespace(directory=root, harness="codex", canary=Path("canary"), binary=Path("nanh"))
+            def observe(attempt, status, report):
+                self.assertTrue((root / "conformance-private.json").is_file())
+                observed.append((attempt, status, report["outcome"]))
+            with patch.object(cell, "cell_environment", return_value={}), \
+                    patch.object(cell, "private_command", side_effect=scripted_conformance(reports)):
+                self.assertEqual(cell.conformance(args, {}, observe=observe), 2)
+            self.assertFalse((root / "conformance-private.json").exists())
+        self.assertEqual(observed, [(1, 1, "failed"), (2, 1, "passed")])
+
+    def test_observer_cannot_receive_invalid_reports_and_cleanup_survives_rejection(self):
+        for report, callback_error in [({"private": "PRIVATE_SENTINEL"}, False),
+                                       (conformance_report(), True)]:
+            with self.subTest(callback_error=callback_error), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                args = argparse.Namespace(directory=root, harness="codex", canary=Path("canary"), binary=Path("nanh"))
+                with patch.object(cell, "cell_environment", return_value={}), \
+                        patch.object(cell, "private_command", side_effect=scripted_conformance([report])):
+                    calls = []
+                    def observe(*_args):
+                        calls.append(True)
+                        raise ValueError("PRIVATE_SENTINEL")
+                    with self.assertRaises(cell.ConformanceFailure) as failure:
+                        cell.conformance(args, {}, observe=observe)
+                self.assertEqual(len(calls), int(callback_error))
+                self.assertEqual(failure.exception.code, "conformance-report-invalid")
+                self.assertNotIn("PRIVATE_SENTINEL", str(failure.exception))
+                self.assertFalse((root / "conformance-private.json").exists())
+
     def test_failed_scenarios_retain_closed_diagnostics_and_actual_attempts(self):
         with self.assertRaises(cell.ConformanceFailure) as failure:
             self.run_conformance(conformance_report(failed=("sentinel",)),

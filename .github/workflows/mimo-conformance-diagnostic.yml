@@ -1,0 +1,82 @@
+name: MiMo canonical conformance observation
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        required: true
+        type: string
+      release_commit:
+        required: true
+        type: string
+      asset_run_id:
+        required: true
+        type: string
+      manifest_sha256:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: mimo-conformance-observation-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  observe:
+    name: Observe the exact released MiMo conformance under canonical isolation
+    runs-on: windows-2025
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+      - name: Verify the immutable release pair independently
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_COMMIT: ${{ inputs.release_commit }}
+          ASSET_RUN_ID: ${{ inputs.asset_run_id }}
+          MANIFEST_SHA256: ${{ inputs.manifest_sha256 }}
+        run: |
+          if ((git rev-parse HEAD) -cne $env:GITHUB_SHA) { throw 'observation checkout differs' }
+          python -B canary/actions/windows_release_assets.py --repository $env:GITHUB_REPOSITORY `
+            --tag $env:RELEASE_TAG --commit $env:RELEASE_COMMIT --controller $env:GITHUB_SHA `
+            --run-id $env:ASSET_RUN_ID --manifest-sha256 $env:MANIFEST_SHA256 `
+            --directory (Join-Path $env:RUNNER_TEMP 'mimo-conformance-attested-release') `
+            --provenance (Join-Path $env:RUNNER_TEMP 'mimo-conformance-release-provenance.json')
+          if ($LASTEXITCODE -ne 0) { throw 'release identity verification failed' }
+      - name: Resolve the official version using the canonical resolver
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python -B canary/actions/cli-suite.py resolve --harnesses mimo-code \
+            --system windows --architecture x86_64 --model qwen3.6 \
+            --output "$RUNNER_TEMP/cli-versions.json"
+      - name: Observe the canonical install and conformance without qualification authority
+        run: |
+          python -B canary/actions/mimo_conformance_diagnostic.py \
+            --binary "$NAN_DIAGNOSTIC_RELEASE_BINARY" --canary "$NAN_DIAGNOSTIC_RELEASE_CANARY" \
+            --provenance "$RUNNER_TEMP/mimo-conformance-release-provenance.json" \
+            --source-sha "$GITHUB_SHA" --manifest "$RUNNER_TEMP/cli-versions.json" \
+            --directory "$RUNNER_TEMP/cli-cell" --output "$RUNNER_TEMP/mimo-canonical-observation.json"
+      - name: Upload only the validated observation and public provenance
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mimo-conformance-observation-${{ github.run_id }}
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/mimo-canonical-observation.json
+            ${{ runner.temp }}/mimo-conformance-release-provenance.json
