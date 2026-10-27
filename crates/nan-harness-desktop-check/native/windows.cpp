@@ -546,16 +546,24 @@ bool mac_fit_resize_ack(CGRect before, CGRect target, CGRect observed) {
         && CGSizeEqualToSize(target.size, observed.size);
 }
 // Fit only the independently focused original standard window. Never activates it.
-static bool fit_mac_proof(std::uint64_t id, pid_t pid, AxFocus& focus, bool require_off_display, bool require_containment = true) {
-    if ([[[NSWorkspace sharedWorkspace] frontmostApplication] processIdentifier] != pid) return false;
+static bool fit_mac_proof(std::uint64_t id, pid_t pid, AxFocus& focus, bool require_off_display, bool require_containment = true, MacWindowObservation* observation = nullptr) {
+    const auto reject = [&](const char* failure) { if (observation) observation->failure = failure; return false; };
+    if ([[[NSWorkspace sharedWorkspace] frontmostApplication] processIdentifier] != pid) return reject("foreground");
     auto application = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
-    if (!application || !application.active || application.hidden || !application.finishedLaunching) return false;
+    if (!application || !application.active || application.hidden || !application.finishedLaunching) return reject("application");
     read_ax_focus(pid, focus);
-    if (std::string(focus.status) != "ready") return false;
+    if (observation) {
+        observation->focus_status = focus.status;
+        observation->query_stage = focus.query_stage ? focus.query_stage : "unqueried";
+        observation->query_error = focus.query_error ? focus.query_error : "unqueried";
+    }
+    if (std::string(focus.status) != "ready") return reject("focus");
     auto windows = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID);
-    if (!windows) return false;
+    if (!windows) return reject("inventory");
     unsigned matches = 0;
-    bool safe = CFArrayGetCount(windows) <= 1024 && match_focus_window(windows, pid, focus.bounds, matches) == id;
+    const auto count = CFArrayGetCount(windows);
+    const char* failure = count > 1024 ? "inventory" : "identity";
+    bool safe = count <= 1024 && match_focus_window(windows, pid, focus.bounds, matches) == id;
     bool found = false;
     for (CFIndex index = 0; safe && index < CFArrayGetCount(windows); ++index) {
         auto window = static_cast<CFDictionaryRef>(CFArrayGetValueAtIndex(windows, index));
@@ -563,13 +571,13 @@ static bool fit_mac_proof(std::uint64_t id, pid_t pid, AxFocus& focus, bool requ
         if (number(window, kCGWindowLayer) == CGWindowLevelForKey(kCGCursorWindowLevelKey)) continue;
         CGRect bounds;
         auto value = static_cast<CFDictionaryRef>(CFDictionaryGetValue(window, kCGWindowBounds));
-        if (!value || !CGRectMakeWithDictionaryRepresentation(value, &bounds)) { safe = false; break; }
+        if (!value || !CGRectMakeWithDictionaryRepresentation(value, &bounds)) { failure = "inventory"; safe = false; break; }
         double alpha = 1;
         auto alpha_value = static_cast<CFNumberRef>(CFDictionaryGetValue(window, kCGWindowAlpha));
         if (alpha_value) CFNumberGetValue(alpha_value, kCFNumberDoubleType, &alpha);
         if (alpha <= 0 || bounds.size.width <= 0 || bounds.size.height <= 0) continue;
         if ((number(window, kCGWindowOwnerPID) == pid && number(window, kCGWindowLayer) == 0)
-            || CGRectIntersectsRect(bounds, focus.bounds)) safe = false;
+            || CGRectIntersectsRect(bounds, focus.bounds)) { failure = "stack"; safe = false; }
     }
     CFRelease(windows);
     bool contained = false;
@@ -577,12 +585,20 @@ static bool fit_mac_proof(std::uint64_t id, pid_t pid, AxFocus& focus, bool requ
         auto display = static_cast<CGDirectDisplayID>([screen.deviceDescription[@"NSScreenNumber"] unsignedIntValue]);
         contained = contained || CGRectContainsRect(CGDisplayBounds(display), focus.bounds);
     }
-    return safe && found && (!require_containment || (require_off_display ? !contained : contained));
+    const bool valid = safe && found && (!require_containment || (require_off_display ? !contained : contained));
+    if (!valid && observation) observation->failure = !safe ? failure : !found ? "identity" : "display";
+    return valid;
 }
 // Shared owned-window proof for the separately scoped native Chat controller.
-bool claude_owned_mac_window(std::uint64_t id, pid_t pid, CGRect bounds) {
+bool claude_owned_mac_window_observed(std::uint64_t id, pid_t pid, CGRect bounds, MacWindowObservation* observation) {
     AxFocus focus;
-    return fit_mac_proof(id, pid, focus, false) && CGRectEqualToRect(bounds, focus.bounds);
+    if (!fit_mac_proof(id,pid,focus,false,true,observation)) return false;
+    if (CGRectEqualToRect(bounds,focus.bounds)) return true;
+    if (observation) observation->failure = "geometry";
+    return false;
+}
+bool claude_owned_mac_window(std::uint64_t id, pid_t pid, CGRect bounds) {
+    return claude_owned_mac_window_observed(id,pid,bounds,nullptr);
 }
 // Read-only classification for passive composer settling. Existing bool callers
 // keep their original proof. Pending never authorizes an action.

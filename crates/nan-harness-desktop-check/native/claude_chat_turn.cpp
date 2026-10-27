@@ -16,6 +16,7 @@
 
 #include "mac_owned_window.hpp"
 bool claude_owned_mac_window(std::uint64_t, pid_t, CGRect);
+bool claude_owned_mac_window_observed(std::uint64_t, pid_t, CGRect, MacWindowObservation*);
 MacOwnedWindowState claude_mac_window_state(std::uint64_t, pid_t, CGRect);
 MacWindowObservation claude_mac_window_observation();
 namespace {
@@ -63,6 +64,22 @@ static void write_input_rejection(std::ostream& output, const InputValueRejectio
     if (value.query_site) output << ' ' << value.query_site << ' ' << value.query_error;
     output << '\n';
 }
+struct PressRejection {
+    const char* phase = nullptr;
+    const char* cause = nullptr;
+    const char* ax_error = nullptr;
+    MacWindowObservation window;
+};
+static void write_press_rejection(std::ostream& output, const std::string& mode, const PressRejection& value) {
+    output << "press-rejection " << mode << ' ' << value.phase << ' ';
+    if (value.ax_error) output << value.ax_error;
+    else {
+        output << value.cause;
+        if (std::string(value.cause) == "owned-window") output << ' ' << value.window.failure
+            << ' ' << value.window.focus_status << ' ' << value.window.query_stage << ' ' << value.window.query_error;
+    }
+    output << '\n';
+}
 struct Request {
     std::string mode, prompt, marker, sentinel;
     std::uint64_t window = 0;
@@ -74,6 +91,7 @@ struct Request {
     mutable const char* window_site = nullptr;
     mutable MacWindowObservation window_observation;
     mutable InputValueRejection input_rejection;
+    mutable PressRejection press_rejection;
     ~Request() { for (auto value : {&prompt, &marker, &sentinel}) std::fill(value->begin(), value->end(), '\0'); }
 };
 static bool decode(const std::string& hex, std::string& result) {
@@ -138,6 +156,24 @@ static bool wait_owned_window(const Request& request, const char* site = "entry"
         },
         [&] { return within(request); },
         [] { std::this_thread::sleep_for(std::chrono::milliseconds(20)); });
+}
+// Capture only the branches of the existing post-press proof. The observer
+// overload executes the same native window queries, never a diagnostic reread.
+static bool owned_after_press(const Request& request) {
+    if (!within(request)) {
+        request.press_rejection = {"post-guard","deadline-before"};
+        return false;
+    }
+    MacWindowObservation observation;
+    if (!claude_owned_mac_window_observed(request.window,request.pid,request.bounds,&observation)) {
+        request.press_rejection = {"post-guard","owned-window",nullptr,observation};
+        return false;
+    }
+    if (!within(request)) {
+        request.press_rejection = {"post-guard","deadline-after"};
+        return false;
+    }
+    return true;
 }
 static std::string text(CFTypeRef value, const char** failure = nullptr) {
     if (!noted(value, "value-unavailable", failure)
@@ -403,14 +439,27 @@ static bool key(CGKeyCode code, bool command) {
     CFRelease(down); CFRelease(up);
     return true;
 }
+template<class Perform, class Guard>
+static const char* dispatch_press_once(const Request& request, const char* success, Perform perform, Guard guard) {
+    const auto error = perform();
+    if (error != kAXErrorSuccess) {
+        request.press_rejection = {"perform-action",nullptr,error == kAXErrorActionUnsupported
+            ? "action-unsupported" : input_ax_error(error)};
+        return "action-uncertain";
+    }
+    return guard() ? success : "action-uncertain";
+}
+static const char* dispatch_press(const Request& request, AXUIElementRef element, const char* success) {
+    return dispatch_press_once(request,success,[&] { return AXUIElementPerformAction(element,kAXPressAction); },
+        [&] { return owned_after_press(request); });
+}
 static const char* press(const Request& request, const Node& node, const char* success) {
     progress(NativeProgress::Press);
     request.deadline_phase = "deadline-press";
     if (!target(node, request) || !owned(request)) return "control";
     Tree fresh;
     if (!fresh.collect(request) || !retained(fresh, node) || !owned(request)) return "control";
-    if (AXUIElementPerformAction(node.element, kAXPressAction) != kAXErrorSuccess) return "action-uncertain";
-    return owned(request) ? success : "action-uncertain";
+    return dispatch_press(request,node.element,success);
 }
 // Classify the already-read value without another accessibility query.
 static const char* initial_input_failure(CFTypeRef value, bool query_failed, bool replace_owned = false) {
@@ -1058,8 +1107,7 @@ static const char* open_failure_details(const Request& request, const Tree& tree
         || !CFEqual(fresh.nodes[current].element, tree.nodes[index].element) || !owned(request)) return "control";
     progress(NativeProgress::Press);
     request.deadline_phase = "deadline-press";
-    if (AXUIElementPerformAction(fresh.nodes[current].element, kAXPressAction) != kAXErrorSuccess) return "action-uncertain";
-    return owned(request) ? "failure-details-opened" : "action-uncertain";
+    return dispatch_press(request,fresh.nodes[current].element,"failure-details-opened");
 }
 // This mode additionally requires a Rust-held clean/Sent/request-specific failure
 // capability. Native cross-call identity is the nonce user Heading, not a CF handle.
@@ -1125,8 +1173,7 @@ static const char* temporal_action(const Request& request, const Tree& tree) {
     if (ready) return details?"failure-details-ready":"retry-ready";
     progress(NativeProgress::Press);
     request.deadline_phase="deadline-press";
-    if (AXUIElementPerformAction(fresh.nodes[current].element,kAXPressAction)!=kAXErrorSuccess) return "action-uncertain";
-    return owned(request)?(details?"failure-details-opened":"retried"):"action-uncertain";
+    return dispatch_press(request,fresh.nodes[current].element,details?"failure-details-opened":"retried");
 }
 static const char* action(const Request& request, const Tree& tree) {
     if (request.mode.find("-temporal") != std::string::npos) return temporal_action(request, tree);
@@ -1212,6 +1259,8 @@ int claude_chat_turn() {
                 std::cout << '\n';
             }
         }
+        if (std::string(stage) == "action-uncertain" && value.press_rejection.phase)
+            write_press_rejection(std::cout,value.mode,value.press_rejection);
         if (value.window_site) {
             const auto& observation = value.window_observation;
             std::cout << "window-guard " << value.window_site << ' ' << observation.failure << ' '

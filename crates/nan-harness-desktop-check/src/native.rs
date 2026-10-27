@@ -36,7 +36,7 @@ pub(crate) use mac_chat_turn::{CHAT_TURN_MAX_MILLIS, ChatActionPhase, failure_la
 #[cfg(target_os = "macos")]
 pub(crate) use mac_chat_turn::{
     ChatTurnReceipt, ChatTurnStage, ComposerShape, FailureRowShape, FailureScopeShape,
-    InputValueRejection, NativeCompletion, WindowGuardObservation,
+    InputValueRejection, NativeCompletion, PressRejection, WindowGuardObservation,
 };
 #[cfg(target_os = "macos")]
 pub(crate) use mac_chat_turn::{
@@ -69,6 +69,29 @@ pub(crate) fn mac_chat_progress_fixture() -> (Result<(), FailureCategory>, MacCh
         &mut observed,
     )
     .map(|_| ());
+    (result, observed)
+}
+
+#[cfg(all(test, target_os = "macos"))]
+pub(crate) fn mac_chat_press_fixture(
+    index: u8,
+) -> (Result<ChatTurnReceipt, FailureCategory>, MacChatTransport) {
+    let fixture = Path::new(env!("NAN_DESKTOP_NATIVE_HELPER"))
+        .with_file_name("helper-build")
+        .join("nanh-claude-chat-turn-test");
+    let mut observed = MacChatTransport {
+        budget_ms: Some(5000),
+        ..MacChatTransport::default()
+    };
+    let result = process::run_claude_chat_turn_until(
+        &fixture,
+        format!("press-rejection {index}").as_bytes(),
+        std::time::Instant::now() + std::time::Duration::from_secs(5),
+        &mut observed,
+    )
+    .and_then(|output| {
+        ChatTurnReceipt::parse(&output, "input-failure-owned").ok_or(FailureCategory::Output)
+    });
     (result, observed)
 }
 

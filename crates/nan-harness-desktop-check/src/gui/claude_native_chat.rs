@@ -75,6 +75,8 @@ struct Facts {
     #[serde(skip_serializing_if = "Option::is_none")]
     native_completion: Option<crate::native::NativeCompletion>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    native_press_rejection: Option<crate::native::PressRejection>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     transport_started: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     transport_budget_ms: Option<u32>,
@@ -105,6 +107,7 @@ impl Default for Facts {
             native_work_progress: None,
             input_value_rejection: None,
             native_completion: None,
+            native_press_rejection: None,
             transport_started: None,
             transport_budget_ms: None,
             submitted_turns: 0,
@@ -126,6 +129,7 @@ impl Facts {
         self.native_work_progress = None;
         self.input_value_rejection = None;
         self.native_completion = None;
+        self.native_press_rejection = None;
         self.transport_started = Some(false);
         self.transport_budget_ms = None;
         if input {
@@ -162,6 +166,7 @@ impl Facts {
         // they never substitute for that guard or an action receipt on timeout.
         self.native_stage = Some(receipt.stage);
         self.input_value_rejection = receipt.input_value_rejection;
+        self.native_press_rejection = receipt.press_rejection;
         if let Some(shape) = receipt.row_shape {
             self.row_shape = Some(shape);
         }
@@ -651,6 +656,58 @@ mod tests {
         .unwrap();
         assert_eq!(serde_json::to_value(&produced).unwrap(), retained);
         if let Some(path) = std::env::var_os("NANH_MAC_COMPLETION_FIXTURE") {
+            open_private_new(Path::new(&path))
+                .unwrap()
+                .write_all(&serde_json::to_vec(&produced).unwrap())
+                .unwrap();
+        }
+    }
+    #[test]
+    fn actual_native_press_rejections_preserve_uncertainty_without_advancing_turns() {
+        let mut produced = Vec::new();
+        for index in 0..6 {
+            let (receipt, transport) = crate::native::mac_chat_press_fixture(index);
+            let mut facts = Facts {
+                submitted_turns: 2,
+                input_verified_turns: 2,
+                copied_responses: 2,
+                ..Facts::default()
+            };
+            facts.begin_action(true);
+            facts.observe_transport(transport);
+            facts.observe_receipt(&receipt.unwrap());
+            facts.action_phase = Some(ChatActionPhase::Completed);
+            let value = serde_json::to_value(&facts).unwrap();
+            assert_eq!(value["nativeStage"], "action-uncertain");
+            assert_eq!(value["nativeWorkProgress"], "press");
+            assert_eq!(value["nativePressRejection"]["mode"], "input-failure-owned");
+            for count in ["submittedTurns", "inputVerifiedTurns", "copiedResponses"] {
+                assert_eq!(value[count], 2);
+            }
+            assert_eq!(value["retryAttempted"], false);
+            produced.push(value);
+            facts.action_phase = Some(ChatActionPhase::PostGuard);
+            facts.transport_failure = Some("timeout");
+            assert!(
+                serde_json::to_value(&facts)
+                    .unwrap()
+                    .get("nativePressRejection")
+                    .is_some()
+            );
+            facts.begin_action(true);
+            assert!(
+                serde_json::to_value(&facts)
+                    .unwrap()
+                    .get("nativePressRejection")
+                    .is_none()
+            );
+        }
+        let expected: Vec<serde_json::Value> = serde_json::from_str(include_str!(
+            "../../../../canary/tests/fixtures/claude-macos-press-rejections.json"
+        ))
+        .unwrap();
+        assert_eq!(produced, expected);
+        if let Some(path) = std::env::var_os("NANH_MAC_PRESS_FIXTURE") {
             open_private_new(Path::new(&path))
                 .unwrap()
                 .write_all(&serde_json::to_vec(&produced).unwrap())

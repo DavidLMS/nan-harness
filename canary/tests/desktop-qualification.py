@@ -257,6 +257,47 @@ class ClaudeNativeEvidenceTests(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 q.claude_input_value_rejection(value)
 
+    def test_actual_native_press_rejections_preserve_uncertainty_in_python(self):
+        records = json.loads((ROOT / 'canary/tests/fixtures/claude-macos-press-rejections.json').read_text())
+        self.assertEqual(len(records), 6)
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'facts.json'
+            for record in records:
+                with self.subTest(phase=record['nativePressRejection']['phase']):
+                    path.write_text(json.dumps(record))
+                    self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [record])
+                    self.assertEqual(record['stage'], 'action-uncertain')
+                    self.assertEqual([record[key] for key in ('submittedTurns', 'inputVerifiedTurns', 'copiedResponses')], [2, 2, 2])
+                    self.assertFalse(record['retryAttempted'])
+                    post_guard = record | dict(actionPhase='post-guard', transportFailure='timeout')
+                    path.write_text(json.dumps(post_guard))
+                    self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [post_guard])
+
+    def test_native_press_diagnostics_reject_unknown_data_and_unbound_frames(self):
+        base = json.loads((ROOT / 'canary/tests/fixtures/claude-macos-press-rejections.json').read_text())[0]
+        press = base['nativePressRejection']
+        invalid = [None, press | {'mode': 'retry-ready'}, press | {'mode': 'PRIVATE'},
+                   press | {'axError': 'success'}, press | {'axError': 'PRIVATE'},
+                   press | {'message': 'PRIVATE'}, press | {'phase': 'PRIVATE'},
+                   dict(mode='input', phase='post-guard', cause='deadline-after', window={}),
+                   dict(mode='input', phase='post-guard', cause='owned-window', window=None),
+                   dict(mode='input', phase='post-guard', cause='PRIVATE')]
+        window = dict(failure='focus', focusStatus='query-error', queryStage='focused-window', queryError='cannot-complete')
+        for key in window:
+            invalid.append(dict(mode='input', phase='post-guard', cause='owned-window', window=window | {key: 'PRIVATE'}))
+        invalid.append(dict(mode='input', phase='post-guard', cause='owned-window', window=window | {'message': 'PRIVATE'}))
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'facts.json'
+            for value in invalid:
+                path.write_text(json.dumps(base | {'nativePressRejection': value}))
+                with self.subTest(value=value), self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+            for change in (dict(stage='completed'), dict(nativeStage='sent'), dict(transportStarted=False),
+                           dict(actionPhase='transport'), dict(transportFailure='timeout')):
+                path.write_text(json.dumps(base | change))
+                with self.subTest(change=change), self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+
     def test_mac_work_progress_retains_the_last_nonfinal_boundary(self):
         base = self.mac_timeout() | dict(nativeProgress='finish', transportStarted=True, transportBudgetMs=1000)
         with tempfile.TemporaryDirectory() as root:
