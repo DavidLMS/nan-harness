@@ -58,6 +58,14 @@ def claude_input_value_rejection(value):
     return dict(value)
 
 
+def claude_composer_shape(value):
+    if (type(value) is not dict or set(value) != {'editors', 'startTasks', 'sendMessages'}
+            or any(type(count) is not int or not 0 <= count <= 1024 for count in value.values())
+            or sum(value.values()) > 1024):
+        raise ValueError('invalid Claude composer shape')
+    return dict(value)
+
+
 def claude_native_tree(value):
     fields = {'operation','reason','nodeScope','foreignBus','childCount','visitedCount'}
     choices = {'operation': {'owner','children','identity','parent','bounds'}, 'reason': {'wrong-owner','query-unavailable','deadline','null-reference','non-list','limit','duplicate'},
@@ -1733,7 +1741,7 @@ def semantic_observations(directory, app, platform=None):
             stages.update('tree-depth tree-nodes tree-name-limit tree-text-limit tree-window-limit tree-process-limit'.split())
             stages.update('clipboard-owner clipboard-allocation clipboard-lock clipboard-empty clipboard-set clipboard-close clipboard-guard-before clipboard-guard-after clipboard-deadline-before clipboard-deadline-after clipboard-open-deadline'.split())
             phase_fields = {'actionPhase', 'transportFailure'}
-            if (app != 'claude-desktop' or set(value) - {'providerObservation', 'guardRejection', 'rowShape', 'scopeShape', 'failureAuthority', 'failureScopeCounts', 'operationTiming', 'nativeAction', 'nativeStage', 'nativeProgress', 'nativeWorkProgress', 'composerShape', 'nativeWindowGuard', 'transportStarted', 'transportBudgetMs', 'inputValueRejection'} not in (fields, fields | phase_fields) or value['diagnosticsOnly'] is not True
+            if (app != 'claude-desktop' or set(value) - {'providerObservation', 'guardRejection', 'rowShape', 'scopeShape', 'failureAuthority', 'failureScopeCounts', 'operationTiming', 'nativeAction', 'nativeStage', 'nativeProgress', 'nativeWorkProgress', 'composerShape', 'nativeWindowGuard', 'transportStarted', 'transportBudgetMs', 'inputValueRejection', 'nativeCompletion'} not in (fields, fields | phase_fields) or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in stages
                     or any(type(value[key]) is not bool for key in flags)
                     or any(type(value[key]) is not int or not 0 <= value[key] <= 3 for key in counts)
@@ -1755,13 +1763,9 @@ def semantic_observations(directory, app, platform=None):
                     raise ValueError('invalid Claude native window guard')
                 record['nativeWindowGuard'] = dict(guard)
             if 'composerShape' in value:
-                shape = value['composerShape']
-                if (mechanism != 'claude-native-chat' or type(shape) is not dict
-                        or set(shape) != {'editors', 'startTasks', 'sendMessages'}
-                        or any(type(count) is not int or not 0 <= count <= 1024 for count in shape.values())
-                        or sum(shape.values()) > 1024):
+                if mechanism != 'claude-native-chat':
                     raise ValueError('invalid Claude composer shape')
-                record['composerShape'] = dict(shape)
+                record['composerShape'] = claude_composer_shape(value['composerShape'])
             if 'nativeAction' in value:
                 action = value['nativeAction']
                 if (mechanism != 'claude-windows-native-chat' or type(action) is not str
@@ -1816,6 +1820,23 @@ def semantic_observations(directory, app, platform=None):
                         or value['submittedTurns'] > 2 or value['retryAttempted']):
                     raise ValueError('unbound Claude input value rejection')
                 record['inputValueRejection'] = claude_input_value_rejection(value['inputValueRejection'])
+            if 'nativeCompletion' in value:
+                completion = value['nativeCompletion']
+                if (mechanism != 'claude-native-chat' or value.get('transportStarted') is not True
+                        or value.get('actionPhase') != 'transport' or 'nativeStage' in value
+                        or value.get('transportFailure') not in {'timeout', 'nonzero-exit', 'output', 'pipe'}
+                        or type(completion) is not dict
+                        or set(completion) - {'composerShape'} != {'stage', 'remainingMs'}
+                        or type(completion['stage']) is not str or completion['stage'] not in stages
+                        or type(completion['remainingMs']) is not int
+                        or not 0 <= completion['remainingMs'] <= 15000
+                        or type(value.get('transportBudgetMs')) is not int
+                        or completion['remainingMs'] > value['transportBudgetMs']):
+                    raise ValueError('invalid Claude native completion observation')
+                completion = dict(completion)
+                if 'composerShape' in completion:
+                    completion['composerShape'] = claude_composer_shape(completion['composerShape'])
+                record['nativeCompletion'] = completion
             if 'operationTiming' in value:
                 timing = value['operationTiming']
                 required = {'budgetMs', 'elapsedMs'}
@@ -3694,6 +3715,13 @@ def semantic_observations(directory, app, platform=None):
                 closed['resultCount'] = count
                 record['toolResult'] = closed
         elif mechanism == 'hermes-renderer-qualification':
+            if 'firstRunPreparation' in value:
+                preparation = value['firstRunPreparation']
+                if (type(preparation) is not str or preparation not in {'absent', 'dismissed', 'blocked', 'uncertain'}
+                        or platform not in (None, 'macos')
+                        or preparation in {'blocked', 'uncertain'} and value.get('inputSubmitted') is not False):
+                    raise ValueError('invalid Hermes first-run preparation')
+                record['firstRunPreparation'] = preparation
             for key in ('endpointOwned', 'attached', 'targetVerified', 'uniqueComposer', 'inputReadback',
                         'inputSubmitted', 'responseVerified', 'providerResponseVerified', 'errorObserved',
                         'retryControl', 'retryHitOwned', 'retryPointStable',

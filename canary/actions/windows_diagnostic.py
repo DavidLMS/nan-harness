@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PROGRESS_ENV = "NAN_HARNESS_CONFORMANCE_PROGRESS"
 ASSERTION_ENV = "NAN_HARNESS_CONFORMANCE_ASSERTION"
 PROGRESS_SCENARIOS = frozenset(("inventory", "sentinel", "tool-round-trip", "external-prerequisite"))
-PROGRESS_STAGES = frozenset(("scenario", "process", "provider-shutdown", "cleanup"))
+PROGRESS_STAGES = frozenset(("scenario", "process", "provider-shutdown", "cleanup", "native-configuration"))
 PROGRESS_STATUSES = frozenset(("started", "passed", "failed"))
 PROGRESS_MAX_LINE = 4096
 PROGRESS_MAX_RECORDS = 256
@@ -562,7 +562,7 @@ _PROBE_MARKER_FIELDS_STAGES = frozenset(PHASES) | {
 _PROBE_MARKER_FIELDS = frozenset({
     "schemaVersion", "stage", "status", "diagnostics", "exitCode", "doctorVersion",
     "doctorExpectedVersion", "doctorReason", "doctorSchemaReason", "discoveryCode",
-    "inventoryFailureReasons", "inventoryProcess", "failedScenarios",
+    "inventoryFailureReasons", "inventoryProcess", "failedScenarios", "conformanceChecks",
 })
 _SEMVER = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$")
 _DOCTOR_REASONS = frozenset({"missing", "invalid", "mismatch", "discovery-error"})
@@ -717,7 +717,21 @@ def installer_diagnostic(cell):
     finally:
         marker.unlink(missing_ok=True)
 
-def probe_diagnostic(cell, expected_stage=None):
+def safe_conformance_checks(value):
+    """Only MiMo's two existing tool contracts; never infer an absent check."""
+    if type(value) is not list or len(value) != 2:
+        return None
+    for item, name in zip(value, ("contract", "native-configuration")):
+        if (type(item) is not dict or set(item) != {"name", "status", "durationMilliseconds"}
+                or type(item["name"]) is not str or item["name"] != name
+                or type(item["status"]) is not str or item["status"] not in {"passed", "failed"}
+                or type(item["durationMilliseconds"]) is not int
+                or not 0 <= item["durationMilliseconds"] <= 86400000):
+            return None
+    return [dict(item) for item in value]
+
+
+def probe_diagnostic(cell, expected_stage=None, expected_harness=None):
     """Consume the probe's bounded diagnostics and exit code, never child output."""
     marker = cell / "probe-result.json"
     result = {"status": "failed", "markerState": "absent"}
@@ -748,7 +762,7 @@ def probe_diagnostic(cell, expected_stage=None):
         allowed = {"schemaVersion", "stage", "status", "diagnostics", "exitCode",
                    "doctorVersion", "doctorExpectedVersion", "doctorReason", "discoveryCode",
                    "doctorSchemaReason", "inventoryFailureReasons", "inventoryProcess",
-                   "failedScenarios"}
+                   "failedScenarios", "conformanceChecks"}
         if set(value) - allowed:
             return _invalid_marker(value)
         for key in ("doctorVersion", "doctorExpectedVersion"):
@@ -785,6 +799,11 @@ def probe_diagnostic(cell, expected_stage=None):
         inventory_process = _safe_inventory_process(value["inventoryProcess"]) if "inventoryProcess" in value else None
         if "inventoryProcess" in value and (expected_stage != "deterministic-contract" or inventory_process is None):
             return _invalid_marker(value)
+        if "conformanceChecks" in value:
+            checks = safe_conformance_checks(value["conformanceChecks"])
+            if expected_harness != "mimo-code" or expected_stage != "deterministic-contract" or checks is None:
+                return _invalid_marker(value)
+            result["conformanceChecks"] = checks
         diagnostics = value.get("diagnostics", [])
         if not isinstance(diagnostics, list) or len(diagnostics) > 16 or any(
                 not isinstance(item, str) or item not in _PROBE_DIAGNOSTICS for item in diagnostics):
@@ -917,6 +936,9 @@ def collect(args, harnesses, output):
                 any_failure = True; reports.append({"harness": harness, "phases": phases})
                 active["harness"] = None; active["phases"] = {}; active["phase"] = None; checkpoint(); continue
             item, diagnostic = resolve_one(resolver, harness, args.model, int(metadata_timeout))
+            expected_mimo = getattr(args, "expected_mimo_version", "")
+            if item is not None and expected_mimo and harness == "mimo-code" and item.version != expected_mimo:
+                raise ValueError("official MiMo version differs from the diagnostic selection")
             if item is None:
                 cid = causal(harness, "metadata", diagnostic.get("category", "unknown"))
                 phases["metadata"] = phase("FAIL", "official-metadata-unavailable", cid); any_failure = True
@@ -1040,7 +1062,7 @@ def collect(args, harnesses, output):
                 assertion_file = assertion_path(cell)
                 invocation_env[ASSERTION_ENV] = str(assertion_file)
             code, reason = run_bounded(common + ["-Stage", stage], cell, invocation_env, child_timeout)
-            diagnostic = probe_diagnostic(cell, stage)
+            diagnostic = probe_diagnostic(cell, stage, harness)
             if stage == "deterministic-contract" and code != 0:
                 progress = read_progress(progress_file)
                 assertion_record = read_assertions(assertion_file)
@@ -1072,6 +1094,8 @@ def collect(args, harnesses, output):
                 mark_dependents(phases, ("deterministic-contract", "live-tool") if name == "version-doctor" else ("live-tool",), name + "-failed", cause)
                 any_failure = True; checkpoint(); break
             phases[name] = phase("PASS", "verified")
+            if "conformanceChecks" in diagnostic:
+                phases[name]["diagnostic"] = {"conformanceChecks": diagnostic["conformanceChecks"]}
             checkpoint()
         if "live-tool" not in phases:
             if args.mode != "live": phases["live-tool"] = phase("NOT_REQUESTED", "deterministic-mode")
@@ -1122,12 +1146,15 @@ def write_outputs(report, output):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__); parser.add_argument("--mode", choices=("deterministic", "live", "native-diagnostic"), default="deterministic")
     parser.add_argument("--harnesses", default="all"); parser.add_argument("--model", default="qwen3.6")
+    parser.add_argument("--expected-mimo-version", default="")
     parser.add_argument("--source-sha", "--source", dest="source", default=""); parser.add_argument("--python-version", default=PYTHON_VERSION); parser.add_argument("--binary", type=Path, required=True); parser.add_argument("--canary", type=Path, required=True)
     parser.add_argument("--output", type=Path, default=Path("windows-canary-report")); parser.add_argument("--timeout", type=int, default=900)
     parser.add_argument("--budget-seconds", type=int, default=6000); args = parser.parse_args(argv)
     if not SAFE_ID.fullmatch(args.model) or not re.fullmatch(r"^[0-9]+\.[0-9]+$", args.python_version) or args.timeout < 1 or args.timeout > 3600 or args.budget_seconds < 1 or (args.source and not SHA.fullmatch(args.source)): parser.error("bounded identity, Python version, timeout, and budget are required")
     harnesses = list(HARNESSES) if args.harnesses == "all" else [x.strip() for x in args.harnesses.split(",")]
     if not harnesses or len(harnesses) != len(set(harnesses)) or any(x not in HARNESSES for x in harnesses): parser.error("harnesses must be all or distinct known identifiers")
+    if args.expected_mimo_version and (args.expected_mimo_version != "0.1.16" or harnesses != ["mimo-code"] or args.mode != "deterministic"):
+        parser.error("frozen MiMo diagnostics require version 0.1.16 and one deterministic cell")
     args.binary = args.binary.resolve(); args.canary = args.canary.resolve()
     report, failed = collect(args, harnesses, args.output.resolve())
     def identity(path):

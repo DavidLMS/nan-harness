@@ -4,8 +4,10 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const ownershipSource = fs.readFileSync(`${__dirname}/endpoint-ownership.cjs`, 'utf8');
 const ownershipFunctions = ownershipSource.slice(ownershipSource.indexOf('function saveWindowsProof('), ownershipSource.indexOf('return { ownedEndpoint'));
-const source = fs.readFileSync(`${__dirname}/observe-hermes.cjs`, 'utf8').replace("const { ownedEndpoint, descendant, parentPid, windowsProof } = require('./endpoint-ownership.cjs').proof(owner, port);", ownershipFunctions).replace("require('./hermes-response-observation.cjs').observe", '(' + require('./hermes-response-observation.cjs').observe.toString() + ')').replace("require('./hermes-retry-subtree.cjs')", `(() => { const module = { exports: {} }; ${fs.readFileSync(`${__dirname}/hermes-retry-subtree.cjs`, 'utf8')} return module.exports; })()`).replace('await driveDom(); process.exit(', 'await driveDom(); return process.exit(');
+const source = fs.readFileSync(`${__dirname}/observe-hermes.cjs`, 'utf8').replace("const { ownedEndpoint, descendant, parentPid, windowsProof } = require('./endpoint-ownership.cjs').proof(owner, port);", ownershipFunctions).replace("require('./hermes-response-observation.cjs').observe", '(' + require('./hermes-response-observation.cjs').observe.toString() + ')').replace("require('./hermes-retry-subtree.cjs')", `(() => { const module = { exports: {} }; ${fs.readFileSync(`${__dirname}/hermes-retry-subtree.cjs`, 'utf8')} return module.exports; })()`).replace("require('./hermes-before-failure.cjs')", `(() => { const module = { exports: {} }; ${fs.readFileSync(`${__dirname}/hermes-before-failure.cjs`, 'utf8')} return module.exports; })()`).replace('await driveDom(); process.exit(', 'await driveDom(); return process.exit(');
 async function trial(overrides, connectionOverrides = {}, scenario = null, qualify = false) {
+  const beforeFailureTrial = scenario?.startsWith('before-failure-') ?? false;
+  if (beforeFailureTrial) scenario = scenario.slice('before-failure-'.length);
   const subtreeTrial = scenario?.startsWith('subtree-') ?? false;
   const output = new Map();
   const request = { connectionPath: '/connection', ownerPid: 20, prompt: 'Check this connection',
@@ -141,11 +143,14 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   let observations = 0;
   let value = '';
   const rendererUrl = 'file:///synthetic/resources/app.asar.unpacked/dist/index.html';
+  const composerElement = { get value() { return value; } };
   const composer = {
+    async elementHandle() { return { scopeValue: composerElement, async dispose() {} }; },
     async count() { return scenario === 'duplicate' ? 2 : 1; },
     async isEditable() { return true; },
     async fill(prompt) { fills++; value = scenario === 'mismatch' ? 'different synthetic input' : prompt; },
     async evaluate(callback, prompt) {
+      if (beforeFailureTrial && callback.toString().includes('element === original')) return callback(composerElement, unwrap(prompt));
       if (submits > 0) throw new Error('Editable locator is disabled or detached after submission');
       return callback({ value }, prompt);
     },
@@ -243,7 +248,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
       if (scenario === 'sampling-remount-alert' && sampleCount >= 2) return callback({ ...boundAlert }, unwrap(argument));
       return callback(currentAlert, unwrap(argument));
     },
-    async count() { return ['failure-appears', 'delayed-foreign-error'].includes(scenario) && submits === 0 ? 0 : scenario === 'missing-error' ? 0 : scenario === 'duplicate-error' ? 2 : 1; },
+    async count() { return (beforeFailureTrial || ['failure-appears', 'delayed-foreign-error'].includes(scenario)) && submits === 0 ? 0 : scenario === 'missing-error' ? 0 : scenario === 'duplicate-error' ? 2 : 1; },
     getByRole(role, options) { assert.equal(role, 'button'); assert.equal(options.name, 'Retry'); return { ...send, async count() { return scenario === 'missing-retry' ? 0 : scenario === 'duplicate-retry' ? 2 : 1; } }; },
   };
   const users = { filter({ hasText }) { assert.equal(hasText, request.prompt); return {
@@ -273,7 +278,9 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   const choiceButton = { ...hitButton, parentElement: null, contains: () => false,
     closest(selector) { return selector === '[data-glass-opaque]' ? onboardingRoot : null; } };
   const choiceHandle = {
-    async evaluate(callback) { samplingChoice = true; choiceButton.ownerDocument = fixtureDocument; return callback(choiceButton); },
+    async evaluate(callback) { samplingChoice = true; choiceButton.ownerDocument = fixtureDocument;
+      onboardingRoot.ownerDocument = fixtureDocument; onboardingRoot.isConnected = true;
+      return callback(choiceButton); },
     async click(options) { assert.equal(options.force, undefined); assert(options.position.x > 0); skips++;
       if (scenario === 'onboarding-uncertain') throw new Error('PRIVATE_SYNTHETIC_VALUE');
       if (scenario !== 'onboarding-remaining') onboardingVisible = false;
@@ -333,6 +340,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
       return { targetInfo: { type: 'page', url: rendererUrl } };
     } }; } }; },
     async evaluate(_callback, args) {
+      if (_callback.name === 'sameDocument') return _callback(unwrap(args));
       if (_callback.toString().includes('requestAnimationFrame')) return _callback();
       if (!args) return _callback.toString().includes('classList.contains') || _callback.toString().includes('openCommands') ? _callback() : true;
       assert.equal(args.prompt, request.prompt);
@@ -378,6 +386,10 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
       require(name) {
         if (name === 'node:fs') return mockFs;
         if (name === 'node:crypto') return require('node:crypto');
+        if (name === 'node:child_process' && beforeFailureTrial) return { execFileSync(command) {
+          if (command === '/bin/ps') return '20';
+          assert.equal(command, '/usr/sbin/lsof'); return 'p30\nf5\nn127.0.0.1:43210\n';
+        } };
         if (name === 'node:child_process' && subtreeTrial) return { execFileSync(command, args) {
           assert.equal(command, 'pwsh');
           assert.ok(args.includes('endpoint') || args.includes('descendant'));
@@ -409,7 +421,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
       location: { href: rendererUrl + '#/PRIVATE-owned-session', hash: '#/PRIVATE-owned-session' },
       process: { env: subtreeTrial ? { GITHUB_ACTIONS: 'true', RUNNER_ENVIRONMENT: 'github-hosted', RUNNER_OS: 'Windows',
         FEASIBILITY_HERMES_RETRY_SUBTREE_SOURCE: '0.17.6:f97608f178d1ffeca59860195ab7da295f7c8e5f' } : {},
-        platform: subtreeTrial ? 'win32' : 'linux', argv: ['node', 'helper', qualify ? '--qualify' : '--drive', '/request', '/output'], exit: resolve },
+        platform: beforeFailureTrial ? 'darwin' : subtreeTrial ? 'win32' : 'linux', argv: ['node', 'helper', qualify ? '--qualify' : '--drive', '/request', '/output'], exit: resolve },
     });
     setTimeout(() => reject(new Error('bounded helper fixture timed out')), 1000).unref();
   });
@@ -476,6 +488,29 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   assert.equal(happy.sendMechanism, 'semantic-keyboard');
   const phase = { timeoutMs: 500, action: 'submit', purpose: 'failure',
     prompt: 'Check the expected provider failure', expectedMarker: 'NAN_CHECK_EXPECTED_FAILURE' };
+  const early = await trial({ ...phase, timeoutMs: 800 }, {}, 'before-failure-onboarding-normal', true);
+  assert.equal(early.facts.firstRunPreparation, 'dismissed');
+  assert.equal(early.skips, 1);
+  assert.equal(early.submits, 1);
+  assert.equal(early.fills, 1);
+  assert.equal(early.retryHandles, 0, 'no failed-turn identity exists before preparation');
+  assert.equal(early.clicks, 0, 'preparation never dispatches Retry');
+  const preparationFixtures = [early.facts];
+  for (const scenario of ['onboarding-remaining', 'onboarding-uncertain', 'onboarding-duplicate',
+      'onboarding-disabled', 'onboarding-missing', 'onboarding-forged']) {
+    const refused = await trial({ ...phase, timeoutMs: 350 }, {}, 'before-failure-' + scenario, true);
+    assert.equal(refused.submits, 0, scenario);
+    assert.equal(refused.fills, 0, scenario);
+    assert(refused.skips <= 1, scenario);
+    assert.equal(refused.clicks, 0, scenario);
+    assert.equal(refused.facts.inputSubmitted, false, scenario);
+    assert(['blocked', 'uncertain'].includes(refused.facts.firstRunPreparation), scenario);
+    preparationFixtures.push(refused.facts);
+  }
+  if (process.argv[4]) fs.writeFileSync(process.argv[4], JSON.stringify(preparationFixtures) + '\n', { mode: 0o600 });
+  assert.deepEqual(preparationFixtures,
+    JSON.parse(fs.readFileSync(`${__dirname}/../../canary/tests/fixtures/hermes-first-run-preparation.json`, 'utf8')),
+    'actual first-run emitter matches the shared Rust/Python fixtures');
   const failure = await trial(phase, {}, 'failure-appears', true);
   assert.equal(failure.facts.errorObserved, true);
   assert.equal(failure.facts.retryControl, true);

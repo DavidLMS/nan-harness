@@ -1035,6 +1035,21 @@ static const char* action(const Request& request, const Tree& tree) {
 static const char* deadline_result(const Request& request, const char* stage, bool expired) {
     return expired && std::string(stage) != "action-uncertain" ? request.deadline_phase : stage;
 }
+static unsigned completion_remaining(const Request& request) {
+    timespec ticks{};
+    if (clock_gettime(CLOCK_MONOTONIC,&ticks)!=0 || ticks.tv_sec<0) return 0;
+    const auto now=static_cast<std::uint64_t>(ticks.tv_sec)*1000+static_cast<std::uint64_t>(ticks.tv_nsec)/1000000;
+    const auto cutoff_remaining=request.cutoff>now?request.cutoff-now:0;
+    const auto steady=std::chrono::duration_cast<std::chrono::milliseconds>(request.deadline-Clock::now()).count();
+    const auto steady_remaining=steady>0?static_cast<std::uint64_t>(steady):0;
+    return static_cast<unsigned>(std::min({std::uint64_t{15000},static_cast<std::uint64_t>(request.millis),cutoff_remaining,steady_remaining}));
+}
+static void completion(std::ostream& output, const char* stage, unsigned remaining,
+                       const ComposerShape* shape = nullptr) {
+    output << "completion " << stage << ' ' << remaining;
+    if (shape) output << ' ' << shape->editors << ' ' << shape->start_tasks << ' ' << shape->send_messages;
+    output << '\n' << std::flush;
+}
 } // namespace
 int claude_chat_turn() {
     @autoreleasepool {
@@ -1068,6 +1083,7 @@ int claude_chat_turn() {
             }
             stage = deadline_result(value, stage, !within(value));
         }
+        completion(std::cout,stage,completion_remaining(value),composer_observed?&composer:nullptr);
         progress(NativeProgress::Finish);
         std::cout << "turn " << stage << '\n';
         if (composer_observed)

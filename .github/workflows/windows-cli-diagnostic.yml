@@ -32,25 +32,79 @@ on:
         required: false
         default: ""
         type: string
+      release_tag:
+        description: Optional attested release tag; requires all four release asset inputs
+        type: string
+        default: ''
+      release_commit:
+        description: Exact release tag commit, separate from this diagnostic controller SHA
+        type: string
+        default: ''
+      asset_run_id:
+        description: Canonical main Release gate run containing release-gate-assets
+        type: string
+        default: ''
+      manifest_sha256:
+        description: Independently verified SHA256SUMS digest for the selected release
+        type: string
+        default: ''
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: windows-cli-diagnostic-${{ github.repository }}${{ inputs.omp_usage_comparison && '-omp-usage' || '' }}
   cancel-in-progress: true
 
 jobs:
+  validate-inputs:
+    name: Validate diagnostic selection before approvals
+    runs-on: ubuntu-24.04
+    permissions: {}
+    steps:
+      - name: Reject incompatible release asset selections
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_COMMIT: ${{ inputs.release_commit }}
+          ASSET_RUN_ID: ${{ inputs.asset_run_id }}
+          MANIFEST_SHA256: ${{ inputs.manifest_sha256 }}
+          SOURCE_OVERRIDE: ${{ inputs.source_sha }}
+          SELECTED_MODE: ${{ inputs.mode }}
+          SELECTED_HARNESSES: ${{ inputs.harnesses }}
+          OMP_COMPARISON: ${{ inputs.omp_usage_comparison }}
+          OMP_CANDIDATE: ${{ inputs.omp_candidate_only }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          names = ('RELEASE_TAG', 'RELEASE_COMMIT', 'ASSET_RUN_ID', 'MANIFEST_SHA256')
+          values = [os.environ.get(name, '') for name in names]
+          if any(values):
+              tag, commit, run, manifest = values
+              valid = (all(values) and not os.environ.get('SOURCE_OVERRIDE')
+                  and os.environ.get('SELECTED_MODE') == 'deterministic'
+                  and os.environ.get('SELECTED_HARNESSES') == 'mimo-code'
+                  and os.environ.get('OMP_COMPARISON') != 'true'
+                  and os.environ.get('OMP_CANDIDATE') != 'true'
+                  and re.fullmatch(r'v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', tag)
+                  and re.fullmatch(r'[0-9a-f]{40}', commit)
+                  and re.fullmatch(r'[1-9][0-9]{0,19}', run) and int(run) <= 2**63 - 1
+                  and re.fullmatch(r'[0-9a-f]{64}', manifest))
+              if not valid:
+                  raise SystemExit('Invalid release asset selection; no diagnostic or approval was started.')
+          PY
+
   approve-live:
     name: Approve the live Windows diagnostic
-    if: (inputs.mode == 'live' || inputs.omp_usage_comparison) && github.ref == 'refs/heads/main'
+    needs: validate-inputs
+    if: needs.validate-inputs.result == 'success' && (inputs.mode == 'live' || inputs.omp_usage_comparison) && github.ref == 'refs/heads/main'
     uses: ./.github/workflows/live-check-approval.yml
     with:
       subject: Run the selected live Windows diagnostic from ${{ github.sha }} against ${{ inputs.source_sha || github.sha }}; OMP usage comparisons also use the live provider.
 
   diagnostic:
-    needs: approve-live
-    if: ${{ always() && !cancelled() && !inputs.omp_usage_comparison && (inputs.mode != 'live' || (github.ref == 'refs/heads/main' && needs.approve-live.result == 'success')) }}
+    needs: [validate-inputs, approve-live]
+    if: ${{ always() && !cancelled() && needs.validate-inputs.result == 'success' && !inputs.omp_usage_comparison && (inputs.mode != 'live' || (github.ref == 'refs/heads/main' && needs.approve-live.result == 'success')) }}
     name: Windows 2025 x64 batch diagnostic
     runs-on: windows-2025
     timeout-minutes: 120
@@ -112,7 +166,22 @@ jobs:
         if: always()
         env:
           SOURCE_SHA_INPUT: ${{ inputs.source_sha }}
+          RELEASE_TAG_INPUT: ${{ inputs.release_tag }}
+          RELEASE_COMMIT_INPUT: ${{ inputs.release_commit }}
+          ASSET_RUN_INPUT: ${{ inputs.asset_run_id }}
+          MANIFEST_SHA_INPUT: ${{ inputs.manifest_sha256 }}
+          SELECTED_MODE: ${{ inputs.mode }}
+          SELECTED_HARNESSES: ${{ inputs.harnesses }}
+          OMP_COMPARISON: ${{ inputs.omp_usage_comparison }}
+          OMP_CANDIDATE: ${{ inputs.omp_candidate_only }}
         run: |
+          $release = @($env:RELEASE_TAG_INPUT, $env:RELEASE_COMMIT_INPUT, $env:ASSET_RUN_INPUT, $env:MANIFEST_SHA_INPUT)
+          $specified = @($release | Where-Object { -not [string]::IsNullOrEmpty($_) }).Count
+          if ($specified -gt 0) {
+            "NAN_DIAGNOSTIC_RELEASE_REQUIRED=1" >> $env:GITHUB_ENV
+            if ($specified -ne 4 -or $env:SOURCE_SHA_INPUT -or $env:SELECTED_MODE -ne 'deterministic' -or $env:SELECTED_HARNESSES -ne 'mimo-code' -or $env:OMP_COMPARISON -eq 'true' -or $env:OMP_CANDIDATE -eq 'true') { throw 'release assets require a complete, credential-free MiMo selection without source override' }
+            if ($env:RELEASE_TAG_INPUT -cnotmatch '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' -or $env:RELEASE_COMMIT_INPUT -cnotmatch '^[0-9a-f]{40}$' -or $env:ASSET_RUN_INPUT -cnotmatch '^[1-9][0-9]{0,19}$' -or $env:MANIFEST_SHA_INPUT -cnotmatch '^[0-9a-f]{64}$') { throw 'release asset identity is invalid' }
+          }
           $source = if ($env:SOURCE_SHA_INPUT) { $env:SOURCE_SHA_INPUT } else { $env:GITHUB_SHA }
           if ($source -cnotmatch '^[0-9a-f]{40}$') { throw 'source_sha must be lowercase 40-character hexadecimal' }
           git -C $env:GITHUB_WORKSPACE fetch --no-tags --depth=1 origin $source
@@ -133,7 +202,7 @@ jobs:
             "NAN_DIAGNOSTIC_SETUP_FIXTURES=failed-pwsh-missing" >> $env:GITHUB_ENV
             throw 'pwsh is required for Windows fixture regressions'
           }
-          $output = & python -m unittest -v canary/tests/windows-diagnostic-workflow.py canary/tests/windows-diagnostic.py canary/tests/windows-summary.py canary/tests/windows-installer.py 2>&1
+          $output = & python -m unittest -v canary/tests/windows-diagnostic-workflow.py canary/tests/windows-diagnostic.py canary/tests/windows-summary.py canary/tests/windows-release-assets.py canary/tests/windows-installer.py 2>&1
           $code = $LASTEXITCODE
           $output | Write-Output
           if ($code -ne 0 -or $output -match 'skipped=[1-9][0-9]*') {
@@ -166,7 +235,11 @@ jobs:
             @{ Filter = 'terminal::diagnostic::tests::cancellation_and_timeout_are_independent_owned_events'; Name = 'diagnostic-cancel' }
             @{ Filter = 'terminal::diagnostic::tests::missing_executable_does_not_claim_exit_or_cleanup'; Name = 'diagnostic-missing' }
             @{ Filter = 'terminal::diagnostic::tests::retention_cap_is_not_eof_and_does_not_block_writer'; Name = 'diagnostic-eof' }
-            @{ Filter = 'terminal::diagnostic::survivors::tests::scan_reports_the_current_process_ancestry'; Name = 'diagnostic-survivors' }
+            @{ Filter = 'terminal::windows_tests::retained_job_counts_descendant_after_root_exit_then_proves_cleanup'; Name = 'diagnostic-owned-descendant' }
+            @{ Filter = 'terminal::windows_tests::retained_job_counts_a_live_root_without_descendants'; Name = 'diagnostic-owned-root' }
+            @{ Filter = 'terminal::windows_tests::unrelated_live_child_does_not_prevent_an_available_empty_job'; Name = 'diagnostic-unrelated' }
+            @{ Filter = 'terminal::windows_tests::diagnostic_detects_owned_descendant_after_root_exit_and_both_eofs'; Name = 'diagnostic-quiet-descendant' }
+            @{ Filter = 'terminal::diagnostic::survivors::tests::failed_job_query_cannot_report_an_available_empty_job'; Name = 'diagnostic-query-error' }
           )
           $rustFailures = @()
           foreach ($entry in $filters) {
@@ -213,6 +286,25 @@ jobs:
           $fixtureCode = $LASTEXITCODE
           "NAN_DIAGNOSTIC_HARNESS_FIXTURE=$env:GITHUB_WORKSPACE\target\x86_64-pc-windows-msvc\release\codex-harness-fixture.exe" >> $env:GITHUB_ENV
           if ($cliCode -ne 0 -or $canaryCode -ne 0 -or $fixtureCode -ne 0) { exit 1 }
+
+      - name: Stage exact attested release diagnostic assets
+        id: release_assets
+        if: always() && env.NAN_DIAGNOSTIC_RELEASE_REQUIRED == '1'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG_INPUT: ${{ inputs.release_tag }}
+          RELEASE_COMMIT_INPUT: ${{ inputs.release_commit }}
+          ASSET_RUN_INPUT: ${{ inputs.asset_run_id }}
+          MANIFEST_SHA_INPUT: ${{ inputs.manifest_sha256 }}
+        run: |
+          if ('${{ steps.source.outcome }}' -ne 'success' -or '${{ steps.identity.outcome }}' -ne 'success' -or (git rev-parse HEAD) -ne $env:GITHUB_SHA) { throw 'release mode requires the unchanged trusted controller checkout' }
+          & python -B canary/actions/windows_release_assets.py --repository $env:GITHUB_REPOSITORY `
+            --tag $env:RELEASE_TAG_INPUT --commit $env:RELEASE_COMMIT_INPUT --controller $env:GITHUB_SHA `
+            --run-id $env:ASSET_RUN_INPUT --manifest-sha256 $env:MANIFEST_SHA_INPUT `
+            --directory (Join-Path $env:RUNNER_TEMP 'windows-attested-release') `
+            --provenance (Join-Path $env:RUNNER_TEMP 'windows-cli-diagnostic\release-provenance.json')
+          if ($LASTEXITCODE -ne 0) { throw 'attested release assets are unavailable' }
 
       - name: Run supervised standard-stream regression
         id: supervised
@@ -291,6 +383,11 @@ jobs:
           NAN_DIAGNOSTIC_CANARY: ${{ github.workspace }}\target\x86_64-pc-windows-msvc\release\nan-harness-canary.exe
         run: |
           $ErrorActionPreference = 'Continue'
+          if ($env:NAN_DIAGNOSTIC_RELEASE_REQUIRED -eq '1') {
+            if ($env:NAN_DIAGNOSTIC_RELEASE_VERIFIED -ne '1') { Write-Output 'Release verification failed; no release batch was started.'; $global:LASTEXITCODE = 1; return }
+            $env:NAN_DIAGNOSTIC_BINARY = $env:NAN_DIAGNOSTIC_RELEASE_BINARY
+            $env:NAN_DIAGNOSTIC_CANARY = $env:NAN_DIAGNOSTIC_RELEASE_CANARY
+          }
           $source = if ($env:TESTED_SOURCE_SHA) { $env:TESTED_SOURCE_SHA } else { $env:GITHUB_SHA }
           # Derive the collector allowance from the actual job elapsed time;
           # Timing starts before checkout. Reserve two minutes for runner
@@ -353,9 +450,11 @@ jobs:
             if ($null -eq $batchCode) { $batchCode = 1 }
             $global:LASTEXITCODE = $batchCode
           } elseif (Test-Path $entrypoint) {
+            $releaseArguments = @()
+            if ($env:NAN_DIAGNOSTIC_RELEASE_REQUIRED -eq '1') { $releaseArguments = @('--expected-mimo-version', '0.1.16') }
             & $entrypoint --harnesses $env:HARNESS_SELECTION --mode $env:DIAGNOSTIC_MODE `
               --model $env:DIAGNOSTIC_MODEL --python-version $env:NAN_DIAGNOSTIC_PYTHON_VERSION --budget-seconds $env:NAN_DIAGNOSTIC_BATCH_BUDGET --source-sha $source --binary $env:NAN_DIAGNOSTIC_BINARY `
-              --canary $env:NAN_DIAGNOSTIC_CANARY --output $env:REPORT_DIR
+              --canary $env:NAN_DIAGNOSTIC_CANARY --output $env:REPORT_DIR @releaseArguments
             $batchCode = $LASTEXITCODE
             if ($null -eq $batchCode) { $batchCode = 1 }
             $global:LASTEXITCODE = $batchCode
@@ -425,6 +524,7 @@ jobs:
           path: |
             ${{ runner.temp }}\windows-cli-diagnostic\report.json
             ${{ runner.temp }}\windows-cli-diagnostic\summary.md
+            ${{ runner.temp }}\windows-cli-diagnostic\release-provenance.json
           if-no-files-found: warn
           retention-days: 7
 
@@ -433,6 +533,12 @@ jobs:
         env:
           DIAGNOSTIC_MODE: ${{ inputs.mode }}
         run: |
+          if ($env:NAN_DIAGNOSTIC_RELEASE_REQUIRED -eq '1') {
+            if ($env:NAN_DIAGNOSTIC_RELEASE_VERIFIED -ne '1') { throw 'release asset verification did not pass' }
+            $receipt = Get-Content (Join-Path $env:RUNNER_TEMP 'windows-cli-diagnostic\release-provenance.json') -Raw | ConvertFrom-Json
+            $observed = Get-Content (Join-Path $env:RUNNER_TEMP 'windows-cli-diagnostic\report.json') -Raw | ConvertFrom-Json
+            if ($observed.sourceSha -cne $receipt.controllerSha -or $observed.nanHarness.sha256 -cne $receipt.nanHarnessSha256 -or $observed.canary.sha256 -cne $receipt.canarySha256) { throw 'diagnostic release provenance differs from executed binaries' }
+          }
           if ($env:DIAGNOSTIC_MODE -eq 'codex-diagnostic') {
             $safe = Join-Path $env:RUNNER_TEMP 'windows-cli-diagnostic\codex-summary.md'
             & python -I (Join-Path $env:GITHUB_WORKSPACE 'canary\actions\codex_diagnostic.py') `
@@ -480,8 +586,8 @@ jobs:
           }
 
   omp-usage-comparison:
-    needs: approve-live
-    if: ${{ always() && !cancelled() && inputs.omp_usage_comparison && github.ref == 'refs/heads/main' && needs.approve-live.result == 'success' }}
+    needs: [validate-inputs, approve-live]
+    if: ${{ always() && !cancelled() && needs.validate-inputs.result == 'success' && inputs.omp_usage_comparison && github.ref == 'refs/heads/main' && needs.approve-live.result == 'success' }}
     name: OMP usage (${{ matrix.kind }}, ${{ matrix.omp }})
     runs-on: windows-2025
     timeout-minutes: 90

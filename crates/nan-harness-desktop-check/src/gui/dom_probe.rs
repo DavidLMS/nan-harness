@@ -576,6 +576,15 @@ impl QualificationFacts {
 }
 
 #[derive(Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum FirstRunPreparation {
+    Absent,
+    Dismissed,
+    Blocked,
+    Uncertain,
+}
+
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Facts {
     schema_version: u8,
@@ -597,6 +606,8 @@ struct Facts {
     error_category: Option<DriverError>,
     playwright_version: Option<String>,
     observed_runtime_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    first_run_preparation: Option<FirstRunPreparation>,
 }
 
 const DOM_FACT_KEYS: &[&str] = &[
@@ -660,7 +671,50 @@ const DOM_OPTIONAL_SCOPE_KEYS: &[&str] = &[
     "retryScopeFailure",
     "retryScopeObservation",
     "retrySubtreeSettlement",
+    "firstRunPreparation",
 ];
+
+// Check the closed wire envelope before Serde can normalize optional enums.
+fn valid_fact_keys(
+    object: &serde_json::Map<String, serde_json::Value>,
+    qualification: bool,
+) -> bool {
+    let extra = if qualification {
+        DOM_QUALIFICATION_KEYS.len()
+    } else {
+        0
+    };
+    let count = (24 + extra)..=(26 + extra);
+    let optional_scope = DOM_OPTIONAL_SCOPE_KEYS
+        .iter()
+        .filter(|key| object.contains_key(**key))
+        .count();
+    if (!qualification && optional_scope != 0)
+        || object.get("firstRunPreparation").is_some_and(|value| {
+            value.as_str().is_none_or(|value| {
+                !["absent", "dismissed", "blocked", "uncertain"].contains(&value)
+            })
+        })
+        || ["retryScopeObservation", "retrySubtreeSettlement"]
+            .iter()
+            .any(|key| object.get(*key).is_some_and(serde_json::Value::is_null))
+        || !count.contains(&(object.len() - optional_scope))
+        || object.keys().any(|key| {
+            !DOM_FACT_KEYS.contains(&key.as_str())
+                && !DOM_QUALIFICATION_KEYS.contains(&key.as_str())
+                && !DOM_OPTIONAL_SCOPE_KEYS.contains(&key.as_str())
+        })
+    {
+        return false;
+    }
+    if DOM_QUALIFICATION_KEYS
+        .iter()
+        .any(|key| qualification != object.contains_key(*key))
+    {
+        return false;
+    }
+    true
+}
 
 fn read_facts(path: &Path, qualification: bool) -> Result<Facts, Reason> {
     let mut bytes = Vec::new();
@@ -673,33 +727,7 @@ fn read_facts(path: &Path, qualification: bool) -> Result<Facts, Reason> {
     let value: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|_| Reason::IsolationUnavailable)?;
     let object = value.as_object().ok_or(Reason::IsolationUnavailable)?;
-    let extra = if qualification {
-        DOM_QUALIFICATION_KEYS.len()
-    } else {
-        0
-    };
-    let count = (24 + extra)..=(26 + extra);
-    let optional_scope = DOM_OPTIONAL_SCOPE_KEYS
-        .iter()
-        .filter(|key| object.contains_key(**key))
-        .count();
-    if (!qualification && optional_scope != 0)
-        || ["retryScopeObservation", "retrySubtreeSettlement"]
-            .iter()
-            .any(|key| object.get(*key).is_some_and(serde_json::Value::is_null))
-        || !count.contains(&(object.len() - optional_scope))
-        || object.keys().any(|key| {
-            !DOM_FACT_KEYS.contains(&key.as_str())
-                && !DOM_QUALIFICATION_KEYS.contains(&key.as_str())
-                && !DOM_OPTIONAL_SCOPE_KEYS.contains(&key.as_str())
-        })
-    {
-        return Err(Reason::IsolationUnavailable);
-    }
-    if DOM_QUALIFICATION_KEYS
-        .iter()
-        .any(|key| qualification != object.contains_key(*key))
-    {
+    if !valid_fact_keys(object, qualification) {
         return Err(Reason::IsolationUnavailable);
     }
     let facts: Facts = serde_json::from_value(value).map_err(|_| Reason::IsolationUnavailable)?;
@@ -713,6 +741,10 @@ fn read_facts(path: &Path, qualification: bool) -> Result<Facts, Reason> {
         })
     };
     if facts.schema_version != 1
+        || matches!(
+            facts.first_run_preparation,
+            Some(FirstRunPreparation::Blocked | FirstRunPreparation::Uncertain)
+        ) && facts.input.input_submitted
         || facts.mechanism
             != if qualification {
                 "hermes-renderer-qualification"
@@ -1627,6 +1659,50 @@ mod tests {
             .remove("retryScopeFailure");
         qualifier["retryControl"] = serde_json::Value::Null;
         assert!(read(&qualifier, true).is_err());
+    }
+
+    #[test]
+    fn first_run_preparation_is_closed_and_never_supplies_submission_proof() {
+        let records: Vec<serde_json::Value> = serde_json::from_str(include_str!(
+            "../../../../canary/tests/fixtures/hermes-first-run-preparation.json"
+        ))
+        .unwrap();
+        assert_eq!(records.len(), 7);
+        for record in &records {
+            let facts = read(record, true).unwrap();
+            let retained = serde_json::to_value(&facts).unwrap();
+            assert_eq!(
+                retained["firstRunPreparation"],
+                record["firstRunPreparation"]
+            );
+            assert_eq!(retained["inputSubmitted"], record["inputSubmitted"]);
+            assert!(!facts.response.response_verified);
+            assert!(read(record, false).is_err());
+        }
+        for invalid in [
+            json!(null),
+            json!(true),
+            json!({"dismissed": null}),
+            json!("PRIVATE"),
+        ] {
+            let mut record = records[0].clone();
+            record["firstRunPreparation"] = invalid;
+            assert!(read(&record, true).is_err());
+        }
+        for stage in ["absent", "dismissed", "blocked", "uncertain"] {
+            let mut record = records[0].clone();
+            record["firstRunPreparation"] = json!(stage);
+            assert_eq!(
+                read(&record, true).is_ok(),
+                ["absent", "dismissed"].contains(&stage)
+            );
+        }
+        let mut legacy = records[0].clone();
+        legacy
+            .as_object_mut()
+            .unwrap()
+            .remove("firstRunPreparation");
+        assert!(read(&legacy, true).is_ok());
     }
 
     #[test]

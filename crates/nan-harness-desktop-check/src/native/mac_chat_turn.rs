@@ -57,6 +57,7 @@ impl NativeProgress {
 pub(crate) struct TransportObservation {
     pub(crate) progress: Option<NativeProgress>,
     pub(crate) work: Option<NativeProgress>,
+    pub(crate) completion: Option<NativeCompletion>,
     pub(crate) started: bool,
     pub(crate) budget_ms: Option<u32>,
 }
@@ -375,6 +376,56 @@ pub(crate) struct ComposerShape {
     start_tasks: u16,
     send_messages: u16,
 }
+/// Work-end evidence only; a timed-out helper never produces an accepted receipt.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NativeCompletion {
+    stage: ChatTurnStage,
+    remaining_ms: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    composer_shape: Option<ComposerShape>,
+}
+impl NativeCompletion {
+    pub(super) fn parse(line: &[u8], budget_ms: u32) -> Option<Self> {
+        if line.len() > 128 {
+            return None;
+        }
+        let text = std::str::from_utf8(line)
+            .ok()?
+            .strip_suffix('\n')?
+            .strip_prefix("completion ")?;
+        let fields: Vec<_> = text.split(' ').collect();
+        if fields.len() != 2 && fields.len() != 5 {
+            return None;
+        }
+        let stage = ChatTurnStage::parse(&format!("turn {}\n", fields[0]))?;
+        let remaining = fields[1];
+        if remaining.is_empty()
+            || remaining.len() > 5
+            || !remaining.bytes().all(|b| b.is_ascii_digit())
+            || (remaining.len() > 1 && remaining.starts_with('0'))
+        {
+            return None;
+        }
+        let remaining_ms = remaining.parse().ok()?;
+        if remaining_ms > CHAT_TURN_MAX_MILLIS || remaining_ms > budget_ms {
+            return None;
+        }
+        let composer_shape = if fields.len() == 5 {
+            Some(ComposerShape::parse(&format!(
+                "composer {} {} {}",
+                fields[2], fields[3], fields[4]
+            ))?)
+        } else {
+            None
+        };
+        Some(Self {
+            stage,
+            remaining_ms,
+            composer_shape,
+        })
+    }
+}
 impl ComposerShape {
     fn parse(line: &str) -> Option<Self> {
         let fields: Vec<_> = line.strip_prefix("composer ")?.split(' ').collect();
@@ -691,6 +742,43 @@ pub(super) fn request(
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn native_completion_is_closed_bounded_and_preserves_optional_shape_presence() {
+        for raw in [
+            b"completion composer 0\n".as_slice(),
+            b"completion sent 100 1 0 1\n",
+        ] {
+            let value = serde_json::to_value(NativeCompletion::parse(raw, 500).unwrap()).unwrap();
+            assert!(value.as_object().unwrap().len() == 2 || value.as_object().unwrap().len() == 3);
+            assert!(value["remainingMs"].as_u64().unwrap() <= 500);
+        }
+        assert!(NativeCompletion::parse(b"completion composer 500\n", 500).is_some());
+        for raw in [
+            "completion PRIVATE 0\n",
+            "completion {\"sent\":null} 0\n",
+            "completion sent null\n",
+            "completion sent -1\n",
+            "completion sent 01\n",
+            "completion sent 15001\n",
+            "completion sent 501\n",
+            "completion sent 0 null\n",
+            "completion sent 0 1 0\n",
+            "completion sent 0 1 0 1024\n",
+            "completion sent 0 1 0 null\n",
+            "completion sent 0 1 0 1 PRIVATE\n",
+            "completion sent 0\nPRIVATE",
+            "completion sent 0",
+            "completion sent 0\r\n",
+            "completion sent  0\n",
+        ] {
+            assert!(
+                NativeCompletion::parse(raw.as_bytes(), 500).is_none(),
+                "{raw}"
+            );
+        }
+        assert!(NativeCompletion::parse(&[b'x'; 129], 500).is_none());
+        assert!(NativeCompletion::parse(b"completion sent 1\n", 0).is_none());
+    }
     #[test]
     fn native_progress_frames_are_literal_strings_without_private_or_object_forms() {
         for label in [

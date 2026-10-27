@@ -21,6 +21,45 @@ CELL_SPEC.loader.exec_module(CELL)
 
 
 class WindowsProbeContracts(unittest.TestCase):
+    def test_real_pwsh_mimo_checks_project_actual_report_and_preserve_exit_verdict(self):
+        pwsh = shutil.which("pwsh")
+        if not pwsh:
+            self.skipTest("pwsh unavailable; actual check producer is verified on Windows")
+        for statuses in [("passed", "failed"), ("failed", "passed"), ("passed", "passed")]:
+            with self.subTest(statuses=statuses), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                marker = root / "probe-result.json"
+                checks = [{"name": name, "status": status, "durationMilliseconds": 12 + index}
+                          for index, (name, status) in enumerate(zip(("contract", "native-configuration"), statuses))]
+                failed = "failed" in statuses
+                scenarios = [{"name": name, "status": "failed" if failed and name == "tool-round-trip" else "passed",
+                              "checks": checks if name == "tool-round-trip" else [{"name": "contract", "status": "passed", "durationMilliseconds": 1}],
+                              "durationMilliseconds": 25 if name == "tool-round-trip" else 1}
+                             for name in ("inventory", "tool-round-trip", "sentinel", "external-prerequisite")]
+                report = {"schemaVersion": 2, "harness": "mimo-code", "outcome": "failed" if failed else "passed",
+                          "scenarios": scenarios, "durationMilliseconds": 28}
+                producer = root / "synthetic-canary.ps1"
+                def run(value):
+                    producer.write_text("Write-Output '" + json.dumps(value) + "'; exit " + str(int(failed)) + "\n")
+                    env = dict(os.environ, NAN_CANARY_PROBE_RESULT=str(marker))
+                    result = subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-File", str(PROBE),
+                        "-Harness", "mimo-code", "-Stage", "deterministic-contract", "-NanBinary", str(producer),
+                        "-Canary", str(producer), "-Version", "0.1.16"],
+                        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+                    return result.returncode, json.loads(marker.read_text(encoding="utf-8-sig"))
+                code, observed = run(report)
+                self.assertEqual(code, int(failed))
+                self.assertEqual(observed["status"], "failed" if failed else "passed")
+                self.assertEqual(observed["conformanceChecks"], checks)
+                self.assertEqual(observed["exitCode"], int(failed))
+                for invalid in (checks[:1], [{**checks[0], "name": "PRIVATE"}, checks[1]],
+                                [{**checks[0], "output": "PRIVATE"}, checks[1]],
+                                [{**checks[0], "durationMilliseconds": True}, checks[1]]):
+                    scenarios[1]["checks"] = invalid
+                    _, observed = run(report)
+                    self.assertNotIn("conformanceChecks", observed)
+                    self.assertNotIn("PRIVATE", json.dumps(observed))
+
     def test_live_marker_accepts_only_closed_diagnostic_categories(self):
         with tempfile.TemporaryDirectory() as tmp:
             marker = Path(tmp) / "marker.json"

@@ -2,6 +2,11 @@
 """Static contracts for the manual native Windows diagnostic workflow."""
 
 from pathlib import Path
+import os
+import re
+import subprocess
+import sys
+import textwrap
 import unittest
 
 
@@ -10,6 +15,66 @@ WORKFLOW = (ROOT / ".github/workflows/windows-cli-diagnostic.yml").read_text()
 
 
 class WindowsDiagnosticWorkflowTests(unittest.TestCase):
+    def test_actual_selection_guard_rejects_release_omp_before_any_credential_or_review_job(self):
+        guard = WORKFLOW.split("  validate-inputs:\n", 1)[1].split("\n  approve-live:", 1)[0]
+        self.assertIn("permissions: {}", guard)
+        self.assertNotIn("environment:", guard)
+        program = guard.split("          python3 - <<'PY'\n", 1)[1].split("\n          PY", 1)[0]
+        program = textwrap.dedent(program)
+        release = dict(RELEASE_TAG="v0.1.26", RELEASE_COMMIT="0be5d88fdefe020e8c302f6538756869042c01fd",
+                       ASSET_RUN_ID="40475697974", MANIFEST_SHA256="a" * 64, SELECTED_MODE="deterministic",
+                       SELECTED_HARNESSES="mimo-code", OMP_COMPARISON="false", OMP_CANDIDATE="false")
+        def status(env):
+            keys = {*release, "SOURCE_OVERRIDE"}
+            child_env = {key: value for key, value in os.environ.items() if key not in keys}
+            result = subprocess.run([sys.executable, "-I", "-c", program], env={**child_env, **env},
+                                    capture_output=True, text=True, timeout=10)
+            self.assertNotIn("PRIVATE", result.stderr)
+            return result.returncode
+        self.assertEqual(status(release), 0)
+        for key, value in [("OMP_COMPARISON", "true"), ("OMP_CANDIDATE", "true"),
+                           ("SOURCE_OVERRIDE", "b" * 40), ("SELECTED_MODE", "live"),
+                           ("SELECTED_HARNESSES", "omp"), ("RELEASE_COMMIT", ""),
+                           ("RELEASE_TAG", "PRIVATE"), ("ASSET_RUN_ID", "99999999999999999999")]:
+            with self.subTest(key=key):
+                self.assertNotEqual(status({**release, key: value}), 0)
+        for mode, comparison in [("live", "false"), ("deterministic", "true"), ("native-diagnostic", "false")]:
+            self.assertEqual(status(dict(SELECTED_MODE=mode, OMP_COMPARISON=comparison)), 0)
+        for name in ("approve-live", "diagnostic", "omp-usage-comparison"):
+            job = re.split(r"\n  [a-z][a-z0-9-]*:\n", WORKFLOW.split(f"\n  {name}:\n", 1)[1], maxsplit=1)[0]
+            # Only the job's first unindented sibling can end this block.
+            self.assertIn("needs:", job)
+            self.assertIn("needs.validate-inputs.result == 'success'", job)
+
+    def test_attested_release_mode_keeps_controller_and_release_assets_separate(self):
+        inputs = WORKFLOW.split("    inputs:\n", 1)[1].split("\npermissions:", 1)[0]
+        self.assertEqual(len(re.findall(r"^      [a-z0-9_]+:$", inputs, re.M)), 10)
+        for name in ("release_tag", "release_commit", "asset_run_id", "manifest_sha256"):
+            self.assertIn(f"      {name}:", inputs)
+        self.assertIn("actions: read", WORKFLOW)
+        self.assertNotIn("contents: write", WORKFLOW)
+        self.assertIn("$specified -ne 4 -or $env:SOURCE_SHA_INPUT", WORKFLOW)
+        self.assertIn("$env:SELECTED_MODE -ne 'deterministic'", WORKFLOW)
+        self.assertIn("$env:SELECTED_HARNESSES -ne 'mimo-code'", WORKFLOW)
+        self.assertIn("(git rev-parse HEAD) -ne $env:GITHUB_SHA", WORKFLOW)
+        self.assertIn("--controller $env:GITHUB_SHA", WORKFLOW)
+        self.assertIn("windows-attested-release", WORKFLOW)
+        self.assertIn("$env:NAN_DIAGNOSTIC_RELEASE_VERIFIED -ne '1'", WORKFLOW)
+        self.assertIn("$env:NAN_DIAGNOSTIC_BINARY = $env:NAN_DIAGNOSTIC_RELEASE_BINARY", WORKFLOW)
+        self.assertIn("$observed.nanHarness.sha256 -cne $receipt.nanHarnessSha256", WORKFLOW)
+        self.assertIn("$observed.canary.sha256 -cne $receipt.canarySha256", WORKFLOW)
+        self.assertIn("@('--expected-mimo-version', '0.1.16')", WORKFLOW)
+        self.assertIn("windows-cli-diagnostic\\release-provenance.json", WORKFLOW)
+
+    def test_windows_survivor_filters_use_retained_membership_not_unix_inventory(self):
+        self.assertNotIn("survivors::tests::scan_reports_the_current_process_ancestry", WORKFLOW)
+        for name in ("retained_job_counts_descendant_after_root_exit_then_proves_cleanup",
+                     "retained_job_counts_a_live_root_without_descendants",
+                     "unrelated_live_child_does_not_prevent_an_available_empty_job",
+                     "diagnostic_detects_owned_descendant_after_root_exit_and_both_eofs",
+                     "failed_job_query_cannot_report_an_available_empty_job"):
+            self.assertIn(name, WORKFLOW)
+
     def test_manual_windows_only_and_least_privilege(self):
         self.assertIn("workflow_dispatch:", WORKFLOW)
         self.assertNotIn("schedule:", WORKFLOW)

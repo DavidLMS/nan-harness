@@ -16,10 +16,27 @@ int main(int argc, char** argv) {
         const bool timeout = request_line == "timeout";
         const auto rejection_index = request_line.rfind("input-rejection ",0) == 0
             ? request_line.substr(16) : "";
+        const auto completion_index = request_line.rfind("completion ",0) == 0 ? request_line.substr(11) : "";
         std::fill(request_line.begin(), request_line.end(), '\0');
         if (timeout) {
             progress(NativeProgress::Window);
             progress(NativeProgress::Tree);
+            std::this_thread::sleep_for(std::chrono::seconds(2));
+            return 0;
+        }
+        if (!completion_index.empty()) {
+            if (completion_index.size()!=1 || completion_index[0]<'0' || completion_index[0]>'5') return 3;
+            const bool sent=completion_index=="1" || completion_index=="5", missing_finish=completion_index=="2";
+            const ComposerShape shape{1,0,1};
+            progress(NativeProgress::Window);
+            progress(sent?NativeProgress::Press:NativeProgress::Composer);
+            completion(std::cout,sent?"sent":"composer",100,missing_finish?nullptr:&shape);
+            if (!missing_finish) {
+                progress(NativeProgress::Finish);
+                std::cout << (completion_index=="4"?"PRIVATE\n":sent?"turn sent\ncomposer 1 0 1\n":"turn composer\ncomposer 1 0 1\n") << std::flush;
+            }
+            if (completion_index=="3") return 3;
+            if (completion_index=="4" || completion_index=="5") return 0;
             std::this_thread::sleep_for(std::chrono::seconds(2));
             return 0;
         }
@@ -63,6 +80,24 @@ int main(int argc, char** argv) {
         "progress focus\nprogress replace-select\nprogress prompt-clipboard\nprogress paste\n"
         "progress pasted-value\nprogress readback\nprogress readback-select\nprogress readback-copy\n"
         "progress collapse\nprogress send-tree\nprogress press\nprogress finish\n");
+    FlushedFrames completed_frames;
+    std::ostream completed_output(&completed_frames);
+    const ComposerShape completed_shape{1,0,1};
+    completion(completed_output,"composer",100,&completed_shape);
+    completion(completed_output,"sent",0);
+    assert(completed_frames.flushes==2);
+    assert(completed_frames.str()=="completion composer 100 1 0 1\ncompletion sent 0\n");
+    Request cutoff_fixture;
+    cutoff_fixture.millis=15000;
+    cutoff_fixture.deadline=Clock::now()+std::chrono::seconds(15);
+    assert(completion_remaining(cutoff_fixture)==0);
+    timespec cutoff_now{}; assert(clock_gettime(CLOCK_MONOTONIC,&cutoff_now)==0);
+    cutoff_fixture.cutoff=static_cast<std::uint64_t>(cutoff_now.tv_sec)*1000+static_cast<std::uint64_t>(cutoff_now.tv_nsec)/1000000+100;
+    assert(completion_remaining(cutoff_fixture)<=100);
+    cutoff_fixture.deadline=Clock::now()+std::chrono::milliseconds(10);
+    assert(completion_remaining(cutoff_fixture)<=10);
+    cutoff_fixture.millis=1;
+    assert(completion_remaining(cutoff_fixture)<=1);
     Tree composer_tree;
     composer_tree.nodes = {fixture(-1, "AXWindow", ""), fixture(0, "AXTextArea", "Write your prompt to Claude"),
         fixture(0, "AXButton", "Send message"), fixture(-1, "AXButton", "Start task")};

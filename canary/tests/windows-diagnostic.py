@@ -33,6 +33,89 @@ class WindowsOsProxy:
 
 
 class WindowsDiagnosticTests(unittest.TestCase):
+    def test_frozen_mimo_version_guard_never_installs_a_newer_official_release(self):
+        args = self.args(); args.expected_mimo_version = "0.1.16"
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
+                patch.object(diagnostic.shutil, "which", return_value="x"), \
+                patch.object(diagnostic, "run_bounded") as run:
+            self.binaries(args, Path(tmp))
+            report, failed = diagnostic.collect(args, ["mimo-code"], Path(tmp))
+        self.assertTrue(failed)
+        self.assertEqual(report["harnesses"][0]["phases"]["metadata"]["status"], "FAIL")
+        run.assert_not_called()
+
+    def test_mimo_existing_native_configuration_progress_is_retained(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "progress.jsonl"
+            event = {"schema_version": 1, "scenario": "tool-round-trip",
+                     "stage": "native-configuration", "status": "failed", "elapsed_milliseconds": 42}
+            path.write_text(json.dumps(event) + "\n")
+            self.assertEqual(diagnostic.read_progress(path)["progress"], event)
+
+    def test_mimo_check_projection_is_strict_context_bound_and_keeps_failure(self):
+        checks = [{"name": "contract", "status": "passed", "durationMilliseconds": 12},
+                  {"name": "native-configuration", "status": "failed", "durationMilliseconds": 34}]
+        marker = {"schemaVersion": 2, "stage": "deterministic-contract", "status": "failed",
+                  "diagnostics": ["conformance-exit-nonzero"], "exitCode": 1,
+                  "failedScenarios": ["tool-round-trip"], "conformanceChecks": checks}
+        with tempfile.TemporaryDirectory() as tmp:
+            cell = Path(tmp)
+            def parse(value, stage="deterministic-contract", harness="mimo-code"):
+                (cell / "probe-result.json").write_text(json.dumps(value))
+                return diagnostic.probe_diagnostic(cell, stage, harness)
+            result = parse(marker)
+            self.assertEqual(result["conformanceChecks"], checks)
+            self.assertEqual(result["status"], "failed")
+            self.assertFalse((cell / "probe-result.json").exists())
+            invalid = [None, {}, [], checks[:1], checks[::-1], checks + checks[:1]]
+            for key, value in [("name", "PRIVATE"), ("status", "skipped"),
+                               ("durationMilliseconds", True), ("durationMilliseconds", -1),
+                               ("durationMilliseconds", 86400001), ("durationMilliseconds", 1.0),
+                               ("output", "PRIVATE")]:
+                changed = [dict(check) for check in checks]
+                changed[0][key] = value
+                invalid.append(changed)
+            for value in invalid:
+                result = parse({**marker, "conformanceChecks": value})
+                self.assertEqual(result["markerState"], "invalid")
+                self.assertNotIn("PRIVATE", json.dumps(result))
+            for stage, harness in [("version-doctor", "mimo-code"), ("deterministic-contract", "codex"),
+                                   ("deterministic-contract", None)]:
+                self.assertEqual(parse(marker, stage, harness)["markerState"], "invalid")
+
+    def test_collector_preserves_mimo_checks_without_extra_invocation_or_verdict_change(self):
+        for failed in (True, False):
+            args = self.args(); calls = []
+            checks = [{"name": "contract", "status": "passed", "durationMilliseconds": 12},
+                      {"name": "native-configuration", "status": "failed" if failed else "passed", "durationMilliseconds": 34}]
+            def fake(argv, cwd, env, timeout):
+                if "-Stage" in argv:
+                    stage = argv[argv.index("-Stage") + 1]
+                    calls.append(stage)
+                    marker = {"schemaVersion": 2, "stage": "complete", "status": "passed", "diagnostics": [], "exitCode": 0}
+                    if stage == "deterministic-contract":
+                        marker["conformanceChecks"] = checks
+                        if failed:
+                            marker.update(stage=stage, status="failed", diagnostics=["conformance-exit-nonzero"],
+                                          exitCode=1, failedScenarios=["tool-round-trip"])
+                    Path(env["NAN_CANARY_PROBE_RESULT"]).write_text(json.dumps(marker))
+                    return (1, "nonzero") if stage == "deterministic-contract" and failed else (0, "exit")
+                return (0, "exit")
+            with self.subTest(failed=failed), tempfile.TemporaryDirectory() as tmp, \
+                    patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
+                    patch.object(diagnostic.shutil, "which", return_value="x"), \
+                    patch.object(diagnostic, "run_bounded", side_effect=fake):
+                self.binaries(args, Path(tmp))
+                report, outcome = diagnostic.collect(args, ["mimo-code"], Path(tmp))
+            self.assertEqual(outcome, failed)
+            self.assertEqual(calls, ["version-doctor", "deterministic-contract"])
+            phase = report["harnesses"][0]["phases"]["deterministic-contract"]
+            self.assertEqual(phase["status"], "FAIL" if failed else "PASS")
+            self.assertEqual(phase["diagnostic"]["conformanceChecks"], checks)
+            rendered = summary.render(summary.safe_view(report))
+            self.assertIn("native-configuration=" + ("failed" if failed else "passed"), rendered)
+
     def test_unavailable_distributions_skip_without_resolution_install_or_live_calls(self):
         for mode in ("deterministic", "live"):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp, \

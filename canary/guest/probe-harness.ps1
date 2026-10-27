@@ -7,6 +7,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'; $stageNow = $Stage; $workspace = $null; $stdout = $null; $stderr = $null; $completed = $false; $markerPath = $env:NAN_CANARY_PROBE_RESULT; $diagnostics = New-Object System.Collections.Generic.List[string]; $exitCode = $null; $doctorVersion = $null; $doctorExpectedVersion = $null; $doctorReason = $null; $doctorSchemaReason = $null; $discoveryCode = $null; $inventoryFailureReasons = $null; $inventoryProcess = $null; $failedScenarios = $null
 $knownDiagnostics = @('doctor-child-launch','doctor-exit-nonzero','doctor-output-invalid','doctor-schema-invalid','doctor-version-missing','doctor-version-invalid','doctor-version-mismatch','doctor-exit-missing','conformance-child-launch','conformance-exit-nonzero','conformance-output-invalid','conformance-schema-invalid','conformance-scenario-missing','conformance-scenario-failed','conformance-inventory-failed','conformance-inventory-operational-failed','conformance-check-invalid','conformance-exit-missing','live-child-launch','live-exit-nonzero','live-exit-missing','live-credential-missing','live-tool-evidence-missing','live-read-marker-missing','live-completion-marker-missing','live-bridge-sentinel','live-usage-invalid', 'live-usage-missing', 'live-usage-unreadable', 'live-usage-malformed', 'live-usage-schema-invalid', 'live-usage-not-observed', 'live-usage-unsupported','live-usage-summary-missing','probe-unexpected-failure')
+$conformanceChecks = $null
 $knownDiagnostics += @('live-error-auth','live-error-network','live-error-arguments','live-error-permission','live-error-provider','live-error-config')
 $hermesMachineFrontend = $false
 if ($Harness -eq 'hermes') {
@@ -39,9 +40,10 @@ function Write-Result([string]$resultStage, [string]$status) {
   if ($null -ne $inventoryFailureReasons) { $value.inventoryFailureReasons = @($inventoryFailureReasons) }
   if ($null -ne $inventoryProcess) { $value.inventoryProcess = $inventoryProcess }
   if ($null -ne $failedScenarios) { $value.failedScenarios = @($failedScenarios) }
+  if ($null -ne $conformanceChecks) { $value.conformanceChecks = @($conformanceChecks) }
   $tmp = Join-Path $parent ('.probe-result.' + [guid]::NewGuid().ToString('N'))
   # Windows PowerShell 5.1 supports UTF-8 (with BOM); JSON parsing is encoding-aware.
-  try { $value | ConvertTo-Json -Compress | Set-Content -LiteralPath $tmp -Encoding UTF8; Move-Item -LiteralPath $tmp -Destination $markerPath -Force }
+  try { $value | ConvertTo-Json -Depth 6 -Compress | Set-Content -LiteralPath $tmp -Encoding UTF8; Move-Item -LiteralPath $tmp -Destination $markerPath -Force }
   finally { if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue } }
 }
 function Fail([string]$message) {
@@ -132,6 +134,24 @@ function Validate-InventoryProcess([object]$Value) {
   if ($status -in @('missing-output','capture-error')) { return $null -eq $Value.exitCode -and $null -eq $Value.osErrorCode -and $null -eq $Value.timeoutMilliseconds -and $null -eq $Value.cleanupStage -and $null -eq $Value.cleanupStream }
   return $null -eq $Value.exitCode -and $null -eq $Value.timeoutMilliseconds -and $null -ne $Value.cleanupStage -and $null -ne $Value.cleanupStream
 }
+function Get-ConformanceChecks([object]$Value) {
+  # Read only the actual validated report. Missing/malformed evidence stays absent;
+  # neither this optional projection nor its formatting decides the probe verdict.
+  try {
+    if ($Harness -cne 'mimo-code' -or $Stage -cne 'deterministic-contract') { return $null }
+    $scenarios = @($Value.scenarios | Where-Object { $_.name -ceq 'tool-round-trip' })
+    if ($scenarios.Count -ne 1 -or @($scenarios[0].checks).Count -ne 2) { return $null }
+    $result = @()
+    foreach ($name in @('contract','native-configuration')) {
+      $selectedChecks = @($scenarios[0].checks | Where-Object { $_.name -ceq $name })
+      if ($selectedChecks.Count -ne 1) { return $null }
+      $check = $selectedChecks[0]
+      if (@($check.PSObject.Properties.Name | Where-Object { @('name','status','durationMilliseconds') -cnotcontains $_ }).Count -gt 0 -or @($check.PSObject.Properties).Count -ne 3 -or $check.name -isnot [string] -or $check.status -isnot [string] -or $check.status -cnotin @('passed','failed') -or -not (Is-BoundedInteger $check.durationMilliseconds 86400000)) { return $null }
+      $result += [ordered]@{ name = $name; status = $check.status; durationMilliseconds = $check.durationMilliseconds }
+    }
+    return $result
+  } catch { return $null }
+}
 function Validate-Conformance([object]$Value, [string]$ExpectedHarness) {
   $valid = $true; $names = @('external-prerequisite','inventory','sentinel','tool-round-trip'); $seen = @{}
   if ($null -eq $Value -or -not (Is-BoundedInteger $Value.schemaVersion 2) -or $Value.schemaVersion -notin @(1,2) -or [string]$Value.harness -cne $ExpectedHarness -or [string]$Value.outcome -notin @('passed','failed') -or $null -eq $Value.scenarios -or -not (Has-OnlyProperties $Value @('schemaVersion','harness','scenarios','outcome','durationMilliseconds','observations','inventoryFailureReasons','inventoryProcess')) -or -not (Is-BoundedInteger $Value.durationMilliseconds 86400000)) { Add-Diagnostic 'conformance-schema-invalid'; return $false }
@@ -195,6 +215,7 @@ try {
     try { $value = Get-Content -Raw $stdout | ConvertFrom-Json } catch { Add-Diagnostic 'conformance-output-invalid'; $value = $null }
     if ($null -eq $value) { Add-Diagnostic 'conformance-schema-invalid' } else {
       $valueValid = Validate-Conformance $value $Harness
+      if ($valueValid) { $conformanceChecks = Get-ConformanceChecks $value }
       $allowedReasons = @('process-failed','marker-missing','provider-failed','provider-shutdown-failed','daemon-cleanup-failed')
       if ($null -ne $value.inventoryFailureReasons) {
         $inventoryFailureReasons = @($value.inventoryFailureReasons)
