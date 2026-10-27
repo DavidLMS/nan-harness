@@ -9,18 +9,29 @@ import json
 import os
 from pathlib import Path
 import shutil
+import re
 import subprocess
 import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 PROBE = ROOT / "canary/guest/probe-harness.ps1"
+CURRENT_DOCTOR_SCHEMA = 9
 CELL_SPEC = importlib.util.spec_from_file_location("probe_cell", ROOT / "canary/actions/cell.py")
 CELL = importlib.util.module_from_spec(CELL_SPEC)
 CELL_SPEC.loader.exec_module(CELL)
 
 
 class WindowsProbeContracts(unittest.TestCase):
+    def test_native_doctor_fixture_tracks_the_actual_cli_producer_schema(self):
+        models = (ROOT / 'crates/nan-harness-cli/src/commands/doctor/models.rs').read_text()
+        version = re.search(r'const DOCTOR_SCHEMA_VERSION: u8 = ([0-9]+);', models)
+        self.assertIsNotNone(version)
+        self.assertEqual(int(version.group(1)), CURRENT_DOCTOR_SCHEMA)
+        source = PROBE.read_text()
+        self.assertIn(f'Is-BoundedInteger $value.schemaVersion {CURRENT_DOCTOR_SCHEMA}', source)
+        self.assertIn('$value.schemaVersion -notin @(8,9)', source)
+
     def test_real_pwsh_mimo_checks_project_actual_report_and_preserve_exit_verdict(self):
         pwsh = shutil.which("pwsh")
         if not pwsh:
@@ -212,7 +223,7 @@ class WindowsProbeContracts(unittest.TestCase):
             producer = root / "doctor-producer.ps1"
             producer.write_text(
                 "@'\n"
-                '{"schemaVersion":8,"offline":true,"harness":"fx","level":"ok",'
+                f'{{"schemaVersion":{CURRENT_DOCTOR_SCHEMA},"offline":true,"harness":"fx","level":"ok",'
                 '"installed":true,"version":"1.2.3",'
                 '"minimumSupportedVersion":"1.0.0",'
                 '"lastCompatibleVersion":"1.2.3",'
@@ -234,7 +245,12 @@ class WindowsProbeContracts(unittest.TestCase):
             value = __import__("json").loads(marker.read_text(encoding="utf-8-sig"))
             self.assertEqual(value["status"], "passed")
             self.assertEqual(value["exitCode"], 0)
-            for invalid in ("true", "8.5", '"8"', "9223372036854775808"):
+            current = producer.read_text()
+            producer.write_text(current.replace(f'"schemaVersion":{CURRENT_DOCTOR_SCHEMA}', '"schemaVersion":8'))
+            legacy = subprocess.run(command, env=env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(legacy.returncode, 0)
+            self.assertEqual(json.loads(marker.read_text(encoding="utf-8-sig"))["status"], "passed")
+            for invalid in ("true", "9.5", '"9"', "7", "10", "9223372036854775808"):
                 producer.write_text(
                     "Write-Output '{\"schemaVersion\":" + invalid + ",\"offline\":true,"
                     "\"harness\":\"fx\",\"level\":\"ok\",\"installed\":true,"
@@ -248,7 +264,7 @@ class WindowsProbeContracts(unittest.TestCase):
             for field in ("compatibleAt", "liveVerifiedAt"):
                 for invalid_timestamp in ("123", "true", "{}"):  # timestamps must remain Rust strings
                     producer.write_text(
-                        "Write-Output '{\"schemaVersion\":8,\"offline\":true,"
+                        f"Write-Output '{{\"schemaVersion\":{CURRENT_DOCTOR_SCHEMA},\"offline\":true,"
                         "\"harness\":\"fx\",\"level\":\"ok\",\"installed\":true,"
                         "\"version\":\"1.2.3\",\"" + field + "\":" + invalid_timestamp + ","
                         "\"warnings\":[],\"safeToShare\":true}'\nexit 0\n",
@@ -335,7 +351,7 @@ class WindowsProbeContracts(unittest.TestCase):
         self.assertIn("$Value.status -isnot [string]", source)
         self.assertNotIn("$value.schemaVersion -isnot [int]", source)
         self.assertIn("Is-BoundedInteger $Value.schemaVersion 2", source)
-        self.assertIn("Is-BoundedInteger $value.schemaVersion 8", source)
+        self.assertIn(f"Is-BoundedInteger $value.schemaVersion {CURRENT_DOCTOR_SCHEMA}", source)
         self.assertIn("function Is-DoctorOptionalString", source)
         self.assertIn("compatibleAt','liveVerifiedAt", source)
         self.assertIn("'inventoryFailureReasons'", source)

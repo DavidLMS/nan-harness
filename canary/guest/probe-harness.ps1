@@ -192,11 +192,12 @@ try {
       $badOptional = @($optionalStrings | Where-Object { $null -ne $value.$_ -and -not (Is-DoctorOptionalString $_ $value.$_) }).Count -gt 0
       $unknownFields = @($value.PSObject.Properties.Name | Where-Object { $allowed -notcontains $_ }).Count -gt 0
       $missingFields = @('schemaVersion','offline','harness','level','installed','warnings','safeToShare' | Where-Object { $null -eq $value.$_ }).Count -gt 0
-      $badTypes = -not (Is-BoundedInteger $value.schemaVersion 8) -or -not ($value.offline -is [bool]) -or -not ($value.installed -is [bool]) -or -not ($value.safeToShare -is [bool]) -or ($null -ne $value.warnings -and @($value.warnings | Where-Object { $_ -isnot [string] }).Count -gt 0) -or $badOptional
+      # Schema 9 added Desktop checks; the CLI HarnessDoctorReport fields are unchanged from 8.
+      $badTypes = -not (Is-BoundedInteger $value.schemaVersion 9) -or -not ($value.offline -is [bool]) -or -not ($value.installed -is [bool]) -or -not ($value.safeToShare -is [bool]) -or ($null -ne $value.warnings -and @($value.warnings | Where-Object { $_ -isnot [string] }).Count -gt 0) -or $badOptional
       if ($unknownFields) { $doctorSchemaReason = 'unknown-field' }
       elseif ($missingFields) { $doctorSchemaReason = 'required-field' }
       elseif ($badTypes) { $doctorSchemaReason = 'field-type' }
-      elseif ($value.schemaVersion -ne 8 -or [string]$value.harness -cne $Harness -or [string]$value.level -notin @('ok','warning','info','error')) { $doctorSchemaReason = 'field-value' }
+      elseif ($value.schemaVersion -notin @(8,9) -or [string]$value.harness -cne $Harness -or [string]$value.level -notin @('ok','warning','info','error')) { $doctorSchemaReason = 'field-value' }
       if ($null -ne $doctorSchemaReason) { Add-Diagnostic 'doctor-schema-invalid' }
       if ($null -eq $value.version) { Add-Diagnostic 'doctor-version-missing'; $doctorReason = 'missing' }
       elseif ($value.version -isnot [string] -or [string]$value.version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$') { Add-Diagnostic 'doctor-version-invalid'; $doctorReason = 'invalid' }

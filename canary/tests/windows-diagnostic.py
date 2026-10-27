@@ -37,6 +37,7 @@ class WindowsDiagnosticTests(unittest.TestCase):
         args = self.args(); args.expected_mimo_version = "0.1.16"
         with tempfile.TemporaryDirectory() as tmp, \
                 patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
+                patch.object(diagnostic, "native_prerequisite_self_test", return_value={"status": "PASS", "checks": {}}), \
                 patch.object(diagnostic.shutil, "which", return_value="x"), \
                 patch.object(diagnostic, "run_bounded") as run:
             self.binaries(args, Path(tmp))
@@ -104,6 +105,7 @@ class WindowsDiagnosticTests(unittest.TestCase):
                 return (0, "exit")
             with self.subTest(failed=failed), tempfile.TemporaryDirectory() as tmp, \
                     patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
+                    patch.object(diagnostic, "native_prerequisite_self_test", return_value={"status": "PASS", "checks": {}}), \
                     patch.object(diagnostic.shutil, "which", return_value="x"), \
                     patch.object(diagnostic, "run_bounded", side_effect=fake):
                 self.binaries(args, Path(tmp))
