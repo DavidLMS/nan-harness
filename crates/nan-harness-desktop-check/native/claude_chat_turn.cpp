@@ -20,6 +20,18 @@ MacOwnedWindowState claude_mac_window_state(std::uint64_t, pid_t, CGRect);
 MacWindowObservation claude_mac_window_observation();
 namespace {
 using Clock = std::chrono::steady_clock;
+enum class NativeProgress {
+    Window, Tree, Composer, InitialValue, Focus, ReplaceSelect, PromptClipboard,
+    Paste, PastedValue, Readback, ReadbackSelect, ReadbackCopy, Collapse, SendTree, Press, Finish
+};
+static void progress(NativeProgress stage, std::ostream& output = std::cout) {
+    constexpr const char* labels[] = {"window", "tree", "composer", "initial-value", "focus", "replace-select",
+        "prompt-clipboard", "paste", "pasted-value", "readback", "readback-select", "readback-copy",
+        "collapse", "send-tree", "press", "finish"};
+    // A flushed site is diagnostic only; the final receipt and all guards still
+    // decide the action. It contains no window, clipboard or transcript data.
+    output << "progress " << labels[static_cast<unsigned>(stage)] << '\n' << std::flush;
+}
 struct Request {
     std::string mode, prompt, marker, sentinel;
     std::uint64_t window = 0;
@@ -312,6 +324,7 @@ static bool key(CGKeyCode code, bool command) {
     return true;
 }
 static const char* press(const Request& request, const Node& node, const char* success) {
+    progress(NativeProgress::Press);
     request.deadline_phase = "deadline-press";
     if (!target(node, request) || !owned(request)) return "control";
     Tree fresh;
@@ -570,42 +583,53 @@ static const char* input(const Request& request, const Tree& tree) {
     if (editor < 0 || send < 0 || request.prompt.empty()) return "composer";
     const auto& control = tree.nodes[editor];
     if (!target(control, request) || !contained_control(tree.nodes[send], request)) return "control";
+    progress(NativeProgress::InitialValue);
     auto initial_value = attribute(control.element, kAXValueAttribute);
     const char* initial_failure = initial_input_failure(initial_value, ax_query_failed, (request.mode == "input-replace-owned" || request.mode == "input-failure-owned"));
     PrivateInputValue initial;
     if (!initial_failure && !private_input_value(initial_value,initial.value)) initial_failure="input-initial-unavailable";
     if (initial_value) CFRelease(initial_value);
     if (initial_failure) return initial_failure;
+    progress(NativeProgress::Focus);
     if (!owned(request)) return "input-focus-guard";
     if (AXUIElementSetAttributeValue(control.element, kAXFocusedAttribute, kCFBooleanTrue) != kAXErrorSuccess)
         return "input-focus-setting";
     if (!wait_focused_composer(request, control)) return "input-focused-identity";
     if ((request.mode == "input-replace-owned" || request.mode == "input-failure-owned")) {
+        progress(NativeProgress::ReplaceSelect);
         if (!key(0, true)) return "input-replace-select-key";
     }
     if (!wait_focused_composer(request, control)) return "input-prompt-before-guard";
+    progress(NativeProgress::PromptClipboard);
     if (!clipboard_write(request.prompt)) return "input-prompt-clipboard";
     if (!owned(request)) return "input-prompt-after-guard";
     if (!wait_focused_composer(request, control)) return "input-focused-identity";
+    progress(NativeProgress::Paste);
     if (!key(9, true)) return "input-paste-key";
+    progress(NativeProgress::PastedValue);
     if (!wait_pasted_value(request,control,initial.value)) return "input-value-mismatch";
+    progress(NativeProgress::Readback);
     request.deadline_phase="deadline-input-readback";
     if (!owned(request)) return "input-readback-before-guard";
     if (!clipboard_write(request.sentinel)) return "input-sentinel-clipboard";
     if (!owned(request)) return "input-sentinel-after-guard";
     if (!wait_focused_composer(request, control)) return "input-focused-identity";
+    progress(NativeProgress::ReadbackSelect);
     if (!key(0, true)) return "input-readback-select-key";
     if (!owned(request)) return "input-readback-select-guard";
     if (!wait_focused_composer(request, control)) return "input-focused-identity";
+    progress(NativeProgress::ReadbackCopy);
     if (!key(8, true)) return "input-readback-copy-key";
     while (within(request) && !clipboard_matches(request.prompt)) std::this_thread::sleep_for(std::chrono::milliseconds(20));
     bool copied = clipboard_matches(request.prompt);
     const char* readback_failure = input_readback_failure(copied,
         copied && string_attribute(control.element, kAXValueAttribute) == request.prompt);
     if (readback_failure) return readback_failure;
+    progress(NativeProgress::Collapse);
     if (!owned(request)) return "input-collapse-guard";
     if (!wait_focused_composer(request, control)) return "input-focused-identity";
     if (!key(124, false)) return "input-collapse-key";
+    progress(NativeProgress::SendTree);
     Tree fresh;
     if (!fresh.collect(request) || !chat(fresh) || !retained(fresh, control)) return "control";
     if (request.mode == "input-failure-owned") {
@@ -843,6 +867,7 @@ static const char* open_failure_details(const Request& request, const Tree& tree
     if (current < 0) return failure;
     if (!chat(fresh) || !retained(fresh, tree.nodes[index])
         || !CFEqual(fresh.nodes[current].element, tree.nodes[index].element) || !owned(request)) return "control";
+    progress(NativeProgress::Press);
     request.deadline_phase = "deadline-press";
     if (AXUIElementPerformAction(fresh.nodes[current].element, kAXPressAction) != kAXErrorSuccess) return "action-uncertain";
     return owned(request) ? "failure-details-opened" : "action-uncertain";
@@ -909,6 +934,7 @@ static const char* temporal_action(const Request& request, const Tree& tree) {
     if (!chat(fresh) || !retained(fresh,tree.nodes[index])
         || !CFEqual(fresh.nodes[current].element,tree.nodes[index].element) || !owned(request)) return "control";
     if (ready) return details?"failure-details-ready":"retry-ready";
+    progress(NativeProgress::Press);
     request.deadline_phase="deadline-press";
     if (AXUIElementPerformAction(fresh.nodes[current].element,kAXPressAction)!=kAXErrorSuccess) return "action-uncertain";
     return owned(request)?(details?"failure-details-opened":"retried"):"action-uncertain";
@@ -942,8 +968,10 @@ int claude_chat_turn() {
         ComposerShape composer{}; bool composer_observed = false;
         if (request(value)) {
             Tree tree;
+            progress(NativeProgress::Window);
             if (!wait_owned_window(value)) stage = "window";
             else {
+                progress(NativeProgress::Tree);
                 value.deadline_phase = "deadline-tree";
                 if (!tree.collect(value)) stage = tree.failure ? tree.failure : "tree-query";
                 else {
@@ -955,6 +983,7 @@ int claude_chat_turn() {
                         scope_shape_observed = row_shape_observed && observe_scope_shape(tree, scope_shape, [&] { return within(value); });
                     }
                     if (input_mode(value.mode)) {
+                        progress(NativeProgress::Composer);
                         stage = prepare_input_tree(value, tree, composer, composer_observed);
                         if (!stage) stage = input(value, tree);
                     } else stage = action(value, tree);
@@ -962,6 +991,7 @@ int claude_chat_turn() {
             }
             stage = deadline_result(value, stage, !within(value));
         }
+        progress(NativeProgress::Finish);
         std::cout << "turn " << stage << '\n';
         if (composer_observed)
             std::cout << "composer " << composer.editors << ' ' << composer.start_tasks << ' ' << composer.send_messages << '\n';

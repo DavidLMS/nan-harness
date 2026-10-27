@@ -188,6 +188,15 @@ Keep the direct wire fields rather than hiding their names in a map or splitting
 one atomic observation. Reassess if another witness or action state is added.
 The scoped `expect` does not waive privacy, validation or behavioral tests.
 
+`CopyControlChange` in
+`crates/nan-harness-desktop-check/src/gui/claude_linux_chat.rs` contains seven
+boolean fields, above the same threshold of three. These independent equality
+observations identify which identity or geometry component changed in one
+passive Copy stability sample. Keep their names in the flat diagnostic contract;
+they grant no input capability, and validation requires the matching refusal
+and at least one changed component. Reassess if another field or action state
+is added. The scoped `expect` does not waive privacy, validation or tests.
+
 `run_node_native_plugins` in
 `crates/nan-harness-cli/src/commands/configuration/tests/plugin_syntax.rs` has
 102 lines, mostly a three-entry table of generated JavaScript fixtures. Keep

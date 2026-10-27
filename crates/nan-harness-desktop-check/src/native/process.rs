@@ -1,3 +1,5 @@
+#[cfg(any(target_os = "macos", all(test, unix)))]
+mod mac_chat;
 #[cfg(any(windows, test))]
 pub(super) mod windows_chat;
 
@@ -206,14 +208,9 @@ pub(super) fn run_claude_chat_turn_until(
     executable: &Path,
     input: &[u8],
     deadline: Instant,
+    observation: &mut super::mac_chat_turn::TransportObservation,
 ) -> Result<Zeroizing<String>, FailureCategory> {
-    run_once_until(
-        executable,
-        OsStr::new("--claude-chat-turn"),
-        None,
-        input,
-        Some(deadline),
-    )
+    mac_chat::run(executable, input, deadline, observation)
 }
 
 pub(super) fn run_once_until(

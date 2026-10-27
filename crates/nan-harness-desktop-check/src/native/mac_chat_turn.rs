@@ -5,6 +5,59 @@ use zeroize::Zeroizing;
 
 pub(crate) const CHAT_TURN_MAX_MILLIS: u32 = 15_000;
 
+/// Diagnostic execution sites, never action receipts or permission to retry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum NativeProgress {
+    Window,
+    Tree,
+    Composer,
+    InitialValue,
+    Focus,
+    ReplaceSelect,
+    PromptClipboard,
+    Paste,
+    PastedValue,
+    Readback,
+    ReadbackSelect,
+    ReadbackCopy,
+    Collapse,
+    SendTree,
+    Press,
+    Finish,
+}
+impl NativeProgress {
+    pub(super) fn parse(line: &[u8]) -> Option<Self> {
+        Some(match line {
+            b"progress window\n" => Self::Window,
+            b"progress tree\n" => Self::Tree,
+            b"progress composer\n" => Self::Composer,
+            b"progress initial-value\n" => Self::InitialValue,
+            b"progress focus\n" => Self::Focus,
+            b"progress replace-select\n" => Self::ReplaceSelect,
+            b"progress prompt-clipboard\n" => Self::PromptClipboard,
+            b"progress paste\n" => Self::Paste,
+            b"progress pasted-value\n" => Self::PastedValue,
+            b"progress readback\n" => Self::Readback,
+            b"progress readback-select\n" => Self::ReadbackSelect,
+            b"progress readback-copy\n" => Self::ReadbackCopy,
+            b"progress collapse\n" => Self::Collapse,
+            b"progress send-tree\n" => Self::SendTree,
+            b"progress press\n" => Self::Press,
+            b"progress finish\n" => Self::Finish,
+            _ => return None,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+#[cfg(any(target_os = "macos", all(test, unix)))]
+pub(crate) struct TransportObservation {
+    pub(crate) progress: Option<NativeProgress>,
+    pub(crate) started: bool,
+    pub(crate) budget_ms: Option<u32>,
+}
+
 pub(crate) fn transport_deadline(
     deadline: std::time::Instant,
     now: std::time::Instant,
@@ -640,6 +693,36 @@ pub(super) fn request(
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn native_progress_frames_are_literal_strings_without_private_or_object_forms() {
+        for label in [
+            "window",
+            "tree",
+            "composer",
+            "initial-value",
+            "focus",
+            "replace-select",
+            "prompt-clipboard",
+            "paste",
+            "pasted-value",
+            "readback",
+            "readback-select",
+            "readback-copy",
+            "collapse",
+            "send-tree",
+            "press",
+            "finish",
+        ] {
+            let frame = format!("progress {label}\n");
+            let parsed = NativeProgress::parse(frame.as_bytes()).unwrap();
+            assert_eq!(serde_json::to_value(parsed).unwrap(), label);
+            assert!(NativeProgress::parse(format!("{frame}PRIVATE").as_bytes()).is_none());
+            assert!(
+                NativeProgress::parse(format!("progress {{\"{label}\":null}}\n").as_bytes())
+                    .is_none()
+            );
+        }
+    }
     #[test]
     fn transport_leaves_post_guard_time_without_extending_the_action_deadline() {
         use std::time::{Duration, Instant};

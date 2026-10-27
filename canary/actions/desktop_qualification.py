@@ -1711,7 +1711,7 @@ def semantic_observations(directory, app, platform=None):
             stages.update('tree-depth tree-nodes tree-name-limit tree-text-limit tree-window-limit tree-process-limit'.split())
             stages.update('clipboard-owner clipboard-allocation clipboard-lock clipboard-empty clipboard-set clipboard-close clipboard-guard-before clipboard-guard-after clipboard-deadline-before clipboard-deadline-after clipboard-open-deadline'.split())
             phase_fields = {'actionPhase', 'transportFailure'}
-            if (app != 'claude-desktop' or set(value) - {'providerObservation', 'guardRejection', 'rowShape', 'scopeShape', 'failureAuthority', 'failureScopeCounts', 'operationTiming', 'nativeAction', 'nativeStage', 'nativeProgress', 'nativeWorkProgress', 'composerShape', 'nativeWindowGuard'} not in (fields, fields | phase_fields) or value['diagnosticsOnly'] is not True
+            if (app != 'claude-desktop' or set(value) - {'providerObservation', 'guardRejection', 'rowShape', 'scopeShape', 'failureAuthority', 'failureScopeCounts', 'operationTiming', 'nativeAction', 'nativeStage', 'nativeProgress', 'nativeWorkProgress', 'composerShape', 'nativeWindowGuard', 'transportStarted', 'transportBudgetMs'} not in (fields, fields | phase_fields) or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in stages
                     or any(type(value[key]) is not bool for key in flags)
                     or any(type(value[key]) is not int or not 0 <= value[key] <= 3 for key in counts)
@@ -1753,10 +1753,32 @@ def semantic_observations(directory, app, platform=None):
                 record['nativeStage'] = stage
             if 'nativeProgress' in value:
                 progress = value['nativeProgress']
-                if (mechanism != 'claude-windows-native-chat' or type(progress) is not str
-                        or progress not in {'setup', 'tree', 'composer', 'action', 'target', 'focus', 'select', 'paste', 'pasted', 'readback', 'copy', 'copied', 'send', 'submit', 'invoke', 'finish'}):
+                allowed = ({'window', 'tree', 'composer', 'initial-value', 'focus', 'replace-select',
+                            'prompt-clipboard', 'paste', 'pasted-value', 'readback', 'readback-select',
+                            'readback-copy', 'collapse', 'send-tree', 'press', 'finish'}
+                           if mechanism == 'claude-native-chat' else
+                           {'setup', 'tree', 'composer', 'action', 'target', 'focus', 'select', 'paste',
+                            'pasted', 'readback', 'copy', 'copied', 'send', 'submit', 'invoke', 'finish'})
+                if (type(progress) is not str or progress not in allowed
+                        or mechanism == 'claude-native-chat' and value.get('transportStarted') is not True):
                     raise ValueError('invalid Claude native progress diagnostic')
                 record['nativeProgress'] = progress
+            if 'transportStarted' in value:
+                started = value['transportStarted']
+                if (mechanism != 'claude-native-chat' or type(started) is not bool
+                        or not phase_fields <= set(value) or value['actionPhase'] is None
+                        or started and (value['actionPhase'] not in {'transport', 'post-guard', 'completed'}
+                                        or type(value.get('transportBudgetMs')) is not int
+                                        or value['transportBudgetMs'] <= 0)):
+                    raise ValueError('invalid Claude native transport start diagnostic')
+                record['transportStarted'] = started
+            if 'transportBudgetMs' in value:
+                budget = value['transportBudgetMs']
+                if (mechanism != 'claude-native-chat' or type(budget) is not int
+                        or not 0 <= budget <= 15000 or 'transportStarted' not in value
+                        or value.get('actionPhase') not in {'transport', 'post-guard', 'completed'}):
+                    raise ValueError('invalid Claude native transport budget diagnostic')
+                record['transportBudgetMs'] = budget
             if 'nativeWorkProgress' in value:
                 progress = value['nativeWorkProgress']
                 if (mechanism != 'claude-windows-native-chat' or type(progress) is not str
@@ -2044,7 +2066,7 @@ def semantic_observations(directory, app, platform=None):
         elif mechanism == 'claude-linux-native-chat':
             fields = {'schemaVersion','mechanism','diagnosticsOnly','stage','submittedTurns',
                       'inputVerifiedTurns','copiedResponses','retryAttempted','clipboardCleared'}
-            if (app != 'claude-desktop' or set(value) - {'failureBoundary','inputShape','embeddedTextObservation','ownedInputObservation','sendActionClass','sendActionObservation','emptyInputDrift','retryCandidateObservation','nativeTreeObservation','queryObservation'} != fields or value['diagnosticsOnly'] is not True
+            if (app != 'claude-desktop' or set(value) - {'failureBoundary','inputShape','embeddedTextObservation','ownedInputObservation','sendActionClass','sendActionObservation','emptyInputDrift','retryCandidateObservation','nativeTreeObservation','queryObservation','copyControlChange'} != fields or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in {
                         'source','focus','paste','readback','send','input-not-empty','blocked',
                         'action-uncertain','deadline','clipboard-cleanup','sent','response-pending',
@@ -2058,6 +2080,16 @@ def semantic_observations(directory, app, platform=None):
                     or value['stage'] == 'retry-forwarded' and not value['retryAttempted']
                     or value['stage'] == 'retry-diagnostic' and value['retryAttempted']):
                 raise ValueError('invalid Claude Linux native Chat diagnostic')
+            if 'copyControlChange' in value:
+                change = value['copyControlChange']
+                equalities = {'roleSame', 'nameSame', 'descriptionSame', 'xSame', 'ySame', 'widthSame', 'heightSame'}
+                if (type(change) is not dict or set(change) != equalities | {'sample'}
+                        or type(change['sample']) is not str or change['sample'] not in {'first', 'second'}
+                        or any(type(change[key]) is not bool for key in equalities)
+                        or all(change[key] for key in equalities)
+                        or value['stage'] != 'blocked' or value.get('failureBoundary') != 'copy-control-changed'):
+                    raise ValueError('invalid Claude Copy control change diagnostic')
+                record['copyControlChange'] = dict(change)
             if 'queryObservation' in value:
                 timing = value['queryObservation']
                 timing_keys = {'calls', 'elapsedMs', 'nativeWindowMs', 'lastMs'}

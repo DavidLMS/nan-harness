@@ -118,6 +118,113 @@ class ClaudeQueryTimingTests(unittest.TestCase):
                     q.semantic_observations(tmp, 'claude-desktop')
 
 
+class ClaudeNativeEvidenceTests(unittest.TestCase):
+    @staticmethod
+    def mac_timeout():
+        return dict(schemaVersion=1, mechanism='claude-native-chat', diagnosticsOnly=True,
+                    stage='action-uncertain', actionPhase='transport', transportFailure='timeout',
+                    submittedTurns=2, inputVerifiedTurns=2, copiedResponses=2,
+                    retryAttempted=False, clipboardCleared=True)
+
+    def test_mac_progress_preserves_timeout_and_unconfirmed_action_counters(self):
+        base = self.mac_timeout()
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'facts.json'
+            for progress in ('window', 'tree', 'composer', 'initial-value', 'focus', 'replace-select',
+                             'prompt-clipboard', 'paste', 'pasted-value', 'readback', 'readback-select',
+                             'readback-copy', 'collapse', 'send-tree', 'press', 'finish'):
+                value = base | dict(nativeProgress=progress, transportStarted=True, transportBudgetMs=15000)
+                path.write_text(json.dumps(value))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [value])
+            for change in ({'nativeProgress': None}, {'nativeProgress': 'PRIVATE'},
+                           {'nativeProgress': {'finish': None}}, {'transportStarted': False},
+                           {'transportStarted': None}, {'transportStarted': 1},
+                           {'transportBudgetMs': None}, {'transportBudgetMs': True},
+                           {'transportBudgetMs': 0}, {'transportBudgetMs': -1},
+                           {'transportBudgetMs': 15001}, {'actionPhase': 'before-guard'},
+                           {'mechanism': 'claude-windows-native-chat'}, {'rawOutput': 'PRIVATE'}):
+                path.write_text(json.dumps(value | change))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+            for missing in ('transportStarted', 'transportBudgetMs', 'actionPhase'):
+                path.write_text(json.dumps({key: item for key, item in value.items() if key != missing}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+
+    def test_mac_pre_spawn_observation_distinguishes_guard_and_budget_exhaustion(self):
+        base = self.mac_timeout() | {'transportStarted': False}
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'facts.json'
+            for change in ({'actionPhase': 'before-guard'}, {'transportBudgetMs': 0},
+                           {'transportBudgetMs': 500, 'transportFailure': 'spawn'}):
+                value = base | change
+                path.write_text(json.dumps(value))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [value])
+            for change in ({'transportStarted': None}, {'transportStarted': []},
+                           {'actionPhase': None}, {'transportBudgetMs': 0, 'actionPhase': 'before-guard'},
+                           {'nativeProgress': 'tree'}, {'mechanism': 'claude-windows-native-chat'}):
+                path.write_text(json.dumps(base | change))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+            path.write_text(json.dumps(self.mac_timeout() | {'transportBudgetMs': 0}))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'claude-desktop')
+
+    def test_actual_mac_producer_transport_and_facts_preserve_the_timeout(self):
+        value = json.loads((ROOT / 'canary/tests/fixtures/claude-macos-transport-timeout.json').read_text())
+        with tempfile.TemporaryDirectory() as root:
+            (Path(root) / 'facts.json').write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [value])
+        self.assertEqual(value['stage'], 'action-uncertain')
+        self.assertEqual(value['transportFailure'], 'timeout')
+        self.assertEqual(value['nativeProgress'], 'tree')
+        self.assertNotIn('nativeStage', value)
+        self.assertEqual(value['submittedTurns'], 2)
+        self.assertFalse(value['retryAttempted'])
+
+    def test_copy_stability_diagnostic_is_closed_and_requires_a_changed_component(self):
+        keys = ('roleSame', 'nameSame', 'descriptionSame', 'xSame', 'ySame', 'widthSame', 'heightSame')
+        base = dict(schemaVersion=1, mechanism='claude-linux-native-chat', diagnosticsOnly=True,
+                    stage='blocked', failureBoundary='copy-control-changed', submittedTurns=3,
+                    inputVerifiedTurns=3, copiedResponses=2, retryAttempted=True, clipboardCleared=True)
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'facts.json'
+            for sample in ('first', 'second'):
+                for key in keys:
+                    change = dict.fromkeys(keys, True) | {'sample': sample, key: False}
+                    value = base | {'copyControlChange': change}
+                    path.write_text(json.dumps(value))
+                    self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [value])
+            for change in (None, [], {}, dict.fromkeys(keys, True) | {'sample': 'first'},
+                           change | {'sample': None}, change | {'sample': {'first': None}},
+                           change | {'sample': 'PRIVATE'}, change | {'xSame': 0},
+                           change | {'ySame': None}, change | {'label': 'PRIVATE'},
+                           {key: item for key, item in change.items() if key != 'roleSame'}):
+                path.write_text(json.dumps(base | {'copyControlChange': change}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+            for context in ({'stage': 'copied'}, {'failureBoundary': 'copy-control-state'},
+                            {'mechanism': 'claude-native-chat'}):
+                path.write_text(json.dumps(value | context))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+
+    def test_actual_linux_producer_fixture_survives_rust_and_python_projection(self):
+        fixture = json.loads((ROOT / 'canary/tests/fixtures/claude-linux-copy-control-change.json').read_text())
+        self.assertEqual(fixture['schemaVersion'], 1)
+        self.assertEqual(len(fixture['records']), 8)
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'facts.json'
+            for record in fixture['records']:
+                with self.subTest(record=record['name']):
+                    summary = record['summary']
+                    path.write_text(json.dumps(summary))
+                    self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [summary])
+                    self.assertEqual(summary['copyControlChange'], record['packet']['facts']['copyControlChange'])
+                    self.assertEqual(summary['stage'], 'blocked')
+                    self.assertEqual(summary['copiedResponses'], 2)
+
+
 class CodexRetainedCustodyTests(unittest.TestCase):
     def test_rejected_custody_preserves_closed_privacy_and_deadline_causes(self):
         value = dict(schemaVersion=1, mechanism='codex-windows-profile-prepare', diagnosticsOnly=True,

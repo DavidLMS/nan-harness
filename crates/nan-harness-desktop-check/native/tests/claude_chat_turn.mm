@@ -7,7 +7,35 @@ MacWindowObservation claude_mac_window_observation() { return {}; }
 static Node fixture(int parent, const char* role, const char* label, const char* current = "") {
     return {nullptr, parent, role, label, current, CGRectZero, true};
 }
-int main() {
+int main(int argc, char** argv) {
+    // Exercise the actual fixed-frame producer through Rust's owned transport
+    // without issuing any AX, clipboard, window or input operation.
+    if (argc == 2 && std::string(argv[1]) == "--claude-chat-turn") {
+        std::string request_line;
+        if (!std::getline(std::cin, request_line)) return 2;
+        const bool timeout = request_line == "timeout";
+        std::fill(request_line.begin(), request_line.end(), '\0');
+        if (timeout) {
+            progress(NativeProgress::Window);
+            progress(NativeProgress::Tree);
+            std::this_thread::sleep_for(std::chrono::seconds(2));
+            return 0;
+        }
+        for (unsigned site = 0; site < 16; ++site) progress(static_cast<NativeProgress>(site));
+        std::cout << "turn sent\ncomposer 1 0 1\n";
+        return 0;
+    }
+    struct FlushedFrames : std::stringbuf {
+        unsigned flushes = 0;
+        int sync() override { ++flushes; return 0; }
+    } frames;
+    std::ostream output(&frames);
+    for (unsigned site = 0; site < 16; ++site) progress(static_cast<NativeProgress>(site), output);
+    assert(frames.flushes == 16);
+    assert(frames.str() == "progress window\nprogress tree\nprogress composer\nprogress initial-value\n"
+        "progress focus\nprogress replace-select\nprogress prompt-clipboard\nprogress paste\n"
+        "progress pasted-value\nprogress readback\nprogress readback-select\nprogress readback-copy\n"
+        "progress collapse\nprogress send-tree\nprogress press\nprogress finish\n");
     Tree composer_tree;
     composer_tree.nodes = {fixture(-1, "AXWindow", ""), fixture(0, "AXTextArea", "Write your prompt to Claude"),
         fixture(0, "AXButton", "Send message"), fixture(-1, "AXButton", "Start task")};

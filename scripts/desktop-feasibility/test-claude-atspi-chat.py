@@ -1,6 +1,7 @@
 import importlib.util
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('controller', Path(__file__).with_name('claude-atspi-chat.py'))
 chat = importlib.util.module_from_spec(spec)
@@ -351,18 +352,36 @@ class NativeGuardProtocolTests(unittest.TestCase):
                     good.replace('WIN 12','WIN 15 7 900 650 20 20 same\nWIN 12')):
             with self.subTest(bad=bad):self.assertFalse(chat.snapshot_clear(bad,held))
 
+COPY_EQUALITIES=('roleSame','nameSame','descriptionSame','xSame','ySame','widthSame','heightSame')
+
+def copy_control_cases():
+    return [
+        (dict(copy_change_at=2),'first','xSame'),
+        (dict(copy_change_at=3),'second','xSame'),
+        *[(dict(copy_change_at=2,copy_bounds_change=(index,value)),'first',field)
+            for index,value,field in [(1,20,'ySame'),(2,110,'widthSame'),(3,50,'heightSame')]],
+        *[(dict(copy_identity_state=2,copy_identity_change=(index,value)),'first',field)
+            for index,value,field in [(0,44,'roleSame'),(1,'PRIVATE changed label','nameSame'),
+                (2,'PRIVATE changed description','descriptionSame')]],
+    ]
+
 class ResponseAdapter(Adapter):
     def __init__(self,**options):
         super().__init__(**options);self.clipboard='old';self.copy_actions=0;self.copy_bounds_reads=0
+        self.copy_state_reads=0;self.clipboard_sentinels=0
     def bounds(self,node):
         if node=='copy':
             self.copy_bounds_reads+=1
+            if self.copy_bounds_reads==self.changes.get('copy_malformed_at'):
+                return self.changes['copy_malformed_bounds']
             if self.changes.get('copy_outside'):
                 return (900,10,100,40)
             if self.changes.get('copy_change_at',100) <= self.copy_bounds_reads:
-                return (20,10,100,40)
+                index,value=self.changes.get('copy_bounds_change',(0,20))
+                return tuple(value if i==index else part for i,part in enumerate((10,10,100,40)))
         return super().bounds(node)
     def state(self,node):
+        if node=='copy':self.copy_state_reads+=1
         bits=super().state(node)
         return bits & ~(1<<8) if node=='copy' and self.changes.get('copy_disabled') else bits
     def hit(self,node,frame):
@@ -371,7 +390,14 @@ class ResponseAdapter(Adapter):
         if node=='wrapper':return (80,'PRIVATE wrapper','')
         if node=='row':return (97 if self.changes.get('row_wrapper') else self.changes.get('row_role',39),'','')
         if node=='heading':return (83,'Claude responded: private-marker','')
-        if node in ('copy','copy2'):return (43,'Copy','')
+        if node in ('copy','copy2'):
+            identity=(43,'Copy','')
+            if node=='copy' and self.copy_state_reads>=2 and 'copy_malformed_identity' in self.changes:
+                return self.changes['copy_malformed_identity']
+            if node=='copy' and self.copy_state_reads>=self.changes.get('copy_identity_state',100):
+                index,value=self.changes['copy_identity_change']
+                identity=tuple(value if i==index else part for i,part in enumerate(identity))
+            return identity
         if node=='title':return (83,'private-marker','')
         return super().identity(node)
     def children(self,node):
@@ -385,7 +411,8 @@ class ResponseAdapter(Adapter):
         if node in ('heading','copy','copy2'):return 'frame' if self.changes.get('global_copy') else 'row'
         if node in ('row','title'):return 'frame'
         return super().parent(node)
-    def clipboard_sentinel(self):self.clipboard='fresh sentinel'
+    def clipboard_sentinel(self):
+        self.clipboard_sentinels+=1;self.clipboard='fresh sentinel'
     def clipboard_read(self):return self.clipboard
     def invoke_once(self,node,index):
         if node=='copy':
@@ -423,9 +450,63 @@ class ResponseTests(unittest.TestCase):
                 return ('r','root') if name=='parent' and value=='root' else value
             setattr(adapter,name,wrap)
         c=chat.Controller(adapter,dict(pid=7,bus='r',path='root'),1,adapter.clock,adapter.sleep)
-        c.bind();return adapter,c,c.copy_response('private-marker')
+        c.bind()
+        adapter.queries=[];query=c.query
+        def observe(method,*args):
+            adapter.queries.append((method,args));return query(method,*args)
+        c.query=observe
+        return adapter,c,c.copy_response('private-marker')
     def test_exact_assistant_scope_copy(self):
         a,c,f=self.case(title=True);self.assertTrue(f['responseVerified']);self.assertEqual(a.copy_actions,1)
+        self.assertNotIn('copyControlChange',f)
+    def test_copy_control_change_uses_existing_reads_before_any_clipboard_or_copy_action(self):
+        for options,sample,field in copy_control_cases():
+            with self.subTest(options=options):
+                adapter,controller,facts=self.case(**options)
+                self.assertEqual(facts['failureBoundary'],'copy-control-changed')
+                self.assertEqual(facts['stage'],'blocked')
+                observation=facts['copyControlChange']
+                self.assertEqual(observation,dict(sample=sample,**{
+                    name:name!=field for name in COPY_EQUALITIES}))
+                self.assertEqual(adapter.copy_actions,0)
+                self.assertEqual(adapter.clipboard_sentinels,0)
+                self.assertFalse(controller.copy_attempted)
+                self.assertFalse(facts['responseVerified'])
+                self.assertNotIn('PRIVATE',str(facts))
+                with patch.object(chat,'copy_control_change',return_value=None):
+                    without,_,old_facts=self.case(**options)
+                self.assertEqual(adapter.queries,without.queries)
+                self.assertEqual(adapter.copy_bounds_reads,without.copy_bounds_reads)
+                self.assertEqual(old_facts['failureBoundary'],facts['failureBoundary'])
+    def test_malformed_copy_bounds_keep_original_refusal_without_diagnostic(self):
+        for value in (None,(),(1,2,3),(1,2,3,4,5),(False,10,100,40),object()):
+            with self.subTest(value=type(value).__name__):
+                adapter,controller,facts=self.case(copy_malformed_at=2,copy_malformed_bounds=value)
+                self.assertEqual(facts['failureBoundary'],'copy-control-changed')
+                self.assertNotIn('copyControlChange',facts)
+                self.assertEqual(adapter.copy_actions,0)
+                self.assertEqual(adapter.clipboard_sentinels,0)
+    def test_malformed_copy_identity_keeps_original_refusal_without_diagnostic(self):
+        for value in (None,(),(43,'Copy'),(True,'Copy',''),(43,None,''),(43,'Copy',object())):
+            with self.subTest(value=type(value).__name__):
+                adapter,_,facts=self.case(copy_malformed_identity=value)
+                self.assertEqual(facts['failureBoundary'],'copy-control-changed')
+                self.assertNotIn('copyControlChange',facts)
+                self.assertEqual(adapter.copy_actions,0)
+                self.assertEqual(adapter.clipboard_sentinels,0)
+    def test_observer_error_preserves_original_copy_refusal_and_no_input(self):
+        with patch.object(chat,'copy_control_change',side_effect=RuntimeError('PRIVATE')):
+            adapter,_,facts=self.case(copy_change_at=2)
+        self.assertEqual(facts['failureBoundary'],'copy-control-changed')
+        self.assertEqual(facts['stage'],'blocked')
+        self.assertNotIn('copyControlChange',facts)
+        self.assertEqual(adapter.copy_actions,0)
+        self.assertEqual(adapter.clipboard_sentinels,0)
+        self.assertNotIn('PRIVATE',str(facts))
+    def test_actual_copy_control_records_match_shared_fixture(self):
+        import json
+        fixture=Path(__file__).resolve().parents[2]/'canary/tests/fixtures/claude-linux-copy-control-change.json'
+        self.assertEqual(copy_control_fixture(),json.loads(fixture.read_text()))
     def test_copy_refusal_site_is_closed_and_preserves_action_custody(self):
         cases=[(dict(copy_change_at=2),'copy-control-changed'),
                (dict(copy_change_at=4),'copy-final-reproof'),
@@ -1692,4 +1773,21 @@ class QueryTimingTests(unittest.TestCase):
             calls=2, elapsedMs=11000, nativeWindowMs=2000, lastMs=9000))
         self.assertNotIn('PRIVATE', str(controller.facts))
 
-if __name__=='__main__':unittest.main()
+def copy_control_fixture():
+    records=[]
+    for options,sample,field in copy_control_cases():
+        _,_,facts=ResponseTests().case(**options)
+        summary=dict(schemaVersion=1,mechanism='claude-linux-native-chat',diagnosticsOnly=True,
+            stage='blocked',submittedTurns=3,inputVerifiedTurns=3,copiedResponses=2,
+            retryAttempted=True,clipboardCleared=True,failureBoundary='copy-control-changed',
+            queryObservation=facts['queryObservation'],copyControlChange=facts['copyControlChange'])
+        records.append(dict(name=sample+'-'+field,packet=dict(facts=facts,binding=None),summary=summary))
+    return dict(schemaVersion=1,records=records)
+
+if __name__=='__main__':
+    import sys
+    if sys.argv[1:]==['--copy-control-fixture']:
+        import json
+        print(json.dumps(copy_control_fixture(),sort_keys=True,indent=2))
+    else:
+        unittest.main()

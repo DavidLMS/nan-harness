@@ -59,6 +59,24 @@ def unique_activation_index(actions):
     return matches[0] if len(matches)==1 else None
 
 
+def copy_control_change(sealed, current, sample):
+    """Closed comparisons of existing reads only; malformed tuples carry no invented facts."""
+    for pair in (sealed,current):
+        if type(pair) is not tuple or len(pair)!=2:
+            return None
+        identity,bounds=pair
+        if (type(identity) is not tuple or len(identity)!=3
+                or type(identity[0]) is not int or not 0<=identity[0]<=255
+                or any(type(value) is not str for value in identity[1:])
+                or type(bounds) is not tuple or len(bounds)!=4
+                or any(type(value) is not int for value in bounds)):
+            return None
+    return dict(sample=sample,roleSame=current[0][0]==sealed[0][0],
+        nameSame=current[0][1]==sealed[0][1],descriptionSame=current[0][2]==sealed[0][2],
+        xSame=current[1][0]==sealed[1][0],ySame=current[1][1]==sealed[1][1],
+        widthSame=current[1][2]==sealed[1][2],heightSame=current[1][3]==sealed[1][3])
+
+
 def input_shape(value):
     # Diagnostic only. These sets never grant replacement or submission authority.
     if type(value) is not str or not 0 < len(value) <= 4096:
@@ -1271,7 +1289,7 @@ class Controller:
             sealed = (self.query('identity',button),self.query('bounds',button))
             sealed_actions = None
             selected_index = None
-            for _ in range(2):
+            for sample in ('first','second'):
                 self.proof()
                 if self.response_scope(marker) != scope:
                     raise Rejected('copy-scope-changed')
@@ -1279,7 +1297,14 @@ class Controller:
                 bits = self.query('state',button)
                 if not bits & (1<<8) or not bits & (1<<24):
                     raise Rejected('copy-control-state')
-                if (self.query('identity',button),self.query('bounds',button)) != sealed:
+                current=(self.query('identity',button),self.query('bounds',button))
+                if current != sealed:
+                    try:
+                        observation=copy_control_change(sealed,current,sample)
+                    except Exception:
+                        observation=None
+                    if observation is not None:
+                        self.facts['copyControlChange']=observation
                     raise Rejected('copy-control-changed')
                 if not inside(sealed[1],self.sealed_frame[1]):
                     raise Rejected('copy-control-outside-frame')
