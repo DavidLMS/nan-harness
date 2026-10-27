@@ -69,8 +69,10 @@ def select_artifact(value, run_id, head):
     return artifact
 
 
-def extract_pair(archive, directory):
-    wanted = {"SHA256SUMS", PLATFORM_ASSETS["windows"]["harness"], PLATFORM_ASSETS["windows"]["canary"]}
+def extract_pair(archive, directory, system="windows"):
+    if system not in PLATFORM_ASSETS:
+        raise ValueError("unsupported release platform")
+    wanted = {"SHA256SUMS", PLATFORM_ASSETS[system]["harness"], PLATFORM_ASSETS[system]["canary"]}
     known = PREPARE_MEMBERS
     with zipfile.ZipFile(archive) as source:
         entries = source.infolist()
@@ -89,7 +91,8 @@ def extract_pair(archive, directory):
 
 
 def stage(args, fetch=api, command=execute):
-    if (args.repository != REPOSITORY or not TAG.fullmatch(args.tag)
+    system = getattr(args, "system", "windows")
+    if (system not in PLATFORM_ASSETS or args.repository != REPOSITORY or not TAG.fullmatch(args.tag)
             or not COMMIT.fullmatch(args.commit) or not COMMIT.fullmatch(args.controller)
             or not SHA256.fullmatch(args.manifest_sha256) or type(args.run_id) is not int or not 1 <= args.run_id <= 2**63 - 1
             or args.directory.exists() or args.directory.is_symlink()):
@@ -117,12 +120,12 @@ def stage(args, fetch=api, command=execute):
             command(["gh", "api", f"{prefix}/actions/artifacts/{artifact['id']}/zip"], output)
         if archive.stat().st_size != artifact["size_in_bytes"] or digest(archive) != artifact["digest"][7:]:
             raise ValueError("release archive digest differs")
-        extract_pair(archive, args.directory)
+        extract_pair(archive, args.directory, system)
     manifest = args.directory / "SHA256SUMS"
     if digest(manifest) != args.manifest_sha256:
         raise ValueError("release checksum anchor differs")
-    cli = args.directory / PLATFORM_ASSETS["windows"]["harness"]
-    canary = args.directory / PLATFORM_ASSETS["windows"]["canary"]
+    cli = args.directory / PLATFORM_ASSETS[system]["harness"]
+    canary = args.directory / PLATFORM_ASSETS[system]["canary"]
     verify = validate_release_assets(manifest, {cli.name: cli, canary.name: canary}, args.tag, args.commit)
     command([*verify, "--repo", REPOSITORY, "--signer-workflow", REPOSITORY + "/.github/workflows/release.yml",
              "--deny-self-hosted-runners"])
@@ -135,6 +138,7 @@ def stage(args, fetch=api, command=execute):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--system", choices=tuple(PLATFORM_ASSETS), default="windows")
     parser.add_argument("--repository", required=True)
     parser.add_argument("--tag", required=True)
     parser.add_argument("--commit", required=True)
@@ -146,6 +150,9 @@ def main():
     args = parser.parse_args()
     try:
         cli, canary, provenance = stage(args)
+        if os.name != "nt":
+            cli.chmod(0o700)
+            canary.chmod(0o700)
         args.provenance.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         with args.provenance.open("x") as output:
             json.dump(provenance, output, sort_keys=True)

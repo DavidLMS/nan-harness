@@ -1,0 +1,158 @@
+name: Observe one immutable MiMo Linux live probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        type: string
+        required: true
+        default: v0.1.27
+      release_commit:
+        type: string
+        required: true
+        default: 7c74af43c6c2917737ad90859c0d2706d674e75f
+      asset_run_id:
+        type: string
+        required: true
+        default: '40520278155'
+      manifest_sha256:
+        type: string
+        required: true
+        default: 205da655631c75615c33ac2a07520f7663aa3251c712fa9cdb493ba0bb7bf5b8
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: mimo-live-diagnostic-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    outputs:
+      release_tag: ${{ steps.selection.outputs.release_tag }}
+      release_commit: ${{ steps.selection.outputs.release_commit }}
+      asset_run_id: ${{ steps.selection.outputs.asset_run_id }}
+      manifest_sha256: ${{ steps.selection.outputs.manifest_sha256 }}
+      frozen_manifest: ${{ steps.freeze.outputs.manifest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Validate the immutable selection before review
+        id: selection
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_COMMIT: ${{ inputs.release_commit }}
+          ASSET_RUN_ID: ${{ inputs.asset_run_id }}
+          MANIFEST_SHA256: ${{ inputs.manifest_sha256 }}
+        run: |
+          python3 -B - <<'PY'
+          import os, re
+          from canary.actions import mimo_live_diagnostic as diagnostic
+          if (os.environ['RELEASE_TAG'] != diagnostic.TAG
+              or os.environ['RELEASE_COMMIT'] != diagnostic.COMMIT
+              or os.environ['MANIFEST_SHA256'] != diagnostic.MANIFEST
+              or not re.fullmatch(r'[1-9][0-9]{0,19}', os.environ['ASSET_RUN_ID'])
+              or int(os.environ['ASSET_RUN_ID']) > 2**63 - 1):
+              raise SystemExit('Invalid immutable diagnostic selection.')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              for name in ('release_tag', 'release_commit', 'asset_run_id', 'manifest_sha256'):
+                  output.write(name + '=' + os.environ[name.upper()] + '\n')
+          PY
+      - name: Verify the exact release pair before review
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 -B canary/actions/windows_release_assets.py --system linux --repository "$GITHUB_REPOSITORY" \
+            --tag '${{ steps.selection.outputs.release_tag }}' --commit '${{ steps.selection.outputs.release_commit }}' \
+            --controller "$GITHUB_SHA" --run-id '${{ steps.selection.outputs.asset_run_id }}' \
+            --manifest-sha256 '${{ steps.selection.outputs.manifest_sha256 }}' \
+            --directory "$RUNNER_TEMP/mimo-live-prepare-assets" --provenance "$RUNNER_TEMP/mimo-live-prepare-provenance.json"
+      - name: Resolve the canonical stock version once
+        id: freeze
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 -B canary/actions/cli-suite.py resolve --harnesses mimo-code --system linux \
+            --architecture aarch64 --model qwen3.6 --output "$RUNNER_TEMP/cli-versions.json"
+          python3 -B - <<'PY'
+          import json, os
+          from pathlib import Path
+          from types import SimpleNamespace
+          from canary.actions import mimo_live_diagnostic as diagnostic
+          path = Path(os.environ['RUNNER_TEMP']) / 'cli-versions.json'
+          diagnostic.frozen_selection(SimpleNamespace(manifest=path))
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('manifest=' + json.dumps(diagnostic.inventory.read_json(path), separators=(',', ':')) + '\n')
+          PY
+
+  approve-live:
+    needs: prepare
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && github.ref == 'refs/heads/main' }}
+    uses: ./.github/workflows/live-check-approval.yml
+    with:
+      subject: Run one Linux ARM64 MiMo 0.1.16 live probe with immutable v0.1.27 assets from 7c74af43c6c2917737ad90859c0d2706d674e75f, model qwen3.6 and controller ${{ github.sha }}; diagnostics only, no qualification or publication.
+
+  observe:
+    needs: [prepare, approve-live]
+    if: ${{ always() && !cancelled() && needs.prepare.result == 'success' && needs.approve-live.result == 'success' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    environment:
+      name: canary-live-workers
+      deployment: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.22.1
+      - name: Stage and reverify the exact release pair
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 -B canary/actions/windows_release_assets.py --system linux --repository "$GITHUB_REPOSITORY" \
+            --tag '${{ needs.prepare.outputs.release_tag }}' --commit '${{ needs.prepare.outputs.release_commit }}' \
+            --controller "$GITHUB_SHA" --run-id '${{ needs.prepare.outputs.asset_run_id }}' \
+            --manifest-sha256 '${{ needs.prepare.outputs.manifest_sha256 }}' \
+            --directory "$RUNNER_TEMP/mimo-live-assets" --provenance "$RUNNER_TEMP/mimo-live-release-provenance.json"
+      - name: Retain the validated frozen version
+        env:
+          FROZEN_MANIFEST: ${{ needs.prepare.outputs.frozen_manifest }}
+        run: |
+          python3 -B - <<'PY'
+          import os
+          from pathlib import Path
+          path = Path(os.environ['RUNNER_TEMP']) / 'cli-versions.json'
+          with path.open('x') as output:
+              output.write(os.environ['FROZEN_MANIFEST'])
+          PY
+      - name: Run exactly one canonical live probe with closed observations
+        env:
+          NAN_API_KEY: ${{ secrets.NAN_API_KEY }}
+        run: |
+          python3 -B canary/actions/mimo_live_diagnostic.py \
+            --binary "$NAN_DIAGNOSTIC_RELEASE_BINARY" --canary "$NAN_DIAGNOSTIC_RELEASE_CANARY" \
+            --provenance "$RUNNER_TEMP/mimo-live-release-provenance.json" --source-sha "$GITHUB_SHA" \
+            --manifest "$RUNNER_TEMP/cli-versions.json" --directory "$RUNNER_TEMP/cli-cell" \
+            --output "$RUNNER_TEMP/mimo-live-observation.json"
+      - name: Upload only the closed observation and public provenance
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mimo-live-observation-${{ github.run_id }}
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/mimo-live-observation.json
+            ${{ runner.temp }}/mimo-live-release-provenance.json

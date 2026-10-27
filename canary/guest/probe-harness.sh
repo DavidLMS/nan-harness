@@ -7,6 +7,10 @@ if [ "$#" -ne 1 ]; then
 fi
 
 harness="$1"
+probe_scripts=''
+if [ "$harness" = mimo-code ] && [ -n "${NAN_CANARY_MIMO_OBSERVATION:-}" ]; then
+  probe_scripts="$(cd "$(dirname "$0")" && pwd)"
+fi
 original_home="$HOME"
 if [ "${NAN_CANARY_HOSTED:-}" = 1 ]; then
   export PATH="$original_home/.mimocode/bin:$original_home/.local/bin:$original_home/.kimi-code/bin:$original_home/.hermes/bin:$PATH"
@@ -56,6 +60,14 @@ cleanup() {
     if [ -n "$stderr_output" ] && [ -f "$stderr_output" ]; then
       cat "$stderr_output" >&2
     fi
+  fi
+  if [ "$harness" = mimo-code ] && [ -n "${NAN_CANARY_MIMO_OBSERVATION:-}" ] \
+    && [ -n "$output" ] && [ -n "$stderr_output" ] \
+    && [ -n "${usage_evidence:-}" ] && [ -n "${marker:-}" ]; then
+    # Advisory facts must be projected before the private captures are deleted.
+    python3 "$probe_scripts/../actions/mimo_live_observation.py" "$output" "$stderr_output" \
+      "$usage_evidence" "$marker" "$probe_stage" "$NAN_CANARY_MIMO_OBSERVATION" \
+      >/dev/null 2>/dev/null || true
   fi
   cleanup_attempt=0
   while [ -e "$workspace" ] && [ "$cleanup_attempt" -lt 10 ]; do

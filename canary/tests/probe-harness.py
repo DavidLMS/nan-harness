@@ -174,6 +174,52 @@ class ProbeHarnessTests(unittest.TestCase):
                 self.assertEqual(json.loads(marker.read_text())["status"], "failed")
                 self.assertNotIn("synthetic secret", result.stderr)
 
+    def test_mimo_observation_keeps_original_failure_and_closed_capture_facts(self):
+        destination = self.root / "mimo-observation.json"
+        with mock.patch.dict(os.environ, {"NAN_CANARY_MIMO_OBSERVATION": str(destination)}):
+            result, marker = self.run_probe("mimo-code", mode="toolfailure")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(CELL.probe_result(marker), {"schemaVersion": 1, "stage": "tool-evidence", "status": "failed"})
+        value = json.loads(destination.read_text())
+        self.assertEqual(value["stage"], "tool-evidence")
+        self.assertEqual(value["stdout"]["status"], "empty")
+        self.assertEqual(value["stderr"]["status"], "invalid")
+        self.assertEqual(value["usage"], "observed")
+        self.assertNotIn("synthetic", destination.read_text())
+        self.assertEqual(stat.S_IMODE(destination.stat().st_mode), 0o600)
+        destination.unlink()
+        # Observation failure cannot change the original verdict or leak captures.
+        with mock.patch.dict(os.environ, {"NAN_CANARY_MIMO_OBSERVATION": str(self.root / "absent" / "output")}):
+            result, marker = self.run_probe("mimo-code", mode="toolfailure")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(CELL.probe_result(marker)["stage"], "tool-evidence")
+        self.assertNotIn("synthetic secret", result.stderr)
+        with mock.patch.dict(os.environ, {"NAN_CANARY_MIMO_OBSERVATION": str(destination)}):
+            result, marker = self.run_probe("mimo-code")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(CELL.probe_result(marker)["status"], "passed")
+        value = json.loads(destination.read_text())
+        self.assertEqual(value["stdout"]["status"], "invalid")
+        self.assertTrue(value["stdout"]["readMarker"])
+        self.assertTrue(value["stdout"]["completionMarker"])
+
+    def test_mimo_live_callback_observes_before_cleanup_without_changing_verdict(self):
+        cell_root = self.root / "mimo-cell"
+        cell_root.mkdir()
+        args = type("Args", (), {"directory": cell_root, "binary": self.bin / "nanh",
+                                  "harness": "mimo-code", "model": "qwen3.6"})()
+        observed = []
+        with mock.patch.dict(os.environ, {"NAN_API_KEY": "synthetic-provider-key", "NAN_CANARY_FAKE_MODE": "toolfailure",
+                                          "NAN_CANARY_MODEL_LOG": str(self.root / "models.log")}):
+            with self.assertRaises(CELL.ProbeFailure) as failure:
+                CELL.live(args, {}, observe=observed.append)
+        self.assertEqual((failure.exception.stage, failure.exception.status), ("tool-evidence", 1))
+        self.assertEqual(len(observed), 1)
+        self.assertEqual(observed[0]["usage"], "observed")
+        self.assertFalse((cell_root / "mimo-live-observation.private.json").exists())
+        self.assertFalse((cell_root / "probe-result.json").exists())
+        self.assertFalse(list(cell_root.rglob("harness-output.txt")))
+
     def test_media_failures_identify_the_operation(self):
         for harness in ("hermes", "openclaw"):
             for stage in ("media-plan", "media-tts", "media-stt", "media-image"):

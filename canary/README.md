@@ -145,6 +145,18 @@ failure fingerprint. They exclude credentials, prompts, responses, tool
 payloads, command output, and local paths. Raw output is retained only in
 private local logs when explicitly requested.
 
+### MiMo live evidence observation
+
+The manual `mimo-live-diagnostic.yml` workflow isolates the Linux ARM64 MiMo
+live probe against the exact attested v0.1.27 binaries. It requires one upstream
+live approval and uses the separate main-only workers environment. It preserves
+the canonical install, live command, timeout, single attempt and assertions.
+An opt-in observer projects bounded JSON event counts, marker predicates and
+usage status before ephemeral capture cleanup. It retains no response text,
+tool arguments, identifiers or paths. Missing or invalid observations remain
+unproven; they cannot change the probe verdict. The diagnostic artifact and
+public release provenance are not release qualification receipts.
+
 ### Canonical MiMo conformance observation
 
 The manual Native Windows CLI diagnostic accepts
