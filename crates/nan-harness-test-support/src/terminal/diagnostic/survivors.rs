@@ -1,19 +1,22 @@
-//! Live-process inventory used to attribute an unclosed capture pipe.
+//! Bounded survivor attribution before and after owned-process cleanup.
 //!
-//! Kernel handle ownership would require raw `unsafe` FFI, which this workspace forbids, so the
-//! diagnostic attributes a surviving writer by combining three closed facts: whether each reader
-//! reached end of file, whether end of file arrived only after the owned tree was terminated, and
-//! which live processes descend from the launched root before and after that termination.
-//!
-//! The inventory only publishes counts and bounded executable base names. It never publishes
-//! paths, command lines, or environment data.
+//! Windows counts all active members of the retained kernel Job, including nested Jobs and a root
+//! whose exit is unconfirmed. It publishes no executable names: a secondary naming query must not
+//! discard authoritative membership or add a global PID ancestry assumption. Unix correlates the
+//! process table's parent chains and process groups and publishes bounded executable base names.
+//! Neither path publishes process identifiers, paths, command lines, or environment data.
 
+#[cfg(any(not(windows), test))]
 use std::collections::HashMap;
 use std::time::Duration;
 
+#[cfg(any(not(windows), test))]
 const MAX_PUBLISHED_NAMES: usize = 8;
+#[cfg(any(not(windows), test))]
 const MAX_NAME_LENGTH: usize = 48;
+#[cfg(any(not(windows), test))]
 const ANCESTRY_HOPS: usize = 64;
+#[cfg(not(windows))]
 const QUERY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Whether a survivor scan was requested, ran, or could not run.
@@ -21,13 +24,13 @@ const QUERY_TIMEOUT: Duration = Duration::from_secs(5);
 pub enum ScanState {
     /// No survivor attribution was needed for this observation.
     NotNeeded,
-    /// The inventory ran and produced a process table.
+    /// The platform ownership query succeeded, including a successfully empty result.
     Available,
     /// The platform query failed or timed out; the scan carries no information.
     Unavailable,
 }
 
-/// Live processes that descend from the diagnostic's launched root process.
+/// Live owned processes; Windows counts every active Job member without publishing names.
 #[derive(Debug, Clone)]
 pub struct SurvivorScan {
     pub state: ScanState,
@@ -55,20 +58,23 @@ impl SurvivorScan {
     }
 }
 
+#[cfg(any(not(windows), test))]
 #[derive(Debug)]
 struct ProcessEntry {
     parent: u32,
-    /// Process group identifier where the platform reports one; `None` on Windows.
+    /// Process group identifier where the process table reports one.
     group: Option<u32>,
     name: String,
 }
 
 /// Process identifiers mapped to their recorded parent, process group, and executable base name.
+#[cfg(any(not(windows), test))]
 #[derive(Debug, Default)]
 pub struct ProcessTable {
     entries: HashMap<u32, ProcessEntry>,
 }
 
+#[cfg(any(not(windows), test))]
 impl ProcessTable {
     /// Parses `pid<separator>ppid<separator>pgid<separator>name` lines; malformed lines are
     /// skipped and an empty group field means the platform did not report one.
@@ -152,6 +158,7 @@ impl ProcessTable {
 }
 
 /// Reduces a raw executable name to a bounded, printable base name.
+#[cfg(any(not(windows), test))]
 pub fn sanitize(raw: &str) -> String {
     let base = raw
         .rsplit(['\\', '/'])
@@ -171,6 +178,7 @@ pub fn sanitize(raw: &str) -> String {
 }
 
 /// Inventories the live descendants of `root` using the platform's own process listing.
+#[cfg(not(windows))]
 pub async fn scan(root: u32) -> SurvivorScan {
     match platform_table().await {
         Some(table) => table.descendants(root),
@@ -182,6 +190,7 @@ pub async fn scan(root: u32) -> SurvivorScan {
 ///
 /// Owned-tree termination is asynchronous, so a single read can still observe processes that are
 /// already dying. The bounded retry keeps a real escapee visible without waiting indefinitely.
+#[cfg(not(windows))]
 pub async fn scan_after_cleanup(root: u32) -> SurvivorScan {
     let mut last = scan(root).await;
     for _ in 1..3 {
@@ -231,32 +240,35 @@ async fn platform_table() -> Option<ProcessTable> {
     Some(ProcessTable::parse('|', &normalized))
 }
 
-#[cfg(windows)]
-async fn platform_table() -> Option<ProcessTable> {
-    // Windows PowerShell 5.1 ships with the operating system; `Get-CimInstance` exposes the
-    // recorded parent identifier without requiring command lines or private data.
-    let script = concat!(
-        "Get-CimInstance Win32_Process | ForEach-Object { ",
-        "[string]$_.ProcessId + '|' + [string]$_.ParentProcessId + '||' + $_.Name }"
-    );
-    let output = tokio::time::timeout(
-        QUERY_TIMEOUT,
-        tokio::process::Command::new("powershell.exe")
-            .args(["-NoProfile", "-NonInteractive", "-Command", script])
-            .stdin(std::process::Stdio::null())
-            .kill_on_drop(true)
-            .output(),
-    )
-    .await
-    .ok()?
-    .ok()?;
-    if !output.status.success() {
-        return None;
+/// Converts only a successful retained-Job query into an available count.
+#[cfg(any(windows, test))]
+fn job_members(result: &std::io::Result<u32>) -> SurvivorScan {
+    match result {
+        Ok(count) => SurvivorScan {
+            state: ScanState::Available,
+            names: Vec::new(),
+            count: *count,
+        },
+        Err(_) => SurvivorScan::unavailable(),
     }
-    Some(ProcessTable::parse(
-        '|',
-        &String::from_utf8_lossy(&output.stdout),
-    ))
+}
+
+#[cfg(windows)]
+pub(super) fn scan_job(child: &super::super::OwnedChild) -> SurvivorScan {
+    job_members(&child.active_process_count())
+}
+
+#[cfg(windows)]
+pub(super) async fn scan_job_after_cleanup(child: &super::super::OwnedChild) -> SurvivorScan {
+    let mut last = scan_job(child);
+    for _ in 1..3 {
+        if last.count == 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        last = scan_job(child);
+    }
+    last
 }
 
 #[cfg(test)]
@@ -305,6 +317,35 @@ mod tests {
     }
 
     #[test]
+    fn retained_job_count_does_not_adopt_stale_parent_decoys() {
+        // A table cannot distinguish a reused root PID from an old recorded parent PID.
+        // This demonstrates that ambiguity; it does not identify any actual CI process.
+        let table = ProcessTable::parse(
+            '|',
+            "42|1||new-root.exe\n90|42||old-service.exe\n91|90||service-child.exe\n",
+        );
+        assert_eq!(table.descendants(42).count, 2);
+        let empty_job = job_members(&Ok(0));
+        assert_eq!(empty_job.state, ScanState::Available);
+        assert_eq!(empty_job.count, 0);
+        assert!(empty_job.names.is_empty());
+
+        // All queried members count, including a still-live root; names are secondary.
+        let owned_job = job_members(&Ok(3));
+        assert_eq!(owned_job.state, ScanState::Available);
+        assert_eq!(owned_job.count, 3);
+        assert!(owned_job.names.is_empty());
+    }
+
+    #[test]
+    fn failed_job_query_cannot_report_an_available_empty_job() {
+        let scanned = job_members(&Err(std::io::Error::other("query failed")));
+        assert_eq!(scanned.state, ScanState::Unavailable);
+        assert_eq!(scanned.count, 0);
+        assert!(scanned.names.is_empty());
+    }
+
+    #[test]
     fn sanitize_strips_paths_and_unprintable_characters() {
         assert_eq!(sanitize("C:\\Tools\\codex.exe"), "codex.exe");
         assert_eq!(sanitize("/usr/lib/some daemon"), "somedaemon");
@@ -312,6 +353,7 @@ mod tests {
         assert_eq!(sanitize("  "), "<unknown>");
     }
 
+    #[cfg(not(windows))]
     #[tokio::test]
     async fn scan_reports_the_current_process_ancestry() {
         let root = std::process::id();

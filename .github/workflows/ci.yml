@@ -130,6 +130,10 @@ jobs:
         run: cargo test --locked -p nan-harness-runtime --all-features --lib prepared::hermes::native_path
       - name: Verify completed Windows jobs can be reaped after polling
         run: cargo test --locked -p nan-harness-runtime --all-features --lib process::windows_job_tests
+      - name: Verify Windows terminal ownership and survivor diagnostics
+        run: 'cargo test --locked -p nan-harness-test-support --lib terminal::'
+      - name: Lint Windows terminal test support
+        run: cargo clippy --locked -p nan-harness-test-support --all-features --all-targets -- -D warnings
       - name: Verify Windows local search installation and lifecycle
         shell: pwsh
         run: |

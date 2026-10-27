@@ -924,13 +924,13 @@ mod tests {
             "the fixture harness should have run: {output:?}"
         );
         if !output.stdout_eof || !output.stderr_eof {
-            // An open pipe must be explained by live descendants, and terminating the owned tree
-            // must release it; anything else means the surviving writer escaped ownership.
+            // An open pipe needs live owned processes and cleanup must release it. Windows uses
+            // retained Job membership; executable names come only from the Unix inventory.
             assert_eq!(output.survivors_at_failure.state, ScanState::Available);
             assert!(
                 output.survivors_at_failure.count >= 1
-                    && !output.survivors_at_failure.names.is_empty(),
-                "an open pipe must be attributed to live descendants: {:?}",
+                    && (cfg!(windows) || !output.survivors_at_failure.names.is_empty()),
+                "an open pipe must be attributed to live owned processes: {:?}",
                 output.survivors_at_failure
             );
             assert!(
