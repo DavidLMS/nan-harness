@@ -73,6 +73,65 @@ fn installed_executable(name: &str) -> std::path::PathBuf {
     path
 }
 
+fn printf_in_path(paths: &[std::path::PathBuf], pathext: &str) -> bool {
+    let mut suffixes = ["", ".exe", ".com", ".bat", ".cmd", ".ps1"]
+        .map(str::to_owned)
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    for suffix in pathext
+        .split(';')
+        .map(str::trim)
+        .filter(|suffix| !suffix.is_empty())
+    {
+        assert!(
+            suffix.len() > 1
+                && suffix.starts_with('.')
+                && suffix[1..].bytes().all(|byte| byte.is_ascii_alphanumeric()),
+            "controlled native PATHEXT must contain simple file extensions"
+        );
+        suffixes.insert(suffix.to_ascii_lowercase());
+    }
+    for directory in paths {
+        assert!(
+            directory.is_dir(),
+            "controlled native PATH directory must exist"
+        );
+        for suffix in &suffixes {
+            match std::fs::metadata(directory.join(format!("printf{suffix}"))) {
+                Ok(metadata) if metadata.is_file() => return true,
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(_) => panic!("controlled printf presence could not be inspected"),
+            }
+        }
+    }
+    false
+}
+
+#[test]
+fn printf_absence_checks_every_controlled_directory_and_script_extension() {
+    let first = tempfile::tempdir().unwrap();
+    let last = tempfile::tempdir().unwrap();
+    let paths = [first.path().to_owned(), last.path().to_owned()];
+    std::fs::write(last.path().join("unrelated.exe"), b"decoy").unwrap();
+    assert!(!printf_in_path(&paths, ".EXE;.CUSTOM"));
+    for name in ["printf", "printf.exe", "printf.custom", "printf.ps1"] {
+        let file = last.path().join(name);
+        std::fs::write(&file, b"synthetic executable or script").unwrap();
+        assert!(printf_in_path(&paths, ".EXE;.CUSTOM"));
+        std::fs::remove_file(file).unwrap();
+    }
+    assert!(!printf_in_path(&paths, ".EXE;.CUSTOM"));
+}
+
+#[cfg(windows)]
+fn private_case_workspace() -> tempfile::TempDir {
+    let workspace = tempfile::tempdir().expect("native marker workspace must be created");
+    nan_harness_private_fs::create_private_dir_all(workspace.path())
+        .unwrap_or_else(|_| panic!("native marker workspace must be private"));
+    workspace
+}
+
 #[cfg(windows)]
 fn failure_category(error: &crate::terminal::TerminalError) -> &'static str {
     use crate::terminal::TerminalError;
@@ -136,28 +195,24 @@ async fn native_windows_marker_command_preserves_contract_without_git() {
         system.join("System32"),
     ];
     let path = std::env::join_paths(&paths).expect("controlled native PATH must serialize");
-    let workspace = tempfile::tempdir().unwrap();
-    let original = powershell(
-        "first-original",
-        &shell,
-        workspace.path(),
-        &path,
-        "printf NAN_HARNESS_TOOL_OK > tool-output.txt",
-    )
-    .await;
+    // PowerShell can search modules for a missing command. Inspect the optional
+    // PATH utility directly so unrelated command discovery is outside this proof.
+    let pathext = match std::env::var("PATHEXT") {
+        Ok(value) => value,
+        Err(std::env::VarError::NotPresent) => String::new(),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            panic!("controlled native PATHEXT must be readable")
+        }
+    };
     assert!(
-        !original.status.success(),
-        "original printf fixture must fail without an external printf command"
-    );
-    assert!(
-        !std::fs::read(workspace.path().join("tool-output.txt"))
-            .is_ok_and(|bytes| bytes == b"NAN_HARNESS_TOOL_OK"),
-        "original fixture must not satisfy the file contract"
+        !printf_in_path(&paths, &pathext),
+        "portable fixture proof must not contain an optional printf executable or script"
     );
     for (case, file, marker) in [
         ("managed", "tool-output.txt", "NAN_HARNESS_TOOL_OK"),
         ("native", "bash-output.txt", "MIMO_BASH_OK"),
     ] {
+        let workspace = private_case_workspace();
         let output = powershell(
             case,
             &shell,
@@ -195,6 +250,7 @@ async fn native_windows_marker_command_preserves_contract_without_git() {
         );
         let path = std::env::join_paths(paths.into_iter().chain([directory]))
             .expect("positive control PATH must serialize");
+        let workspace = private_case_workspace();
         let output = powershell(
             "git-positive",
             &shell,
