@@ -112,7 +112,7 @@ if subcommand == "mimo" and os.environ.get("NAN_CANARY_FAKE_MODE") in ("mimopers
             connection.execute("INSERT INTO message VALUES (?,?,?,?,?)", (identity, "PRIVATE_SESSION", "main", json.dumps(value), created))
         for identity, message, value in (
             ("PRIVATE_PROMPT", "PRIVATE_USER", {"type": "text", "text": native_message}),
-            ("PRIVATE_TOOL", "PRIVATE_ASSISTANT", {"type": "tool", "tool": "read", "state": {"status": "completed", "output": marker, "time": {"start": 1, "end": 2}}}),
+            ("PRIVATE_TOOL", "PRIVATE_ASSISTANT", {"type": "tool", "tool": "read", "state": {"status": "completed", "input": {"file_path": str(Path.cwd() / "read-target.txt")}, "output": marker, "time": {"start": 1, "end": 2}}}),
             ("PRIVATE_REPLY", "PRIVATE_ASSISTANT", {"type": "text", "text": marker + "\nNAN_CANARY_OK"})):
             connection.execute("INSERT INTO part VALUES (?,?,?,?)", (identity, "PRIVATE_SESSION", message, json.dumps(value)))
 usage = Path(os.environ["NAN_HARNESS_INTERNAL_CANARY_USAGE_FILE"])
@@ -271,6 +271,79 @@ class ProbeHarnessTests(unittest.TestCase):
         self.assertFalse((cell_root / "mimo-live-observation.private.json").exists())
         self.assertFalse((cell_root / "probe-result.json").exists())
         self.assertFalse(list(cell_root.rglob("harness-output.txt")))
+
+    def test_mimo_native_evidence_qualifies_empty_stdout_and_retains_the_limitation(self):
+        cell_root = self.root / 'mimo-cell'
+        cell_root.mkdir()
+        args = type('Args', (), {'directory': cell_root, 'binary': self.bin / 'nanh',
+                                 'harness': 'mimo-code', 'model': 'qwen3.6', 'harness_version': '0.1.16'})()
+        with mock.patch.dict(os.environ, {'NAN_API_KEY': 'synthetic-key', 'NAN_CANARY_FAKE_MODE': 'mimopersisted',
+                                         'NAN_CANARY_MODEL_LOG': str(self.root / 'models.log'),
+                                         'MIMOCODE_DB': '', 'MIMOCODE_DISABLE_CHANNEL_DB': ''}):
+            result = CELL.live(args, {})
+        self.assertEqual(result, CELL.CheckResult(1, CELL.MIMO_SESSION_DETAIL))
+        self.assertIn('stdout was empty', result.detail)
+        self.assertFalse((cell_root / 'probe-result.json').exists())
+        self.assertEqual((self.root / 'models.log').read_text().splitlines(), ['qwen3.6'])
+
+    def test_mimo_native_evidence_never_uses_other_versions_or_unbound_prompts(self):
+        for version, mode in (('0.1.15', 'mimopersisted'), ('0.1.17', 'mimopersisted'),
+                              ('0.1.16', 'mimopersistedbare'), ('0.1.16', 'toolfailure'),
+                              ('', 'mimopersisted')):
+            with self.subTest(version=version, mode=mode):
+                cell_root = self.root / 'mimo-cell'
+                cell_root.mkdir(exist_ok=True)
+                args = type('Args', (), {'directory': cell_root, 'binary': self.bin / 'nanh',
+                                         'harness': 'mimo-code', 'model': 'qwen3.6', 'harness_version': version})()
+                with mock.patch.dict(os.environ, {'NAN_API_KEY': 'synthetic-key', 'NAN_CANARY_FAKE_MODE': mode,
+                                                 'NAN_CANARY_MODEL_LOG': str(self.root / 'models.log'),
+                                                 'NAN_CANARY_MIMO_SESSION_EVIDENCE': '0.1.16',
+                                                 'MIMOCODE_DB': '', 'MIMOCODE_DISABLE_CHANNEL_DB': ''}):
+                    with self.assertRaises(CELL.ProbeFailure):
+                        CELL.live(args, {})
+
+    def test_native_evidence_detail_survives_the_live_stage_report(self):
+        directory = self.root / 'report-cell'
+        directory.mkdir()
+        binary = self.bin / 'nanh'
+        state = dict(nanHarness={'sha256': CELL.digest(binary)}, harness={'id': 'mimo-code'},
+                     checks=[{'name': 'install-and-diagnose'}, {'name': 'deterministic-conformance'}],
+                     durationMilliseconds=0)
+        (directory / 'state.json').write_text(json.dumps(state))
+        args = type('Args', (), {'directory': directory, 'binary': binary, 'stage': 'live',
+                                 'harness': 'mimo-code'})()
+        with mock.patch.object(CELL, 'live', return_value=CELL.CheckResult(1, CELL.MIMO_SESSION_DETAIL)):
+            CELL.run(args)
+        report = json.loads((directory / 'state.json').read_text())
+        self.assertEqual(report['checks'][-1]['detail'], CELL.MIMO_SESSION_DETAIL)
+        self.assertEqual(report['checks'][-1]['attempts'], 1)
+        self.assertEqual(report['checks'][-1]['status'], 'passed')
+
+    def test_native_evidence_marker_rejects_unknown_or_failed_receipts(self):
+        path = self.root / 'marker.json'
+        base = dict(schemaVersion=1, stage='complete', status='passed', evidence=CELL.MIMO_SESSION_EVIDENCE)
+        path.write_text(json.dumps(base))
+        self.assertEqual(CELL.probe_result(path), base)
+        for change in ({'evidence': 'PRIVATE'}, {'status': 'failed', 'stage': 'tool-evidence'},
+                       {'diagnostic': next(iter(CELL.PROBE_DIAGNOSTICS))}):
+            path.write_text(json.dumps(base | change))
+            self.assertIsNone(CELL.probe_result(path))
+
+    def test_native_evidence_does_not_bypass_nonempty_output_usage_or_process_failures(self):
+        cases = (
+            ('print("nonempty malformed output")', 'tool-evidence'),
+            ('raise SystemExit(17)', 'harness-run'),
+            ('os.environ["NAN_HARNESS_INTERNAL_CANARY_USAGE_FILE"] += ".missing"', 'usage-evidence'),
+        )
+        for injected, stage in cases:
+            with self.subTest(stage=stage):
+                self._script(self.bin / 'nanh', FAKE_NANH.replace('usage = Path(', injected + '\nusage = Path('))
+                with mock.patch.dict(os.environ, {'NAN_CANARY_MIMO_SESSION_EVIDENCE': '0.1.16',
+                                                 'MIMOCODE_DB': '', 'MIMOCODE_DISABLE_CHANNEL_DB': ''}):
+                    result, marker = self.run_probe('mimo-code', mode='mimopersisted')
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(CELL.probe_result(marker)['stage'], stage)
+                self.assertNotIn('evidence', CELL.probe_result(marker))
 
     def test_media_failures_identify_the_operation(self):
         for harness in ("hermes", "openclaw"):

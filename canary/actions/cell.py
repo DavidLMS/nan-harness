@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from typing import NamedTuple
 
 if os.name == "nt":
     import ctypes
@@ -60,6 +61,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from selection import CLI_HARNESSES, PLATFORMS as HOSTED_PLATFORMS, resolve_model
 from hermes_diagnostics import DIAGNOSTIC_CODES, safe_frames
 from mimo_live_observation import read_observation
+from mimo_live_evidence import EVIDENCE as MIMO_SESSION_EVIDENCE, DETAIL as MIMO_SESSION_DETAIL
+
+
+class CheckResult(NamedTuple):
+    attempts: int
+    detail: str
 
 HARNESSES = CLI_HARNESSES
 SEMVER = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?\Z")
@@ -1223,7 +1230,7 @@ def probe_result(path):
     except (OSError, ValueError):
         return None
     required = {"schemaVersion", "stage", "status"}
-    if (not isinstance(value, dict) or set(value) not in (required, required | {"diagnostic"})
+    if (not isinstance(value, dict) or set(value) not in (required, required | {"diagnostic"}, required | {"evidence"})
             or type(value.get("schemaVersion")) is not int or value["schemaVersion"] != 1
             or not isinstance(value.get("stage"), str) or value["stage"] not in PROBE_STAGES
             or not isinstance(value.get("status"), str) or value["status"] not in ("passed", "failed")
@@ -1231,7 +1238,8 @@ def probe_result(path):
             or ("diagnostic" in value and
                 (not isinstance(value["diagnostic"], str) or
                  value["status"] != "failed" or value["stage"] != "completion-marker" or
-                 value["diagnostic"] not in PROBE_DIAGNOSTICS))):
+                 value["diagnostic"] not in PROBE_DIAGNOSTICS))
+            or ("evidence" in value and (value['status'] != 'passed' or value['evidence'] != MIMO_SESSION_EVIDENCE))):
         return None
     return value
 
@@ -1264,6 +1272,12 @@ def live(args, _state, observe=None):
     environment.pop("NAN_CANARY_HERMES_STREAM_JSON", None)
     environment.pop("NAN_CANARY_MIMO_OBSERVATION", None)
     environment.pop("NAN_CANARY_MIMO_EXPECTED_PROMPT", None)
+    environment.pop("NAN_CANARY_MIMO_SESSION_EVIDENCE", None)
+    # The historical directed observer retains its stdout-only diagnostic contract.
+    native_mimo = (observe is None and os.name != 'nt' and args.harness == 'mimo-code'
+                   and getattr(args, 'harness_version', '') == '0.1.16')
+    if native_mimo:
+        environment['NAN_CANARY_MIMO_SESSION_EVIDENCE'] = '0.1.16'
     if args.harness == "hermes" and hermes_machine_frontend(getattr(args, "harness_version", "")):
         environment["NAN_CANARY_HERMES_STREAM_JSON"] = "1"
     environment["NAN_CANARY_NAN_COMMAND"] = str(args.binary)
@@ -1301,6 +1315,11 @@ def live(args, _state, observe=None):
         if observe is not None:
             observation.unlink(missing_ok=True)
     if status == 0 and result is not None and result["status"] == "passed":
+        if result.get('evidence') is not None:
+            if not native_mimo:
+                raise ProbeFailure('marker-missing', status)
+            print('::warning::' + MIMO_SESSION_DETAIL)
+            return CheckResult(1, MIMO_SESSION_DETAIL)
         return 1
     if result is not None and result["stage"] == "cleanup":
         raise ProbeCleanupError("live probe workspace cleanup is unproven")
@@ -1409,10 +1428,13 @@ def run(args):
     if len(state["checks"]) != index:
         raise RuntimeError("cell stages must execute once in order")
     started = time.monotonic()
-    attempts = execute(args, state) or 1
+    result = execute(args, state) or 1
+    attempts = result.attempts if isinstance(result, CheckResult) else result
     duration = int((time.monotonic() - started) * 1000)
     state["checks"].append({"name": name, "status": "passed",
                             "durationMilliseconds": duration, "attempts": attempts})
+    if isinstance(result, CheckResult):
+        state['checks'][-1]['detail'] = result.detail
     state["durationMilliseconds"] += duration
     write_json(state_path, state)
 

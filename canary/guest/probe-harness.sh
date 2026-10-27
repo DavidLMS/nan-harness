@@ -8,7 +8,7 @@ fi
 
 harness="$1"
 probe_scripts=''
-if [ "$harness" = mimo-code ] && [ -n "${NAN_CANARY_MIMO_OBSERVATION:-}" ]; then
+if [ "$harness" = mimo-code ]; then
   probe_scripts="$(cd "$(dirname "$0")" && pwd)"
 fi
 original_home="$HOME"
@@ -24,6 +24,7 @@ output=''
 stderr_output=''
 probe_stage='setup'
 probe_diagnostic=''
+probe_evidence=''
 marker_path="${NAN_CANARY_PROBE_RESULT:-}"
 write_marker() {
   marker_stage="$1"
@@ -34,7 +35,10 @@ write_marker() {
   marker_tmp=''
   marker_tmp="$(mktemp "$marker_parent/.probe-result.XXXXXX")" || return 1
   if ! chmod 600 "$marker_tmp" \
-    || ! if [ -n "$marker_diagnostic" ]; then
+    || ! if [ "$marker_status" = passed ] && [ -n "$probe_evidence" ]; then
+         printf '{"schemaVersion":1,"stage":"%s","status":"%s","evidence":"%s"}\n' \
+           "$marker_stage" "$marker_status" "$probe_evidence" > "$marker_tmp"
+       elif [ -n "$marker_diagnostic" ]; then
          printf '{"schemaVersion":1,"stage":"%s","status":"%s","diagnostic":"%s"}\n' \
            "$marker_stage" "$marker_status" "$marker_diagnostic" > "$marker_tmp"
        else
@@ -110,6 +114,7 @@ prompt="Use the available file-reading tool to read '$workspace/read-target.txt'
 output="$workspace/harness-output.txt"
 stderr_output="$workspace/harness-stderr.txt"
 verify_read_marker=true
+verify_completion_marker=true
 probe_stage='harness-run'
 
 case "$harness" in
@@ -144,8 +149,17 @@ case "$harness" in
     "$nan_command" mimo --model "$model" -- \
       run --pure --format json --dangerously-skip-permissions "$prompt" >"$output" 2>"$stderr_output"
     probe_stage='tool-evidence'
-    grep -F '"tool":"read"' "$output" "$stderr_output" >/dev/null \
-      || grep -F '"read"' "$output" "$stderr_output" >/dev/null
+    if [ "${NAN_CANARY_MIMO_SESSION_EVIDENCE:-}" = 0.1.16 ] \
+      && ! grep -q '[^[:space:]]' "$output"; then
+      NAN_CANARY_MIMO_EXPECTED_PROMPT="$prompt" python3 "$probe_scripts/../actions/mimo_live_evidence.py" \
+        "$workspace" "$marker" >/dev/null 2>/dev/null
+      probe_evidence='mimo-0.1.16-native-session-empty-stdout'
+      verify_read_marker=false
+      verify_completion_marker=false
+    else
+      grep -F '"tool":"read"' "$output" "$stderr_output" >/dev/null \
+        || grep -F '"read"' "$output" "$stderr_output" >/dev/null
+    fi
     ;;
   opencode)
     opencode_args=(run --format json --auto)
@@ -280,7 +294,7 @@ if [ "$verify_read_marker" = true ]; then
   grep -F "$marker" "$output" "$stderr_output" >/dev/null
 fi
 probe_stage='completion-marker'
-if ! grep -F 'NAN_CANARY_OK' "$output" "$stderr_output" >/dev/null; then
+if [ "$verify_completion_marker" = true ] && ! grep -F 'NAN_CANARY_OK' "$output" "$stderr_output" >/dev/null; then
   if [ "$harness" = aider ]; then
     stdout_empty=true
     stderr_empty=true

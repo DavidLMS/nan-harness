@@ -260,7 +260,38 @@ def project(count, assistants, marker):
     return result
 
 
-def collect(workspace: Path, marker: str, prompt: str):
+def require_task(assistants, workspace, marker):
+    """Admit only a fully settled principal turn reading this probe's target."""
+    require(bool(assistants))
+    read = False
+    for message in assistants:
+        data = message['data']
+        require(completed(data) and 'error' not in data)
+        require(data['time']['completed'] >= data['time']['created'])
+        for part in message['parts']:
+            if part['type'] == 'text':
+                require(type(part.get('text')) is str and 'NH-BRIDGE-' not in part['text'])
+            if part['type'] != 'tool':
+                continue
+            state = part.get('state')
+            require(type(state) is dict and state.get('status') == 'completed')
+            output = state.get('output')
+            require(type(output) is str and 'NH-BRIDGE-' not in output)
+            if part.get('tool') != 'read':
+                continue
+            arguments = state.get('input')
+            require(type(arguments) is dict and type(arguments.get('file_path')) is str)
+            target = Path(arguments['file_path'])
+            if not target.is_absolute():
+                target = workspace / target
+            targets = {workspace / 'read-target.txt', workspace.resolve() / 'read-target.txt'}
+            read |= target in targets and marker in output
+    require(read)
+    result = project(1, assistants, marker)
+    require(result['finalFinish'] == 'stop' and all(result[key] for key in FLAGS))
+
+
+def collect(workspace: Path, marker: str, prompt: str, *, require_live_task=False):
     result = dict(schemaVersion=1, status='unavailable', reason='data-invalid', **dict.fromkeys(METRICS))
     try:
         require(type(marker) is str and 0 < len(marker) <= 256 and marker.isascii())
@@ -270,6 +301,8 @@ def collect(workspace: Path, marker: str, prompt: str):
         identity = database.lstat()
         sessions, messages = records(snapshot(database))
         count, assistants = principal(sessions, messages, {str(workspace), str(physical)}, prompt)
+        if require_live_task:
+            require_task(assistants, workspace, marker)
         current = database.lstat()
         require((current.st_dev, current.st_ino, current.st_size, current.st_mtime_ns) ==
                 (identity.st_dev, identity.st_ino, identity.st_size, identity.st_mtime_ns), 'path-unbound')

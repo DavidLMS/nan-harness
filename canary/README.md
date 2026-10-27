@@ -147,6 +147,25 @@ private local logs when explicitly requested.
 
 ### MiMo live evidence observation
 
+Hosted live qualification on Linux/macOS accepts a narrowly versioned alternative
+for official MiMo 0.1.16 when its stdout is whitespace-only. The unchanged
+`nanh mimo ... run --format json` command must exit successfully once. Before
+cleanup, a read-only snapshot must bind the fresh owned profile's sole principal
+user to the exact submitted prompt. Every principal assistant and tool must be
+completed without errors, a native `read` of this probe's exact target must
+contain its private marker, and the final `stop` answer must contain both the
+read marker and completion marker. Foreign/ambiguous sessions, incomplete turns,
+failed tools, bridge sentinels and missing or invalid stores fail closed. Usage,
+stderr summary and workspace cleanup remain mandatory. There are no additional
+provider requests, replay or timeout changes.
+
+This qualifies NaN routing and task execution, not MiMo's headless output delivery.
+The existing report's `live-tool.detail` retains the fixed limitation and the job
+emits a warning whenever native-session evidence replaces empty stdout. Other
+versions, nonempty stdout and Windows retain the console-evidence checks. No
+MiMo installation, binary or source is modified. Old failed receipts remain
+failed; the changed policy requires a fresh complete release gate run.
+
 The manual `mimo-live-diagnostic.yml` workflow isolates the Linux ARM64 MiMo
 live probe against the exact attested v0.1.27 binaries. It requires one upstream
 live approval and uses the separate main-only workers environment. It preserves
@@ -162,7 +181,9 @@ mode and reject unbound profiles, overrides, ambiguous turns and oversized
 records. It retains no response text, tool arguments, identifiers or paths.
 Missing or invalid observations remain
 unproven; they cannot change the probe verdict. The diagnostic artifact and
-public release provenance are not release qualification receipts.
+public release provenance are not release qualification receipts. This directed
+observer deliberately keeps its original stdout-only verdict even though the
+normal hosted gate now admits the versioned native-session alternative above.
 
 ### Canonical MiMo conformance observation
 
