@@ -7,6 +7,17 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.27] - 2026-10-27
+
+### Fixed
+
+- Write Windows MiMo conformance markers through the required Python runtime,
+  preserving its native PowerShell frontend without relying on optional Git utilities.
+- Settle Hermes first-run onboarding before retaining the failed conversation
+  used by Desktop qualification, preserving ownership and single-action checks.
+- Retain bounded native input stages and source-bound hidden error categories
+  during qualification without exposing private output or changing verdicts.
+
 ## [0.1.26] - 2026-10-27
 
 ### Fixed
@@ -1072,7 +1083,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.26...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.27...HEAD
+[0.1.27]: https://github.com/DavidLMS/nan-harness/compare/v0.1.26...v0.1.27
 [0.1.26]: https://github.com/DavidLMS/nan-harness/compare/v0.1.25...v0.1.26
 [0.1.25]: https://github.com/DavidLMS/nan-harness/compare/v0.1.24...v0.1.25
 [0.1.24]: https://github.com/DavidLMS/nan-harness/compare/v0.1.23...v0.1.24
