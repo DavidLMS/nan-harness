@@ -1263,6 +1263,7 @@ def live(args, _state, observe=None):
     environment = cell_environment(args.directory)
     environment.pop("NAN_CANARY_HERMES_STREAM_JSON", None)
     environment.pop("NAN_CANARY_MIMO_OBSERVATION", None)
+    environment.pop("NAN_CANARY_MIMO_EXPECTED_PROMPT", None)
     if args.harness == "hermes" and hermes_machine_frontend(getattr(args, "harness_version", "")):
         environment["NAN_CANARY_HERMES_STREAM_JSON"] = "1"
     environment["NAN_CANARY_NAN_COMMAND"] = str(args.binary)

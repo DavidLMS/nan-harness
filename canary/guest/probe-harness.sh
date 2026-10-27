@@ -65,7 +65,7 @@ cleanup() {
     && [ -n "$output" ] && [ -n "$stderr_output" ] \
     && [ -n "${usage_evidence:-}" ] && [ -n "${marker:-}" ]; then
     # Advisory facts must be projected before the private captures are deleted.
-    python3 "$probe_scripts/../actions/mimo_live_observation.py" "$output" "$stderr_output" \
+    NAN_CANARY_MIMO_EXPECTED_PROMPT="$prompt" python3 "$probe_scripts/../actions/mimo_live_observation.py" "$output" "$stderr_output" \
       "$usage_evidence" "$marker" "$probe_stage" "$NAN_CANARY_MIMO_OBSERVATION" \
       >/dev/null 2>/dev/null || true
   fi

@@ -12,6 +12,12 @@ import mimo_live_observation as observation
 
 
 class ObservationTests(unittest.TestCase):
+    def test_noninteractive_prompt_binding_matches_the_pinned_native_transformation(self):
+        self.assertEqual(observation.noninteractive_prompt("Read the file"), '\"Read the file\"\n')
+        self.assertEqual(observation.noninteractive_prompt("marker"), "marker\n")
+        self.assertEqual(observation.noninteractive_prompt('Read "file"'), '\"Read \\\"file\\\"\"\n')
+        self.assertEqual(observation.noninteractive_prompt(""), "")
+
     def test_documented_events_count_only_fixed_predicates(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "capture"

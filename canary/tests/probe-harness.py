@@ -72,7 +72,7 @@ if subcommand == "openclaw":
     print('"meta":{"toolSummary":{"calls":1,"failures":0,"tools":["read"]}}')
     print('}')
     print("NAN_CANARY_OK")
-elif os.environ.get("NAN_CANARY_FAKE_MODE") != "toolfailure":
+elif os.environ.get("NAN_CANARY_FAKE_MODE") not in ("toolfailure", "mimopersisted", "mimopersistedbare"):
     outputs = {
         "claude": '{"name":"Read"}', "opencode": '{"tool":"read"}', "mimo": '{"tool":"read"}',
         "pi": '{"toolName":"read"}', "omp": '{"toolName":"read"}',
@@ -91,6 +91,30 @@ elif os.environ.get("NAN_CANARY_FAKE_MODE") != "toolfailure":
             (os.environ.get("NAN_CANARY_FAKE_MODE", "").startswith("aidercategory") or
              os.environ.get("NAN_CANARY_FAKE_MODE", "") == "aidercompletionmissing")):
         print("NAN_CANARY_OK")
+if subcommand == "mimo" and os.environ.get("NAN_CANARY_FAKE_MODE") in ("mimopersisted", "mimopersistedbare"):
+    import sqlite3
+    database = Path(os.environ["MIMOCODE_HOME"]) / "data/mimocode.db"
+    database.parent.mkdir(parents=True)
+    marker = Path("read-target.txt").read_text().strip()
+    native_message = '"' + args[-1].replace('"', '\\"') + '"' if " " in args[-1] else args[-1]
+    if not sys.stdin.isatty():
+        native_message += "\n"
+    if os.environ.get("NAN_CANARY_FAKE_MODE") == "mimopersistedbare":
+        native_message = args[-1]
+    with sqlite3.connect(database) as connection:
+        connection.execute("CREATE TABLE session (id TEXT, parent_id TEXT, directory TEXT)")
+        connection.execute("CREATE TABLE message (id TEXT, session_id TEXT, agent_id TEXT, data TEXT, time_created INTEGER)")
+        connection.execute("CREATE TABLE part (id TEXT, session_id TEXT, message_id TEXT, data TEXT)")
+        connection.execute("INSERT INTO session VALUES (?,NULL,?)", ("PRIVATE_SESSION", os.getcwd()))
+        for identity, value, created in (
+            ("PRIVATE_USER", {"role": "user"}, 1),
+            ("PRIVATE_ASSISTANT", {"role": "assistant", "parentID": "PRIVATE_USER", "time": {"created": 1, "completed": 2}, "finish": "stop"}, 2)):
+            connection.execute("INSERT INTO message VALUES (?,?,?,?,?)", (identity, "PRIVATE_SESSION", "main", json.dumps(value), created))
+        for identity, message, value in (
+            ("PRIVATE_PROMPT", "PRIVATE_USER", {"type": "text", "text": native_message}),
+            ("PRIVATE_TOOL", "PRIVATE_ASSISTANT", {"type": "tool", "tool": "read", "state": {"status": "completed", "output": marker, "time": {"start": 1, "end": 2}}}),
+            ("PRIVATE_REPLY", "PRIVATE_ASSISTANT", {"type": "text", "text": marker + "\nNAN_CANARY_OK"})):
+            connection.execute("INSERT INTO part VALUES (?,?,?,?)", (identity, "PRIVATE_SESSION", message, json.dumps(value)))
 usage = Path(os.environ["NAN_HARNESS_INTERNAL_CANARY_USAGE_FILE"])
 usage.parent.mkdir(parents=True, exist_ok=True)
 usage.write_text('{"schemaVersion":1,"status":"observed"}\n', encoding="utf-8")
@@ -147,7 +171,7 @@ class ProbeHarnessTests(unittest.TestCase):
             env["NAN_CANARY_MODEL"] = model
         if marker:
             env["NAN_CANARY_PROBE_RESULT"] = str(marker_path)
-        result = subprocess.run(["bash", str(PROBE), harness], env=env,
+        result = subprocess.run(["bash", str(PROBE), harness], env=env, stdin=subprocess.DEVNULL,
                                 capture_output=True, text=True, timeout=30)
         return result, marker_path
 
@@ -202,6 +226,34 @@ class ProbeHarnessTests(unittest.TestCase):
         self.assertEqual(value["stdout"]["status"], "invalid")
         self.assertTrue(value["stdout"]["readMarker"])
         self.assertTrue(value["stdout"]["completionMarker"])
+
+    def test_persisted_mimo_read_and_answer_do_not_replace_missing_output_evidence(self):
+        destination = self.root / "native-session-observation.json"
+        with mock.patch.dict(os.environ, {"NAN_CANARY_MIMO_OBSERVATION": str(destination),
+                                          "MIMOCODE_DB": "", "MIMOCODE_DISABLE_CHANNEL_DB": ""}):
+            result, marker = self.run_probe("mimo-code", mode="mimopersisted")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(CELL.probe_result(marker)["stage"], "tool-evidence")
+        value = json.loads(destination.read_text())
+        self.assertEqual(CELL.read_observation(destination), value)
+        self.assertEqual(value["schemaVersion"], 2)
+        self.assertEqual(value["stdout"]["status"], "empty")
+        trajectory = value["trajectory"]
+        self.assertEqual((trajectory["status"], trajectory["reason"]), ("observed", None))
+        self.assertEqual(trajectory["mainUsers"], 1)
+        self.assertEqual(trajectory["completedReadTools"], 1)
+        self.assertTrue(all(trajectory[key] for key in ("readOutputMarker", "finalAssistantComplete",
+                                                       "finalReadMarker", "finalCompletionMarker")))
+        for private in ("PRIVATE", "NAN_CANARY_READ_", "NAN_CANARY_OK", "read-target.txt"):
+            self.assertNotIn(private, destination.read_text())
+        destination.unlink()
+        with mock.patch.dict(os.environ, {"NAN_CANARY_MIMO_OBSERVATION": str(destination),
+                                          "MIMOCODE_DB": "", "MIMOCODE_DISABLE_CHANNEL_DB": ""}):
+            result, marker = self.run_probe("mimo-code", mode="mimopersistedbare")
+        self.assertEqual((result.returncode, CELL.probe_result(marker)["stage"]), (1, "tool-evidence"))
+        trajectory = json.loads(destination.read_text())["trajectory"]
+        self.assertEqual((trajectory["status"], trajectory["reason"]), ("unavailable", "session-unbound"))
+        self.assertIsNone(trajectory["completedReadTools"])
 
     def test_mimo_live_callback_observes_before_cleanup_without_changing_verdict(self):
         cell_root = self.root / "mimo-cell"
