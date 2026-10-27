@@ -1,0 +1,18 @@
+{
+  "actionPhase": "transport",
+  "clipboardCleared": false,
+  "copiedResponses": 2,
+  "diagnosticsOnly": true,
+  "inputVerifiedTurns": 2,
+  "mechanism": "claude-native-chat",
+  "nativeProgress": "tree",
+  "nativeWorkProgress": "tree",
+  "providerObservation": null,
+  "retryAttempted": false,
+  "schemaVersion": 1,
+  "stage": "action-uncertain",
+  "submittedTurns": 2,
+  "transportBudgetMs": 500,
+  "transportFailure": "timeout",
+  "transportStarted": true
+}

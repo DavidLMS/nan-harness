@@ -1,0 +1,147 @@
+[
+  {
+    "actionPhase": "completed",
+    "clipboardCleared": false,
+    "composerShape": {
+      "editors": 1,
+      "sendMessages": 0,
+      "startTasks": 1
+    },
+    "copiedResponses": 0,
+    "diagnosticsOnly": true,
+    "inputValueRejection": {
+      "cause": "target-geometry",
+      "site": "paste-focus-before",
+      "valueRelation": "unmeasured"
+    },
+    "inputVerifiedTurns": 0,
+    "mechanism": "claude-native-chat",
+    "nativeProgress": "finish",
+    "nativeStage": "input-value-mismatch",
+    "nativeWorkProgress": "pasted-value",
+    "providerObservation": null,
+    "retryAttempted": false,
+    "schemaVersion": 1,
+    "stage": "input-value-mismatch",
+    "submittedTurns": 0,
+    "transportBudgetMs": 5000,
+    "transportFailure": null,
+    "transportStarted": true
+  },
+  {
+    "actionPhase": "completed",
+    "clipboardCleared": false,
+    "composerShape": {
+      "editors": 1,
+      "sendMessages": 0,
+      "startTasks": 1
+    },
+    "copiedResponses": 0,
+    "diagnosticsOnly": true,
+    "inputValueRejection": {
+      "cause": "value-type",
+      "site": "paste-value",
+      "valueRelation": "unmeasured"
+    },
+    "inputVerifiedTurns": 0,
+    "mechanism": "claude-native-chat",
+    "nativeProgress": "finish",
+    "nativeStage": "input-value-mismatch",
+    "nativeWorkProgress": "pasted-value",
+    "providerObservation": null,
+    "retryAttempted": false,
+    "schemaVersion": 1,
+    "stage": "input-value-mismatch",
+    "submittedTurns": 0,
+    "transportBudgetMs": 5000,
+    "transportFailure": null,
+    "transportStarted": true
+  },
+  {
+    "actionPhase": "completed",
+    "clipboardCleared": false,
+    "composerShape": {
+      "editors": 1,
+      "sendMessages": 0,
+      "startTasks": 1
+    },
+    "copiedResponses": 0,
+    "diagnosticsOnly": true,
+    "inputValueRejection": {
+      "cause": "window-geometry",
+      "site": "paste-focus-after",
+      "valueRelation": "expected"
+    },
+    "inputVerifiedTurns": 0,
+    "mechanism": "claude-native-chat",
+    "nativeProgress": "finish",
+    "nativeStage": "input-value-mismatch",
+    "nativeWorkProgress": "pasted-value",
+    "providerObservation": null,
+    "retryAttempted": false,
+    "schemaVersion": 1,
+    "stage": "input-value-mismatch",
+    "submittedTurns": 0,
+    "transportBudgetMs": 5000,
+    "transportFailure": null,
+    "transportStarted": true
+  },
+  {
+    "actionPhase": "completed",
+    "clipboardCleared": false,
+    "composerShape": {
+      "editors": 1,
+      "sendMessages": 0,
+      "startTasks": 1
+    },
+    "copiedResponses": 0,
+    "diagnosticsOnly": true,
+    "inputValueRejection": {
+      "cause": "value-other",
+      "site": "paste-relation",
+      "valueRelation": "other"
+    },
+    "inputVerifiedTurns": 0,
+    "mechanism": "claude-native-chat",
+    "nativeProgress": "finish",
+    "nativeStage": "input-value-mismatch",
+    "nativeWorkProgress": "pasted-value",
+    "providerObservation": null,
+    "retryAttempted": false,
+    "schemaVersion": 1,
+    "stage": "input-value-mismatch",
+    "submittedTurns": 0,
+    "transportBudgetMs": 5000,
+    "transportFailure": null,
+    "transportStarted": true
+  },
+  {
+    "actionPhase": "completed",
+    "clipboardCleared": false,
+    "composerShape": {
+      "editors": 1,
+      "sendMessages": 0,
+      "startTasks": 1
+    },
+    "copiedResponses": 0,
+    "diagnosticsOnly": true,
+    "inputValueRejection": {
+      "cause": "value-other",
+      "site": "readback-value",
+      "valueRelation": "other"
+    },
+    "inputVerifiedTurns": 0,
+    "mechanism": "claude-native-chat",
+    "nativeProgress": "finish",
+    "nativeStage": "input-value-mismatch",
+    "nativeWorkProgress": "readback-copy",
+    "providerObservation": null,
+    "retryAttempted": false,
+    "schemaVersion": 1,
+    "stage": "input-value-mismatch",
+    "submittedTurns": 0,
+    "transportBudgetMs": 5000,
+    "transportFailure": null,
+    "transportStarted": true
+  }
+]

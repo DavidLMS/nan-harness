@@ -139,6 +139,15 @@ These exceptions cover direct variant-to-fixed-value mappings without guards,
 nested decisions, or side effects. Reassess them if behavior is added. They do
 not exempt coverage, mutation testing, privacy, or other quality requirements.
 
+`Cause::parse` in
+`crates/nan-harness-desktop-check/src/native/mac_chat_turn/input_value.rs`
+measures cyclomatic 31 and cognitive 30 with the local complexity script on
+2026-10-27. It maps 28 fixed diagnostic labels to closed variants and rejects
+all other input. Keep the exhaustive mapping beside its enum; splitting it
+would obscure the wire contract. The same fixed-value mapping exception
+applies. Reassess if labels or behavior are added; this does not waive strict
+validation, privacy or behavioral tests.
+
 ZCode adds one direct mapping case to each projection. At `513a3c5d`, the same
 script measured `telemetry_harness_for_command` at cyclomatic 25/cognitive 24
 and telemetry `HarnessKind::as_str` at cyclomatic 24/cognitive 23. The existing
@@ -187,6 +196,15 @@ capability, and validation rejects contradictions or a mismatched refusal.
 Keep the direct wire fields rather than hiding their names in a map or splitting
 one atomic observation. Reassess if another witness or action state is added.
 The scoped `expect` does not waive privacy, validation or behavioral tests.
+
+`CopyControlChange` in
+`crates/nan-harness-desktop-check/src/gui/claude_linux_chat.rs` contains seven
+boolean fields, above the same threshold of three. These independent equality
+observations identify which identity or geometry component changed in one
+passive Copy stability sample. Keep their names in the flat diagnostic contract;
+they grant no input capability, and validation requires the matching refusal
+and at least one changed component. Reassess if another field or action state
+is added. The scoped `expect` does not waive privacy, validation or tests.
 
 `run_node_native_plugins` in
 `crates/nan-harness-cli/src/commands/configuration/tests/plugin_syntax.rs` has

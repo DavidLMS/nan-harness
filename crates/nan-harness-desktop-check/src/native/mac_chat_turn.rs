@@ -2,8 +2,64 @@
 use super::Window;
 use std::fmt::Write as _;
 use zeroize::Zeroizing;
+mod input_value;
+pub(crate) use input_value::InputValueRejection;
 
 pub(crate) const CHAT_TURN_MAX_MILLIS: u32 = 15_000;
+
+/// Diagnostic execution sites, never action receipts or permission to retry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum NativeProgress {
+    Window,
+    Tree,
+    Composer,
+    InitialValue,
+    Focus,
+    ReplaceSelect,
+    PromptClipboard,
+    Paste,
+    PastedValue,
+    Readback,
+    ReadbackSelect,
+    ReadbackCopy,
+    Collapse,
+    SendTree,
+    Press,
+    Finish,
+}
+impl NativeProgress {
+    pub(super) fn parse(line: &[u8]) -> Option<Self> {
+        Some(match line {
+            b"progress window\n" => Self::Window,
+            b"progress tree\n" => Self::Tree,
+            b"progress composer\n" => Self::Composer,
+            b"progress initial-value\n" => Self::InitialValue,
+            b"progress focus\n" => Self::Focus,
+            b"progress replace-select\n" => Self::ReplaceSelect,
+            b"progress prompt-clipboard\n" => Self::PromptClipboard,
+            b"progress paste\n" => Self::Paste,
+            b"progress pasted-value\n" => Self::PastedValue,
+            b"progress readback\n" => Self::Readback,
+            b"progress readback-select\n" => Self::ReadbackSelect,
+            b"progress readback-copy\n" => Self::ReadbackCopy,
+            b"progress collapse\n" => Self::Collapse,
+            b"progress send-tree\n" => Self::SendTree,
+            b"progress press\n" => Self::Press,
+            b"progress finish\n" => Self::Finish,
+            _ => return None,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+#[cfg(any(target_os = "macos", all(test, unix)))]
+pub(crate) struct TransportObservation {
+    pub(crate) progress: Option<NativeProgress>,
+    pub(crate) work: Option<NativeProgress>,
+    pub(crate) started: bool,
+    pub(crate) budget_ms: Option<u32>,
+}
 
 pub(crate) fn transport_deadline(
     deadline: std::time::Instant,
@@ -356,6 +412,7 @@ pub(crate) struct ChatTurnReceipt {
     pub(crate) scope_shape: Option<FailureScopeShape>,
     pub(crate) composer_shape: Option<ComposerShape>,
     pub(crate) window_guard: Option<WindowGuardObservation>,
+    pub(crate) input_value_rejection: Option<InputValueRejection>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -477,28 +534,26 @@ impl ChatTurnReceipt {
             return None;
         }
         let (output, window_guard) = WindowGuardObservation::split(output, mode)?;
-        let (first, remainder) = output.split_once('\n')?;
-        let stage = ChatTurnStage::parse(&format!("{first}\n"))?;
+        let stage = ChatTurnStage::parse(&format!("{}\n", output.split_once('\n')?.0))?;
+        let (output, input_value_rejection) = InputValueRejection::split(output, mode, stage)?;
+        let (_, remainder) = output.split_once('\n')?;
+        let mut receipt = Self {
+            stage,
+            row_shape: None,
+            scope_shape: None,
+            composer_shape: None,
+            window_guard,
+            input_value_rejection,
+        };
         if remainder.is_empty() {
-            return Some(Self {
-                stage,
-                row_shape: None,
-                scope_shape: None,
-                composer_shape: None,
-                window_guard,
-            });
+            return Some(receipt);
         }
         if matches!(
             mode,
             "input" | "input-replace-owned" | "input-failure-owned"
         ) {
-            return Some(Self {
-                stage,
-                row_shape: None,
-                scope_shape: None,
-                composer_shape: Some(ComposerShape::parse(remainder.strip_suffix('\n')?)?),
-                window_guard,
-            });
+            receipt.composer_shape = Some(ComposerShape::parse(remainder.strip_suffix('\n')?)?);
+            return Some(receipt);
         }
         if !matches!(
             mode,
@@ -543,33 +598,29 @@ impl ChatTurnReceipt {
         {
             return None;
         }
-        Some(Self {
-            stage,
-            scope_shape,
-            composer_shape: None,
-            window_guard,
-            row_shape: Some(FailureRowShape {
-                source_version: "2.19675.0",
-                source_sha256: "87e6b710a540352fcd4f9a1f0f6a8f9f9b6377ca676fd99c3e4d8bc87653dceb",
-                navigation_source_sha256: "948270963cdf93cc411d95393157f5c7e2c06f18916d8c4ea1971828fb0c677c",
-                phase: "pre-disclosure",
-                counts: FailureRowCounts {
-                    source_rows: values[0],
-                    streaming_rows: values[1],
-                    exact_user_headings: values[2],
-                    exact_prompt_nodes: values[3],
-                    server_error_labels: values[4],
-                    retry_controls: values[5],
-                    details_controls: values[6],
-                    user_rows: values[7],
-                    error_rows: values[8],
-                    shared_parent_pairs: values[9],
-                    adjacent_pairs: values[10],
-                    assistant_headings_in_error_rows: values[11],
-                    duplicate_positions: values[12],
-                },
-            }),
-        })
+        receipt.scope_shape = scope_shape;
+        receipt.row_shape = Some(FailureRowShape {
+            source_version: "2.19675.0",
+            source_sha256: "87e6b710a540352fcd4f9a1f0f6a8f9f9b6377ca676fd99c3e4d8bc87653dceb",
+            navigation_source_sha256: "948270963cdf93cc411d95393157f5c7e2c06f18916d8c4ea1971828fb0c677c",
+            phase: "pre-disclosure",
+            counts: FailureRowCounts {
+                source_rows: values[0],
+                streaming_rows: values[1],
+                exact_user_headings: values[2],
+                exact_prompt_nodes: values[3],
+                server_error_labels: values[4],
+                retry_controls: values[5],
+                details_controls: values[6],
+                user_rows: values[7],
+                error_rows: values[8],
+                shared_parent_pairs: values[9],
+                adjacent_pairs: values[10],
+                assistant_headings_in_error_rows: values[11],
+                duplicate_positions: values[12],
+            },
+        });
+        Some(receipt)
     }
 }
 fn hex(value: &str) -> Zeroizing<String> {
@@ -640,6 +691,36 @@ pub(super) fn request(
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn native_progress_frames_are_literal_strings_without_private_or_object_forms() {
+        for label in [
+            "window",
+            "tree",
+            "composer",
+            "initial-value",
+            "focus",
+            "replace-select",
+            "prompt-clipboard",
+            "paste",
+            "pasted-value",
+            "readback",
+            "readback-select",
+            "readback-copy",
+            "collapse",
+            "send-tree",
+            "press",
+            "finish",
+        ] {
+            let frame = format!("progress {label}\n");
+            let parsed = NativeProgress::parse(frame.as_bytes()).unwrap();
+            assert_eq!(serde_json::to_value(parsed).unwrap(), label);
+            assert!(NativeProgress::parse(format!("{frame}PRIVATE").as_bytes()).is_none());
+            assert!(
+                NativeProgress::parse(format!("progress {{\"{label}\":null}}\n").as_bytes())
+                    .is_none()
+            );
+        }
+    }
     #[test]
     fn transport_leaves_post_guard_time_without_extending_the_action_deadline() {
         use std::time::{Duration, Instant};

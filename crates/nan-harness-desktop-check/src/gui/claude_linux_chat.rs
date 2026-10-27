@@ -123,6 +123,66 @@ fn query_observation(facts: &Value) -> Option<QueryObservation> {
         && value.last_ms <= value.elapsed_ms)
         .then_some(value)
 }
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum CopySample {
+    First,
+    Second,
+}
+impl<'de> Deserialize<'de> for CopySample {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // Unit-enum object forms are outside this strictly string-valued diagnostic wire.
+        match String::deserialize(deserializer)?.as_str() {
+            "first" => Ok(Self::First),
+            "second" => Ok(Self::Second),
+            _ => Err(serde::de::Error::custom("invalid copy sample")),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "keep seven independent equality observations explicit in the closed copy diagnostic"
+)]
+struct CopyControlChange {
+    sample: CopySample,
+    role_same: bool,
+    name_same: bool,
+    description_same: bool,
+    x_same: bool,
+    y_same: bool,
+    width_same: bool,
+    height_same: bool,
+}
+fn copy_control_change(facts: &Value) -> Option<CopyControlChange> {
+    if facts["stage"] != "blocked"
+        || facts["failureBoundary"] != "copy-control-changed"
+        || facts["responseVerified"] != false
+    {
+        return None;
+    }
+    let value: CopyControlChange =
+        serde_json::from_value(facts.get("copyControlChange")?.clone()).ok()?;
+    (!(value.role_same
+        && value.name_same
+        && value.description_same
+        && value.x_same
+        && value.y_same
+        && value.width_same
+        && value.height_same))
+        .then_some(value)
+}
+fn project_copy_control_change(summary: &mut Value, value: Option<CopyControlChange>) {
+    if summary["stage"] == "blocked"
+        && summary["failureBoundary"] == "copy-control-changed"
+        && let Some(value) = value
+    {
+        summary["copyControlChange"] = json!(value);
+    }
+}
 type EmptyInputDrift = std::collections::BTreeMap<EmptyInputField, bool>;
 fn native_tree_observation(facts: &Value) -> Option<Value> {
     let value = facts.get("nativeTreeObservation")?;
@@ -516,6 +576,9 @@ fn valid_binding(fields: &serde_json::Map<String, Value>) -> bool {
 // packet. Validate them together so no field can widen input authority.
 fn validate_diagnostics(facts: &Value) -> Option<()> {
     let fields = facts.as_object()?;
+    if fields.contains_key("copyControlChange") && copy_control_change(facts).is_none() {
+        return None;
+    }
     if fields.contains_key("queryObservation") && query_observation(facts).is_none() {
         return None;
     }
@@ -601,7 +664,7 @@ fn decode(bytes: &[u8]) -> Option<(Value, Option<Value>)> {
         return None;
     }
     let facts = value["facts"].as_object()?;
-    if !(11..=23).contains(&facts.len())
+    if !(11..=24).contains(&facts.len())
         || facts.keys().any(|key| {
             !FLAGS.contains(&key.as_str())
                 && ![
@@ -621,6 +684,7 @@ fn decode(bytes: &[u8]) -> Option<(Value, Option<Value>)> {
                     "retryForwarded",
                     "nativeTreeObservation",
                     "queryObservation",
+                    "copyControlChange",
                 ]
                 .contains(&key.as_str())
         })
@@ -846,6 +910,7 @@ pub(crate) struct ClaudeLinuxChatSession<'a> {
     retry: RetryState,
     native_tree: Option<Value>,
     query_observation: Option<QueryObservation>,
+    copy_control_change: Option<CopyControlChange>,
     submitted: u8,
     verified: u8,
     copied: u8,
@@ -890,6 +955,7 @@ impl Gui {
             retry: RetryState::NotStarted,
             native_tree: None,
             query_observation: None,
+            copy_control_change: None,
             submitted: 0,
             verified: 0,
             copied: 0,
@@ -963,6 +1029,7 @@ impl ClaudeLinuxChatSession<'_> {
         self.retry_candidate = retry_candidate_observation(&facts);
         self.native_tree = native_tree_observation(&facts);
         self.query_observation = query_observation(&facts);
+        self.copy_control_change = copy_control_change(&facts);
         facts["stage"]
             .as_str()
             .ok_or(Reason::ActionUnsupported)?
@@ -1184,6 +1251,7 @@ impl ClaudeLinuxChatSession<'_> {
         if let Some(boundary) = self.failure_boundary {
             facts["failureBoundary"] = json!(boundary);
         }
+        project_copy_control_change(&mut facts, self.copy_control_change);
         if self.stage == "retry-diagnostic"
             && let Some(candidate) = self.retry_candidate
         {
@@ -1221,6 +1289,123 @@ impl ClaudeLinuxChatSession<'_> {
         }
         recorded.map_err(|_| Reason::IsolationUnavailable)?;
         outcome
+    }
+}
+
+#[cfg(test)]
+mod copy_control_change_tests {
+    use super::{copy_control_change, decode, project_copy_control_change, query_observation};
+    use serde_json::{Value, json};
+
+    fn fixture() -> Value {
+        serde_json::from_str(include_str!(
+            "../../../../canary/tests/fixtures/claude-linux-copy-control-change.json"
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn actual_python_packets_survive_decode_and_the_final_diagnostic_projection() {
+        let fixture = fixture();
+        let records = fixture["records"].as_array().unwrap();
+        assert_eq!(records.len(), 8);
+        for record in records {
+            let (facts, _) = decode(&serde_json::to_vec(&record["packet"]).unwrap()).unwrap();
+            assert_eq!(facts["stage"], "blocked");
+            assert_eq!(facts["responseVerified"], false);
+            let mut summary = json!({"schemaVersion":1,"mechanism":"claude-linux-native-chat",
+                "diagnosticsOnly":true,"stage":"blocked","submittedTurns":3,
+                "inputVerifiedTurns":3,"copiedResponses":2,"retryAttempted":true,
+                "clipboardCleared":true,"failureBoundary":"copy-control-changed"});
+            summary["queryObservation"] = json!(query_observation(&facts).unwrap());
+            project_copy_control_change(&mut summary, copy_control_change(&facts));
+            assert_eq!(summary, record["summary"], "{}", record["name"]);
+        }
+    }
+
+    #[test]
+    fn raw_packets_reject_non_string_samples_null_unknown_fields_and_inconsistent_context() {
+        let packet = fixture()["records"][0]["packet"].clone();
+        for invalid in [
+            json!({"first":null}),
+            json!(null),
+            json!(1),
+            json!("PRIVATE"),
+        ] {
+            let mut changed = packet.clone();
+            changed["facts"]["copyControlChange"]["sample"] = invalid;
+            assert!(decode(&serde_json::to_vec(&changed).unwrap()).is_none());
+        }
+        for invalid in [json!(null), json!(1), json!("PRIVATE"), json!({})] {
+            let mut changed = packet.clone();
+            changed["facts"]["copyControlChange"] = invalid;
+            assert!(decode(&serde_json::to_vec(&changed).unwrap()).is_none());
+        }
+        for key in [
+            "roleSame",
+            "nameSame",
+            "descriptionSame",
+            "xSame",
+            "ySame",
+            "widthSame",
+            "heightSame",
+        ] {
+            for invalid in [
+                json!(null),
+                json!(1),
+                json!("PRIVATE"),
+                json!({"true":null}),
+            ] {
+                let mut changed = packet.clone();
+                changed["facts"]["copyControlChange"][key] = invalid;
+                assert!(decode(&serde_json::to_vec(&changed).unwrap()).is_none());
+            }
+            let mut changed = packet.clone();
+            changed["facts"]["copyControlChange"]
+                .as_object_mut()
+                .unwrap()
+                .remove(key);
+            assert!(decode(&serde_json::to_vec(&changed).unwrap()).is_none());
+        }
+        for (key, value) in [
+            ("stage", json!("copied")),
+            ("failureBoundary", json!("copy-control-hit")),
+            ("responseVerified", json!(true)),
+        ] {
+            let mut changed = packet.clone();
+            changed["facts"][key] = value;
+            assert!(decode(&serde_json::to_vec(&changed).unwrap()).is_none());
+        }
+        for key in ["bounds", "name", "rawNode"] {
+            let mut changed = packet.clone();
+            changed["facts"]["copyControlChange"][key] = json!("PRIVATE");
+            assert!(decode(&serde_json::to_vec(&changed).unwrap()).is_none());
+        }
+        let mut unchanged = packet;
+        unchanged["facts"]["copyControlChange"]["xSame"] = json!(true);
+        assert!(decode(&serde_json::to_vec(&unchanged).unwrap()).is_none());
+    }
+
+    #[test]
+    fn legacy_absence_and_later_guard_loss_cannot_promote_copy_authority() {
+        let mut packet = fixture()["records"][0]["packet"].clone();
+        let (facts, _) = decode(&serde_json::to_vec(&packet).unwrap()).unwrap();
+        let observation = copy_control_change(&facts);
+        packet["facts"]
+            .as_object_mut()
+            .unwrap()
+            .remove("copyControlChange");
+        assert!(decode(&serde_json::to_vec(&packet).unwrap()).is_some());
+        for (stage, boundary) in [
+            ("blocked", "native-window"),
+            ("clipboard-cleanup", "clipboard"),
+            ("copied", "copy-control-changed"),
+        ] {
+            let mut summary = json!({"stage":stage,"failureBoundary":boundary});
+            let before = summary.clone();
+            project_copy_control_change(&mut summary, observation);
+            assert_eq!(summary, before);
+        }
     }
 }
 

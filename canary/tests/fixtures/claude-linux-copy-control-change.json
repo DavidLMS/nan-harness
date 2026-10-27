@@ -1,0 +1,517 @@
+{
+  "records": [
+    {
+      "name": "first-xSame",
+      "packet": {
+        "binding": null,
+        "facts": {
+          "copyControlChange": {
+            "descriptionSame": true,
+            "heightSame": true,
+            "nameSame": true,
+            "roleSame": true,
+            "sample": "first",
+            "widthSame": true,
+            "xSame": false,
+            "ySame": true
+          },
+          "diagnosticsOnly": true,
+          "failureBoundary": "copy-control-changed",
+          "inputVerified": false,
+          "mechanism": "claude-linux-native-chat",
+          "pasteAttempted": false,
+          "queryObservation": {
+            "calls": 231,
+            "elapsedMs": 0,
+            "lastMs": 0,
+            "nativeWindowMs": 0
+          },
+          "recoveryVerified": false,
+          "responseVerified": false,
+          "schemaVersion": 1,
+          "sendAttempted": false,
+          "sendForwarded": false,
+          "stage": "blocked",
+          "toolVerified": false
+        }
+      },
+      "summary": {
+        "clipboardCleared": true,
+        "copiedResponses": 2,
+        "copyControlChange": {
+          "descriptionSame": true,
+          "heightSame": true,
+          "nameSame": true,
+          "roleSame": true,
+          "sample": "first",
+          "widthSame": true,
+          "xSame": false,
+          "ySame": true
+        },
+        "diagnosticsOnly": true,
+        "failureBoundary": "copy-control-changed",
+        "inputVerifiedTurns": 3,
+        "mechanism": "claude-linux-native-chat",
+        "queryObservation": {
+          "calls": 231,
+          "elapsedMs": 0,
+          "lastMs": 0,
+          "nativeWindowMs": 0
+        },
+        "retryAttempted": true,
+        "schemaVersion": 1,
+        "stage": "blocked",
+        "submittedTurns": 3
+      }
+    },
+    {
+      "name": "second-xSame",
+      "packet": {
+        "binding": null,
+        "facts": {
+          "copyControlChange": {
+            "descriptionSame": true,
+            "heightSame": true,
+            "nameSame": true,
+            "roleSame": true,
+            "sample": "second",
+            "widthSame": true,
+            "xSame": false,
+            "ySame": true
+          },
+          "diagnosticsOnly": true,
+          "failureBoundary": "copy-control-changed",
+          "inputVerified": false,
+          "mechanism": "claude-linux-native-chat",
+          "pasteAttempted": false,
+          "queryObservation": {
+            "calls": 304,
+            "elapsedMs": 0,
+            "lastMs": 0,
+            "nativeWindowMs": 0
+          },
+          "recoveryVerified": false,
+          "responseVerified": false,
+          "schemaVersion": 1,
+          "sendAttempted": false,
+          "sendForwarded": false,
+          "stage": "blocked",
+          "toolVerified": false
+        }
+      },
+      "summary": {
+        "clipboardCleared": true,
+        "copiedResponses": 2,
+        "copyControlChange": {
+          "descriptionSame": true,
+          "heightSame": true,
+          "nameSame": true,
+          "roleSame": true,
+          "sample": "second",
+          "widthSame": true,
+          "xSame": false,
+          "ySame": true
+        },
+        "diagnosticsOnly": true,
+        "failureBoundary": "copy-control-changed",
+        "inputVerifiedTurns": 3,
+        "mechanism": "claude-linux-native-chat",
+        "queryObservation": {
+          "calls": 304,
+          "elapsedMs": 0,
+          "lastMs": 0,
+          "nativeWindowMs": 0
+        },
+        "retryAttempted": true,
+        "schemaVersion": 1,
+        "stage": "blocked",
+        "submittedTurns": 3
+      }
+    },
+    {
+      "name": "first-ySame",
+      "packet": {
+        "binding": null,
+        "facts": {
+          "copyControlChange": {
+            "descriptionSame": true,
+            "heightSame": true,
+            "nameSame": true,
+            "roleSame": true,
+            "sample": "first",
+            "widthSame": true,
+            "xSame": true,
+            "ySame": false
+          },
+          "diagnosticsOnly": true,
+          "failureBoundary": "copy-control-changed",
+          "inputVerified": false,
+          "mechanism": "claude-linux-native-chat",
+          "pasteAttempted": false,
+          "queryObservation": {
+            "calls": 231,
+            "elapsedMs": 0,
+            "lastMs": 0,
+            "nativeWindowMs": 0
+          },
+          "recoveryVerified": false,
+          "responseVerified": false,
+          "schemaVersion": 1,
+          "sendAttempted": false,
+          "sendForwarded": false,
+          "stage": "blocked",
+          "toolVerified": false
+        }
+      },
+      "summary": {
+        "clipboardCleared": true,
+        "copiedResponses": 2,
+        "copyControlChange": {
+          "descriptionSame": true,
+          "heightSame": true,
+          "nameSame": true,
+          "roleSame": true,
+          "sample": "first",
+          "widthSame": true,
+          "xSame": true,
+          "ySame": false
+        },
+        "diagnosticsOnly": true,
+        "failureBoundary": "copy-control-changed",
+        "inputVerifiedTurns": 3,
+        "mechanism": "claude-linux-native-chat",
+        "queryObservation": {
+          "calls": 231,
+          "elapsedMs": 0,
+          "lastMs": 0,
+          "nativeWindowMs": 0
+        },
+        "retryAttempted": true,
+        "schemaVersion": 1,
+        "stage": "blocked",
+        "submittedTurns": 3
+      }
+    },
+    {
+      "name": "first-widthSame",
+      "packet": {
+        "binding": null,
+        "facts": {
+          "copyControlChange": {
+            "descriptionSame": true,
+            "heightSame": true,
+            "nameSame": true,
+            "roleSame": true,
+            "sample": "first",
+            "widthSame": false,
+            "xSame": true,
+            "ySame": true
+          },
+          "diagnosticsOnly": true,
+          "failureBoundary": "copy-control-changed",
+          "inputVerified": false,
+          "mechanism": "claude-linux-native-chat",
+          "pasteAttempted": false,
+          "queryObservation": {
+            "calls": 231,
+            "elapsedMs": 0,
+            "lastMs": 0,
+            "nativeWindowMs": 0
+          },
+          "recoveryVerified": false,
+          "responseVerified": false,
+          "schemaVersion": 1,
+          "sendAttempted": false,
+          "sendForwarded": false,
+          "stage": "blocked",
+          "toolVerified": false
+        }
+      },
+      "summary": {
+        "clipboardCleared": true,
+        "copiedResponses": 2,
+        "copyControlChange": {
+          "descriptionSame": true,
+          "heightSame": true,
+          "nameSame": true,
+          "roleSame": true,
+          "sample": "first",
+          "widthSame": false,
+          "xSame": true,
+          "ySame": true
+        },
+        "diagnosticsOnly": true,
+        "failureBoundary": "copy-control-changed",
+        "inputVerifiedTurns": 3,
+        "mechanism": "claude-linux-native-chat",
+        "queryObservation": {
+          "calls": 231,
+          "elapsedMs": 0,
+          "lastMs": 0,
+          "nativeWindowMs": 0
+        },
+        "retryAttempted": true,
+        "schemaVersion": 1,
+        "stage": "blocked",
+        "submittedTurns": 3
+      }
+    },
+    {
+      "name": "first-heightSame",
+      "packet": {
+        "binding": null,
+        "facts": {
+          "copyControlChange": {
+            "descriptionSame": true,
+            "heightSame": false,
+            "nameSame": true,
+            "roleSame": true,
+            "sample": "first",
+            "widthSame": true,
+            "xSame": true,
+            "ySame": true
+          },
+          "diagnosticsOnly": true,
+          "failureBoundary": "copy-control-changed",
+          "inputVerified": false,
+          "mechanism": "claude-linux-native-chat",
+          "pasteAttempted": false,
+          "queryObservation": {
+            "calls": 231,
+            "elapsedMs": 0,
+            "lastMs": 0,
+            "nativeWindowMs": 0
+          },
+          "recoveryVerified": false,
+          "responseVerified": false,
+          "schemaVersion": 1,
+          "sendAttempted": false,
+          "sendForwarded": false,
+          "stage": "blocked",
+          "toolVerified": false
+        }
+      },
+      "summary": {
+        "clipboardCleared": true,
+        "copiedResponses": 2,
+        "copyControlChange": {
+          "descriptionSame": true,
+          "heightSame": false,
+          "nameSame": true,
+          "roleSame": true,
+          "sample": "first",
+          "widthSame": true,
+          "xSame": true,
+          "ySame": true
+        },
+        "diagnosticsOnly": true,
+        "failureBoundary": "copy-control-changed",
+        "inputVerifiedTurns": 3,
+        "mechanism": "claude-linux-native-chat",
+        "queryObservation": {
+          "calls": 231,
+          "elapsedMs": 0,
+          "lastMs": 0,
+          "nativeWindowMs": 0
+        },
+        "retryAttempted": true,
+        "schemaVersion": 1,
+        "stage": "blocked",
+        "submittedTurns": 3
+      }
+    },
+    {
+      "name": "first-roleSame",
+      "packet": {
+        "binding": null,
+        "facts": {
+          "copyControlChange": {
+            "descriptionSame": true,
+            "heightSame": true,
+            "nameSame": true,
+            "roleSame": false,
+            "sample": "first",
+            "widthSame": true,
+            "xSame": true,
+            "ySame": true
+          },
+          "diagnosticsOnly": true,
+          "failureBoundary": "copy-control-changed",
+          "inputVerified": false,
+          "mechanism": "claude-linux-native-chat",
+          "pasteAttempted": false,
+          "queryObservation": {
+            "calls": 231,
+            "elapsedMs": 0,
+            "lastMs": 0,
+            "nativeWindowMs": 0
+          },
+          "recoveryVerified": false,
+          "responseVerified": false,
+          "schemaVersion": 1,
+          "sendAttempted": false,
+          "sendForwarded": false,
+          "stage": "blocked",
+          "toolVerified": false
+        }
+      },
+      "summary": {
+        "clipboardCleared": true,
+        "copiedResponses": 2,
+        "copyControlChange": {
+          "descriptionSame": true,
+          "heightSame": true,
+          "nameSame": true,
+          "roleSame": false,
+          "sample": "first",
+          "widthSame": true,
+          "xSame": true,
+          "ySame": true
+        },
+        "diagnosticsOnly": true,
+        "failureBoundary": "copy-control-changed",
+        "inputVerifiedTurns": 3,
+        "mechanism": "claude-linux-native-chat",
+        "queryObservation": {
+          "calls": 231,
+          "elapsedMs": 0,
+          "lastMs": 0,
+          "nativeWindowMs": 0
+        },
+        "retryAttempted": true,
+        "schemaVersion": 1,
+        "stage": "blocked",
+        "submittedTurns": 3
+      }
+    },
+    {
+      "name": "first-nameSame",
+      "packet": {
+        "binding": null,
+        "facts": {
+          "copyControlChange": {
+            "descriptionSame": true,
+            "heightSame": true,
+            "nameSame": false,
+            "roleSame": true,
+            "sample": "first",
+            "widthSame": true,
+            "xSame": true,
+            "ySame": true
+          },
+          "diagnosticsOnly": true,
+          "failureBoundary": "copy-control-changed",
+          "inputVerified": false,
+          "mechanism": "claude-linux-native-chat",
+          "pasteAttempted": false,
+          "queryObservation": {
+            "calls": 231,
+            "elapsedMs": 0,
+            "lastMs": 0,
+            "nativeWindowMs": 0
+          },
+          "recoveryVerified": false,
+          "responseVerified": false,
+          "schemaVersion": 1,
+          "sendAttempted": false,
+          "sendForwarded": false,
+          "stage": "blocked",
+          "toolVerified": false
+        }
+      },
+      "summary": {
+        "clipboardCleared": true,
+        "copiedResponses": 2,
+        "copyControlChange": {
+          "descriptionSame": true,
+          "heightSame": true,
+          "nameSame": false,
+          "roleSame": true,
+          "sample": "first",
+          "widthSame": true,
+          "xSame": true,
+          "ySame": true
+        },
+        "diagnosticsOnly": true,
+        "failureBoundary": "copy-control-changed",
+        "inputVerifiedTurns": 3,
+        "mechanism": "claude-linux-native-chat",
+        "queryObservation": {
+          "calls": 231,
+          "elapsedMs": 0,
+          "lastMs": 0,
+          "nativeWindowMs": 0
+        },
+        "retryAttempted": true,
+        "schemaVersion": 1,
+        "stage": "blocked",
+        "submittedTurns": 3
+      }
+    },
+    {
+      "name": "first-descriptionSame",
+      "packet": {
+        "binding": null,
+        "facts": {
+          "copyControlChange": {
+            "descriptionSame": false,
+            "heightSame": true,
+            "nameSame": true,
+            "roleSame": true,
+            "sample": "first",
+            "widthSame": true,
+            "xSame": true,
+            "ySame": true
+          },
+          "diagnosticsOnly": true,
+          "failureBoundary": "copy-control-changed",
+          "inputVerified": false,
+          "mechanism": "claude-linux-native-chat",
+          "pasteAttempted": false,
+          "queryObservation": {
+            "calls": 231,
+            "elapsedMs": 0,
+            "lastMs": 0,
+            "nativeWindowMs": 0
+          },
+          "recoveryVerified": false,
+          "responseVerified": false,
+          "schemaVersion": 1,
+          "sendAttempted": false,
+          "sendForwarded": false,
+          "stage": "blocked",
+          "toolVerified": false
+        }
+      },
+      "summary": {
+        "clipboardCleared": true,
+        "copiedResponses": 2,
+        "copyControlChange": {
+          "descriptionSame": false,
+          "heightSame": true,
+          "nameSame": true,
+          "roleSame": true,
+          "sample": "first",
+          "widthSame": true,
+          "xSame": true,
+          "ySame": true
+        },
+        "diagnosticsOnly": true,
+        "failureBoundary": "copy-control-changed",
+        "inputVerifiedTurns": 3,
+        "mechanism": "claude-linux-native-chat",
+        "queryObservation": {
+          "calls": 231,
+          "elapsedMs": 0,
+          "lastMs": 0,
+          "nativeWindowMs": 0
+        },
+        "retryAttempted": true,
+        "schemaVersion": 1,
+        "stage": "blocked",
+        "submittedTurns": 3
+      }
+    }
+  ],
+  "schemaVersion": 1
+}

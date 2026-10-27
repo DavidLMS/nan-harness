@@ -20,6 +20,45 @@ MacOwnedWindowState claude_mac_window_state(std::uint64_t, pid_t, CGRect);
 MacWindowObservation claude_mac_window_observation();
 namespace {
 using Clock = std::chrono::steady_clock;
+enum class NativeProgress {
+    Window, Tree, Composer, InitialValue, Focus, ReplaceSelect, PromptClipboard,
+    Paste, PastedValue, Readback, ReadbackSelect, ReadbackCopy, Collapse, SendTree, Press, Finish
+};
+static void progress(NativeProgress stage, std::ostream& output = std::cout) {
+    constexpr const char* labels[] = {"window", "tree", "composer", "initial-value", "focus", "replace-select",
+        "prompt-clipboard", "paste", "pasted-value", "readback", "readback-select", "readback-copy",
+        "collapse", "send-tree", "press", "finish"};
+    // A flushed site is diagnostic only; the final receipt and all guards still
+    // decide the action. It contains no window, clipboard or transcript data.
+    output << "progress " << labels[static_cast<unsigned>(stage)] << '\n' << std::flush;
+}
+struct InputValueRejection {
+    const char* site = nullptr;
+    const char* cause = nullptr;
+    const char* relation = "unmeasured";
+};
+// Classify only the first already-evaluated failure; never evaluate a skipped
+// AX expression or change the original predicate's truth value.
+static bool noted(bool valid, const char* cause, const char** failure) {
+    if (!valid && failure && !*failure) *failure = cause;
+    return valid;
+}
+static const char* window_input_cause(const MacWindowObservation& observation) {
+    struct Mapping { const char* source; const char* closed; };
+    constexpr Mapping mapping[] = {{"foreground", "window-foreground"}, {"application", "window-application"},
+        {"focus", "window-focus"}, {"geometry", "window-geometry"}, {"inventory", "window-inventory"},
+        {"identity", "window-identity"}, {"layer", "window-layer"}, {"display", "window-display"}, {"stack", "window-stack"}};
+    for (const auto& item : mapping) if (std::string(observation.failure) == item.source) return item.closed;
+    return "window-unmeasured";
+}
+static const char* input_relation(const std::string& value, const std::string& prompt, const std::string& initial) {
+    if (value == prompt) return "expected";
+    if (value == initial) return "initial";
+    return prompt.compare(0, value.size(), value) == 0 ? "prefix" : "other";
+}
+static void write_input_rejection(std::ostream& output, const InputValueRejection& value) {
+    output << "input-value-rejection " << value.site << ' ' << value.cause << ' ' << value.relation << '\n';
+}
 struct Request {
     std::string mode, prompt, marker, sentinel;
     std::uint64_t window = 0;
@@ -30,6 +69,7 @@ struct Request {
     mutable const char* deadline_phase = "deadline-window";
     mutable const char* window_site = nullptr;
     mutable MacWindowObservation window_observation;
+    mutable InputValueRejection input_rejection;
     ~Request() { for (auto value : {&prompt, &marker, &sentinel}) std::fill(value->begin(), value->end(), '\0'); }
 };
 static bool decode(const std::string& hex, std::string& result) {
@@ -95,10 +135,11 @@ static bool wait_owned_window(const Request& request, const char* site = "entry"
         [&] { return within(request); },
         [] { std::this_thread::sleep_for(std::chrono::milliseconds(20)); });
 }
-static std::string text(CFTypeRef value) {
-    if (!value || CFGetTypeID(value) != CFStringGetTypeID()) return {};
+static std::string text(CFTypeRef value, const char** failure = nullptr) {
+    if (!noted(value, "value-unavailable", failure)
+        || !noted(CFGetTypeID(value) == CFStringGetTypeID(), "value-type", failure)) return {};
     char buffer[4097];
-    if (!CFStringGetCString(static_cast<CFStringRef>(value), buffer, sizeof(buffer), kCFStringEncodingUTF8)) return {};
+    if (!noted(CFStringGetCString(static_cast<CFStringRef>(value), buffer, sizeof(buffer), kCFStringEncodingUTF8), "value-encoding", failure)) return {};
     return buffer;
 }
 static bool ax_query_failed = false;
@@ -108,9 +149,9 @@ static CFTypeRef attribute(AXUIElementRef element, CFStringRef name) {
     if (error != kAXErrorSuccess && error != kAXErrorNoValue && error != kAXErrorAttributeUnsupported) ax_query_failed = true;
     return error == kAXErrorSuccess ? value : nullptr;
 }
-static std::string string_attribute(AXUIElementRef element, CFStringRef name) {
+static std::string string_attribute(AXUIElementRef element, CFStringRef name, const char** failure = nullptr) {
     auto value = attribute(element, name);
-    auto result = text(value);
+    auto result = text(value, failure);
     if (value) CFRelease(value);
     return result;
 }
@@ -312,6 +353,7 @@ static bool key(CGKeyCode code, bool command) {
     return true;
 }
 static const char* press(const Request& request, const Node& node, const char* success) {
+    progress(NativeProgress::Press);
     request.deadline_phase = "deadline-press";
     if (!target(node, request) || !owned(request)) return "control";
     Tree fresh;
@@ -344,51 +386,71 @@ struct FocusIdentity {
 };
 static ComposerFocus composer_focus_identity(const FocusIdentity& focused, const Node& control,
                                              const Request& request, bool target_unchanged,
-                                             bool query_failed) {
+                                             bool query_failed, const char** failure = nullptr) {
     const auto bounds = focused.bounds;
-    if (query_failed || !target_unchanged || !focused.element || focused.pid != static_cast<pid_t>(request.pid)
-        || focused.role.empty() || !std::isfinite(bounds.origin.x) || !std::isfinite(bounds.origin.y)
-        || !std::isfinite(bounds.size.width) || !std::isfinite(bounds.size.height)
-        || bounds.size.width <= 0 || bounds.size.height <= 0 || !CGRectContainsRect(request.bounds, bounds))
+    if (!noted(!query_failed, "query-failed", failure)
+        || !noted(target_unchanged, "focused-identity", failure)
+        || !noted(focused.element, "focused-element", failure)
+        || !noted(focused.pid == static_cast<pid_t>(request.pid), "focused-pid", failure)
+        || !noted(!focused.role.empty(), "focused-role", failure)
+        || !noted(std::isfinite(bounds.origin.x) && std::isfinite(bounds.origin.y)
+            && std::isfinite(bounds.size.width) && std::isfinite(bounds.size.height)
+            && bounds.size.width > 0 && bounds.size.height > 0
+            && CGRectContainsRect(request.bounds, bounds), "focused-geometry", failure))
         return ComposerFocus::Rejected;
-    if (CFEqual(focused.element, control.element))
-        return focused_identity(focused.element, control, focused.pid, request.pid, focused.role, bounds)
-            ? ComposerFocus::Focused : ComposerFocus::Rejected;
+    if (CFEqual(focused.element, control.element)) {
+        const bool same = focused_identity(focused.element, control, focused.pid, request.pid, focused.role, bounds);
+        if (!same) noted(false, focused.role != control.role ? "focused-role" : "focused-geometry", failure);
+        return same ? ComposerFocus::Focused : ComposerFocus::Rejected;
+    }
     return ComposerFocus::PendingIdentity;
 }
-static ComposerFocus focused_composer(const Request& request, const Node& control) {
-    if (!within(request) || ax_query_failed) return ComposerFocus::Rejected;
+static ComposerFocus focused_composer(const Request& request, const Node& control, const char** failure = nullptr) {
+    const auto rejected = [&](const char* cause) { noted(false, cause, failure); return ComposerFocus::Rejected; };
+    const bool initial_time = within(request);
+    if (!initial_time || ax_query_failed) return rejected(initial_time ? "query-failed" : "deadline");
     const auto before_window = claude_mac_window_state(request.window, request.pid, request.bounds);
-    if (!within(request) || before_window == MacOwnedWindowState::Rejected) return ComposerFocus::Rejected;
+    const bool before_time = within(request);
+    if (!before_time || before_window == MacOwnedWindowState::Rejected)
+        return rejected(before_time ? window_input_cause(claude_mac_window_observation()) : "deadline");
     AXUIElementRef app = AXUIElementCreateApplication(request.pid);
-    if (!app) return ComposerFocus::Rejected;
+    if (!app) return rejected("application");
     if (AXUIElementSetMessagingTimeout(app, .1F) != kAXErrorSuccess) {
         CFRelease(app);
-        return ComposerFocus::Rejected;
+        return rejected("query-failed");
     }
     CFTypeRef value = nullptr;
     const auto error = AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute, &value);
     CFRelease(app);
     ComposerFocus state = ComposerFocus::Rejected;
+    const char* identity_failure = nullptr;
     if (error == kAXErrorSuccess && value && CFGetTypeID(value) == AXUIElementGetTypeID()) {
         FocusIdentity focused;
         focused.element = static_cast<AXUIElementRef>(value);
         CGRect target_bounds;
         pid_t target_pid = 0;
-        const bool target_unchanged = AXUIElementGetPid(control.element, &target_pid) == kAXErrorSuccess
-            && target_pid == static_cast<pid_t>(request.pid) && rectangle(control.element, target_bounds)
-            && CGRectEqualToRect(target_bounds, control.bounds)
-            && string_attribute(control.element, kAXRoleAttribute) == control.role;
-        const bool queried = AXUIElementGetPid(focused.element, &focused.pid) == kAXErrorSuccess
-            && rectangle(focused.element, focused.bounds);
+        const bool target_unchanged = noted(AXUIElementGetPid(control.element, &target_pid) == kAXErrorSuccess, "query-failed", &identity_failure)
+            && noted(target_pid == static_cast<pid_t>(request.pid), "target-pid", &identity_failure)
+            && [&] { const bool valid = rectangle(control.element, target_bounds);
+                return noted(valid, ax_query_failed ? "query-failed" : "target-bounds-unavailable", &identity_failure); }()
+            && noted(CGRectEqualToRect(target_bounds, control.bounds), "target-geometry", &identity_failure)
+            && [&] { const bool same = string_attribute(control.element, kAXRoleAttribute) == control.role;
+                return noted(same, ax_query_failed ? "query-failed" : "target-role", &identity_failure); }();
+        const bool queried = noted(AXUIElementGetPid(focused.element, &focused.pid) == kAXErrorSuccess, "query-failed", &identity_failure)
+            && [&] { const bool valid = rectangle(focused.element, focused.bounds);
+                return noted(valid, ax_query_failed ? "query-failed" : "focused-bounds-unavailable", &identity_failure); }();
         if (queried) focused.role = string_attribute(focused.element, kAXRoleAttribute);
-        state = composer_focus_identity(focused, control, request, target_unchanged, !queried || ax_query_failed);
+        state = composer_focus_identity(focused, control, request, target_unchanged, !queried || ax_query_failed, &identity_failure);
+    } else {
+        identity_failure = error == kAXErrorSuccess ? "focused-element" : "query-failed";
     }
     if (value) CFRelease(value);
-    if (!within(request)) return ComposerFocus::Rejected;
+    if (!within(request)) return rejected("deadline");
     const auto after_window = claude_mac_window_state(request.window, request.pid, request.bounds);
-    if (!within(request) || after_window == MacOwnedWindowState::Rejected || state == ComposerFocus::Rejected)
-        return ComposerFocus::Rejected;
+    const bool after_time = within(request);
+    if (!after_time || after_window == MacOwnedWindowState::Rejected || state == ComposerFocus::Rejected)
+        return rejected(!after_time ? "deadline" : after_window == MacOwnedWindowState::Rejected
+            ? window_input_cause(claude_mac_window_observation()) : identity_failure ? identity_failure : "focused-identity");
     // Exact composer identity remains required for readiness. Incomplete window
     // proof only allows another passive query under this same absolute cutoff.
     return before_window == MacOwnedWindowState::PendingFocus || after_window == MacOwnedWindowState::PendingFocus
@@ -422,14 +484,15 @@ struct PrivateInputValue {
     std::string value;
     ~PrivateInputValue() { std::fill(value.begin(),value.end(),'\0'); }
 };
-static bool private_input_value(CFTypeRef value, std::string& result) {
+static bool private_input_value(CFTypeRef value, std::string& result, const char** failure = nullptr) {
     char buffer[4097]{};
-    const bool valid=value && CFGetTypeID(value)==CFStringGetTypeID()
-        && CFStringGetLength(static_cast<CFStringRef>(value))<=1024
-        && CFStringGetCString(static_cast<CFStringRef>(value),buffer,sizeof(buffer),kCFStringEncodingUTF8);
+    const bool valid=noted(value, "value-unavailable", failure)
+        && noted(CFGetTypeID(value)==CFStringGetTypeID(), "value-type", failure)
+        && noted(CFStringGetLength(static_cast<CFStringRef>(value))<=1024, "value-size", failure)
+        && noted(CFStringGetCString(static_cast<CFStringRef>(value),buffer,sizeof(buffer),kCFStringEncodingUTF8), "value-encoding", failure);
     if (valid) result=buffer;
     std::fill(std::begin(buffer),std::end(buffer),'\0');
-    return valid && result.size()<=1024;
+    return valid && noted(result.size()<=1024, "value-size", failure);
 }
 static PastedValue pasted_value_state(const std::string& value, const std::string& prompt,
                                      bool valid_value, bool exact_focus, const std::string& initial = "") {
@@ -440,18 +503,36 @@ static PastedValue pasted_value_state(const std::string& value, const std::strin
     if (value==initial) return PastedValue::Pending;
     return prompt.compare(0,value.size(),value)==0 ? PastedValue::Pending : PastedValue::Rejected;
 }
+static PastedValue related_paste_value(const std::string& value, const std::string& prompt,
+                                      const std::string& initial, InputValueRejection& rejection) {
+    const auto state = pasted_value_state(value,prompt,true,true,initial);
+    if (state == PastedValue::Rejected) rejection = {"paste-relation", "value-other", "other"};
+    return state;
+}
 static PastedValue pasted_composer_value(const Request& request, const Node& control, const std::string& initial) {
-    const auto before=focused_composer(request,control);
-    if (before==ComposerFocus::Rejected) return PastedValue::Rejected;
+    const char* focus_failure = nullptr;
+    const auto before=focused_composer(request,control,&focus_failure);
+    if (before==ComposerFocus::Rejected) {
+        request.input_rejection = {"paste-focus-before", focus_failure, "unmeasured"};
+        return PastedValue::Rejected;
+    }
     if (before==ComposerFocus::PendingIdentity) return PastedValue::Pending;
     auto value=attribute(control.element,kAXValueAttribute);
+    const bool value_query_failed = ax_query_failed;
     PrivateInputValue observed;
-    const bool valid=private_input_value(value,observed.value);
+    const char* value_failure = ax_query_failed ? "query-failed" : nullptr;
+    const bool valid=private_input_value(value,observed.value,&value_failure);
     if (value) CFRelease(value);
-    const auto after=focused_composer(request,control);
-    if (!valid || ax_query_failed || after==ComposerFocus::Rejected) return PastedValue::Rejected;
+    focus_failure = nullptr;
+    const auto after=focused_composer(request,control,&focus_failure);
+    if (!valid || ax_query_failed || after==ComposerFocus::Rejected) {
+        request.input_rejection = !valid || value_query_failed
+            ? InputValueRejection{"paste-value", value_failure ? value_failure : "query-failed", "unmeasured"}
+            : InputValueRejection{"paste-focus-after", focus_failure, input_relation(observed.value,request.prompt,initial)};
+        return PastedValue::Rejected;
+    }
     if (after==ComposerFocus::PendingIdentity) return PastedValue::Pending;
-    return pasted_value_state(observed.value,request.prompt,true,true,initial);
+    return related_paste_value(observed.value,request.prompt,initial,request.input_rejection);
 }
 template<class Query, class Within, class Pause>
 static bool settle_pasted_value(Query query, Within within_deadline, Pause pause) {
@@ -570,42 +651,62 @@ static const char* input(const Request& request, const Tree& tree) {
     if (editor < 0 || send < 0 || request.prompt.empty()) return "composer";
     const auto& control = tree.nodes[editor];
     if (!target(control, request) || !contained_control(tree.nodes[send], request)) return "control";
+    progress(NativeProgress::InitialValue);
     auto initial_value = attribute(control.element, kAXValueAttribute);
     const char* initial_failure = initial_input_failure(initial_value, ax_query_failed, (request.mode == "input-replace-owned" || request.mode == "input-failure-owned"));
     PrivateInputValue initial;
     if (!initial_failure && !private_input_value(initial_value,initial.value)) initial_failure="input-initial-unavailable";
     if (initial_value) CFRelease(initial_value);
     if (initial_failure) return initial_failure;
+    progress(NativeProgress::Focus);
     if (!owned(request)) return "input-focus-guard";
     if (AXUIElementSetAttributeValue(control.element, kAXFocusedAttribute, kCFBooleanTrue) != kAXErrorSuccess)
         return "input-focus-setting";
     if (!wait_focused_composer(request, control)) return "input-focused-identity";
     if ((request.mode == "input-replace-owned" || request.mode == "input-failure-owned")) {
+        progress(NativeProgress::ReplaceSelect);
         if (!key(0, true)) return "input-replace-select-key";
     }
     if (!wait_focused_composer(request, control)) return "input-prompt-before-guard";
+    progress(NativeProgress::PromptClipboard);
     if (!clipboard_write(request.prompt)) return "input-prompt-clipboard";
     if (!owned(request)) return "input-prompt-after-guard";
     if (!wait_focused_composer(request, control)) return "input-focused-identity";
+    progress(NativeProgress::Paste);
     if (!key(9, true)) return "input-paste-key";
+    progress(NativeProgress::PastedValue);
     if (!wait_pasted_value(request,control,initial.value)) return "input-value-mismatch";
+    progress(NativeProgress::Readback);
     request.deadline_phase="deadline-input-readback";
     if (!owned(request)) return "input-readback-before-guard";
     if (!clipboard_write(request.sentinel)) return "input-sentinel-clipboard";
     if (!owned(request)) return "input-sentinel-after-guard";
     if (!wait_focused_composer(request, control)) return "input-focused-identity";
+    progress(NativeProgress::ReadbackSelect);
     if (!key(0, true)) return "input-readback-select-key";
     if (!owned(request)) return "input-readback-select-guard";
     if (!wait_focused_composer(request, control)) return "input-focused-identity";
+    progress(NativeProgress::ReadbackCopy);
     if (!key(8, true)) return "input-readback-copy-key";
     while (within(request) && !clipboard_matches(request.prompt)) std::this_thread::sleep_for(std::chrono::milliseconds(20));
     bool copied = clipboard_matches(request.prompt);
-    const char* readback_failure = input_readback_failure(copied,
-        copied && string_attribute(control.element, kAXValueAttribute) == request.prompt);
+    const char* value_failure = nullptr;
+    PrivateInputValue readback;
+    // Keep the original copied && AX-value short circuit. Diagnostic formatting
+    // must never add a value query when clipboard readback already failed.
+    const bool value_verified = copied && (readback.value = string_attribute(control.element, kAXValueAttribute, &value_failure)) == request.prompt;
+    const char* readback_failure = input_readback_failure(copied, value_verified);
+    if (readback_failure && std::string(readback_failure) == "input-value-mismatch") {
+        if (ax_query_failed) value_failure = "query-failed";
+        request.input_rejection = {"readback-value", value_failure ? value_failure : "value-other",
+            value_failure ? "unmeasured" : "other"};
+    }
     if (readback_failure) return readback_failure;
+    progress(NativeProgress::Collapse);
     if (!owned(request)) return "input-collapse-guard";
     if (!wait_focused_composer(request, control)) return "input-focused-identity";
     if (!key(124, false)) return "input-collapse-key";
+    progress(NativeProgress::SendTree);
     Tree fresh;
     if (!fresh.collect(request) || !chat(fresh) || !retained(fresh, control)) return "control";
     if (request.mode == "input-failure-owned") {
@@ -843,6 +944,7 @@ static const char* open_failure_details(const Request& request, const Tree& tree
     if (current < 0) return failure;
     if (!chat(fresh) || !retained(fresh, tree.nodes[index])
         || !CFEqual(fresh.nodes[current].element, tree.nodes[index].element) || !owned(request)) return "control";
+    progress(NativeProgress::Press);
     request.deadline_phase = "deadline-press";
     if (AXUIElementPerformAction(fresh.nodes[current].element, kAXPressAction) != kAXErrorSuccess) return "action-uncertain";
     return owned(request) ? "failure-details-opened" : "action-uncertain";
@@ -909,6 +1011,7 @@ static const char* temporal_action(const Request& request, const Tree& tree) {
     if (!chat(fresh) || !retained(fresh,tree.nodes[index])
         || !CFEqual(fresh.nodes[current].element,tree.nodes[index].element) || !owned(request)) return "control";
     if (ready) return details?"failure-details-ready":"retry-ready";
+    progress(NativeProgress::Press);
     request.deadline_phase="deadline-press";
     if (AXUIElementPerformAction(fresh.nodes[current].element,kAXPressAction)!=kAXErrorSuccess) return "action-uncertain";
     return owned(request)?(details?"failure-details-opened":"retried"):"action-uncertain";
@@ -942,8 +1045,10 @@ int claude_chat_turn() {
         ComposerShape composer{}; bool composer_observed = false;
         if (request(value)) {
             Tree tree;
+            progress(NativeProgress::Window);
             if (!wait_owned_window(value)) stage = "window";
             else {
+                progress(NativeProgress::Tree);
                 value.deadline_phase = "deadline-tree";
                 if (!tree.collect(value)) stage = tree.failure ? tree.failure : "tree-query";
                 else {
@@ -955,6 +1060,7 @@ int claude_chat_turn() {
                         scope_shape_observed = row_shape_observed && observe_scope_shape(tree, scope_shape, [&] { return within(value); });
                     }
                     if (input_mode(value.mode)) {
+                        progress(NativeProgress::Composer);
                         stage = prepare_input_tree(value, tree, composer, composer_observed);
                         if (!stage) stage = input(value, tree);
                     } else stage = action(value, tree);
@@ -962,9 +1068,12 @@ int claude_chat_turn() {
             }
             stage = deadline_result(value, stage, !within(value));
         }
+        progress(NativeProgress::Finish);
         std::cout << "turn " << stage << '\n';
         if (composer_observed)
             std::cout << "composer " << composer.editors << ' ' << composer.start_tasks << ' ' << composer.send_messages << '\n';
+        if (std::string(stage) == "input-value-mismatch" && input_mode(value.mode) && value.input_rejection.site)
+            write_input_rejection(std::cout, value.input_rejection);
         if (row_shape_observed && within(value)) {
             std::cout << "rows";
             for (unsigned count : row_shape) std::cout << ' ' << count;

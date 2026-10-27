@@ -714,6 +714,7 @@ impl Visual {
         mode: &str,
         values: [&str; 3],
         deadline: Instant,
+        transport: &mut crate::native::MacChatTransport,
         mut observe: impl FnMut(
             crate::native::ChatActionPhase,
             Option<FailureCategory>,
@@ -727,15 +728,25 @@ impl Visual {
         })?;
         observe(Phase::AfterGuard, None, None);
         observe(Phase::Transport, None, None);
-        let transport_deadline =
-            crate::native::claude_chat_transport_deadline(deadline, Instant::now()).map_err(
-                |category| {
-                    observe(Phase::Transport, Some(category), None);
-                    category.reason()
-                },
-            )?;
+        let now = Instant::now();
+        let reserved = crate::native::claude_chat_transport_deadline(deadline, now);
+        transport.budget_ms = Some(reserved.as_ref().map_or(0, |limit| {
+            u32::try_from(limit.saturating_duration_since(now).as_millis())
+                .unwrap_or(crate::native::CHAT_TURN_MAX_MILLIS)
+                .min(crate::native::CHAT_TURN_MAX_MILLIS)
+        }));
+        let transport_deadline = reserved.map_err(|category| {
+            observe(Phase::Transport, Some(category), None);
+            category.reason()
+        })?;
         self.native
-            .claude_chat_turn(&self.window.borrow(), mode, values, transport_deadline)
+            .claude_chat_turn(
+                &self.window.borrow(),
+                mode,
+                values,
+                transport_deadline,
+                transport,
+            )
             .map_err(|category| {
                 observe(Phase::Transport, Some(category), None);
                 category.reason()
