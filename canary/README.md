@@ -29,6 +29,9 @@ for read/write/edit, shell, file discovery, a subagent, and a search MCP round-t
 against local fixtures. Failure of this `native-configuration` check fails
 conformance in daily and release cells. Published assets acquire this check only
 when they include the updated canary binary; daily never substitutes a source build.
+Windows MiMo marker commands use the required Python runtime, preserving exact
+file contents under its native PowerShell frontend without depending on Git's
+optional `printf.exe`. This fixture change also requires updated canary assets.
 
 Hermes resolution binds the official release tag to an immutable commit. Older
 date-tagged releases use their `pyproject.toml` product version; current releases

@@ -135,6 +135,22 @@ class WindowsDiagnosticWorkflowTests(unittest.TestCase):
         self.assertIn("$totalMilliseconds", WORKFLOW)
         self.assertIn("home\\.npm-global", WORKFLOW)
         self.assertIn("--blocked-reason unsafe_prerequisite", WORKFLOW)
+
+    def test_mimo_portability_regression_is_source_only_and_precedes_the_native_batch(self):
+        step = WORKFLOW.split('      - name: Verify MiMo marker writes without optional Git utilities\n', 1)[1].split('\n      - name:', 1)[0]
+        self.assertIn("inputs.mode == 'deterministic'", step)
+        self.assertIn("inputs.harnesses == 'mimo-code'", step)
+        self.assertIn("inputs.release_tag == ''", step)
+        self.assertIn('NAN_MIMO_MARKER_POWERSHELL', step)
+        self.assertIn('NAN_MIMO_MARKER_PYTHON', step)
+        self.assertIn('NAN_MIMO_MARKER_GIT_USR_BIN', step)
+        self.assertIn('native_windows_marker_command_preserves_contract_without_git -- --ignored --exact', step)
+        self.assertIn('if ($LASTEXITCODE -ne 0)', step)
+        self.assertNotIn('continue-on-error:', step)
+        self.assertNotIn('NAN_API_KEY', step)
+        self.assertNotIn('secrets.', step)
+        self.assertLess(WORKFLOW.index('Verify MiMo marker writes without optional Git utilities'),
+                        WORKFLOW.index('Run one isolated Windows diagnostic batch'))
         self.assertIn("Copy-Item -LiteralPath $artifactSummary", WORKFLOW)
         for setup in ("NAN_DIAGNOSTIC_SETUP_IDENTITY", "NAN_DIAGNOSTIC_SETUP_NODE", "NAN_DIAGNOSTIC_SETUP_FIXTURES"):
             self.assertIn(setup, WORKFLOW)

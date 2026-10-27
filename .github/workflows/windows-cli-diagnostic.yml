@@ -307,6 +307,18 @@ jobs:
           "NAN_DIAGNOSTIC_HARNESS_FIXTURE=$env:GITHUB_WORKSPACE\target\x86_64-pc-windows-msvc\release\codex-harness-fixture.exe" >> $env:GITHUB_ENV
           if ($cliCode -ne 0 -or $canaryCode -ne 0 -or $fixtureCode -ne 0) { exit 1 }
 
+      - name: Verify MiMo marker writes without optional Git utilities
+        if: always() && inputs.mode == 'deterministic' && inputs.harnesses == 'mimo-code' && inputs.release_tag == ''
+        run: |
+          if ('${{ steps.source.outcome }}' -ne 'success' -or '${{ steps.build.outcome }}' -ne 'success') { throw 'marker regression requires the selected source build' }
+          $env:NAN_MIMO_MARKER_POWERSHELL = (Get-Command pwsh -ErrorAction Stop).Source
+          $env:NAN_MIMO_MARKER_PYTHON = (Get-Command python -ErrorAction Stop).Source
+          $gitUtilities = Join-Path $env:ProgramFiles 'Git\usr\bin'
+          if (-not (Test-Path (Join-Path $gitUtilities 'printf.exe'))) { throw 'hosted Git comparison utility is unavailable' }
+          $env:NAN_MIMO_MARKER_GIT_USR_BIN = $gitUtilities
+          cargo test --locked -p nan-harness-test-support --lib conformance::mimo::marker_command_tests::native_windows_marker_command_preserves_contract_without_git -- --ignored --exact
+          if ($LASTEXITCODE -ne 0) { throw 'MiMo marker portability regression failed' }
+
       - name: Stage exact attested release diagnostic assets
         id: release_assets
         if: always() && env.NAN_DIAGNOSTIC_RELEASE_REQUIRED == '1'

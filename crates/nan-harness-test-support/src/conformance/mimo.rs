@@ -16,6 +16,18 @@ use std::time::Instant;
 const CHECK_NAME: &str = "native-configuration";
 const ROTATED_CREDENTIAL: &str = "nan-harness-conformance-rotated-credential";
 
+pub(super) fn marker_write_command(file: &str, marker: &str) -> String {
+    if cfg!(windows) {
+        // MiMo 0.1.16 selects PowerShell on Windows. Python is already a required
+        // hosted prerequisite; do not depend on Git's optional printf.exe on PATH.
+        format!(
+            "python -c \"from pathlib import Path; Path('{file}').write_text('{marker}', encoding='utf-8')\""
+        )
+    } else {
+        format!("printf {marker} > {file}")
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum NativeMcpRoute {
     Direct,
@@ -302,7 +314,7 @@ fn native_calls(root: &Path, route: NativeMcpRoute) -> Vec<ScriptedToolCall> {
         ),
         call(
             "bash",
-            json!({"command": "printf MIMO_BASH_OK > bash-output.txt", "description": "Write a conformance marker"}),
+            json!({"command": marker_write_command("bash-output.txt", "MIMO_BASH_OK"), "description": "Write a conformance marker"}),
         ),
         call("glob", json!({"pattern": "*.txt", "path": root})),
         call(
@@ -352,6 +364,9 @@ fn read_json(path: &Path) -> Result<Value, ()> {
 fn require(condition: bool) -> Result<(), ()> {
     condition.then_some(()).ok_or(())
 }
+
+#[cfg(test)]
+mod marker_command_tests;
 
 #[cfg(test)]
 mod tests {
