@@ -14,11 +14,38 @@ int main(int argc, char** argv) {
         std::string request_line;
         if (!std::getline(std::cin, request_line)) return 2;
         const bool timeout = request_line == "timeout";
+        const auto rejection_index = request_line.rfind("input-rejection ",0) == 0
+            ? request_line.substr(16) : "";
         std::fill(request_line.begin(), request_line.end(), '\0');
         if (timeout) {
             progress(NativeProgress::Window);
             progress(NativeProgress::Tree);
             std::this_thread::sleep_for(std::chrono::seconds(2));
+            return 0;
+        }
+        if (!rejection_index.empty()) {
+            InputValueRejection rejected;
+            PrivateInputValue value;
+            const char* failure = nullptr;
+            if (rejection_index == "0") {
+                noted(false,"target-geometry",&failure);
+                rejected = {"paste-focus-before",failure,"unmeasured"};
+            } else if (rejection_index == "1") {
+                assert(!private_input_value(kCFBooleanTrue,value.value,&failure));
+                rejected = {"paste-value",failure,"unmeasured"};
+            } else if (rejection_index == "2") {
+                rejected = {"paste-focus-after",window_input_cause({"geometry"}),input_relation("prompt","prompt","")};
+            } else if (rejection_index == "3") {
+                assert(related_paste_value("foreign","prompt","",rejected)==PastedValue::Rejected);
+            } else if (rejection_index == "4") {
+                assert(std::string(input_readback_failure(true,false))=="input-value-mismatch");
+                rejected = {"readback-value","value-other","other"};
+            } else return 3;
+            progress(NativeProgress::Window);
+            progress(rejection_index == "4" ? NativeProgress::ReadbackCopy : NativeProgress::PastedValue);
+            progress(NativeProgress::Finish);
+            std::cout << "turn input-value-mismatch\ncomposer 1 1 0\n";
+            write_input_rejection(std::cout,rejected);
             return 0;
         }
         for (unsigned site = 0; site < 16; ++site) progress(static_cast<NativeProgress>(site));
@@ -235,11 +262,16 @@ int main(int argc, char** argv) {
     focus_request.pid = 7;
     focus_request.bounds = CGRectMake(0, 0, 100, 100);
     FocusIdentity focused{focus_control.element, 7, "AXTextArea", focus_control.bounds};
+    const char* focus_diagnostic = nullptr;
+    assert(composer_focus_identity(focused,focus_control,focus_request,true,false,&focus_diagnostic)==ComposerFocus::Focused);
+    assert(focus_diagnostic==nullptr);
     assert(composer_focus_identity(focused, focus_control, focus_request, true, false) == ComposerFocus::Focused);
     auto previous = focused;
     previous.element = reinterpret_cast<AXUIElementRef>(CFSTR("previous-copy-control"));
     previous.role = "AXButton";
     previous.bounds = CGRectMake(60, 60, 10, 10);
+    assert(composer_focus_identity(previous,focus_control,focus_request,true,false,&focus_diagnostic)==ComposerFocus::PendingIdentity);
+    assert(focus_diagnostic==nullptr); // A valid foreign focused element remains passive pending.
     assert(composer_focus_identity(previous, focus_control, focus_request, true, false) == ComposerFocus::PendingIdentity);
     assert(composer_focus_identity(previous, focus_control, focus_request, false, false) == ComposerFocus::Rejected);
     assert(composer_focus_identity(previous, focus_control, focus_request, true, true) == ComposerFocus::Rejected);
@@ -259,6 +291,55 @@ int main(int argc, char** argv) {
     auto missing = previous;
     missing.element = nullptr;
     assert(composer_focus_identity(missing, focus_control, focus_request, true, false) == ComposerFocus::Rejected);
+    for (const auto& test : std::vector<std::pair<FocusIdentity,const char*>>{
+            {moved,"focused-geometry"}, {foreign,"focused-pid"}, {outside,"focused-geometry"}, {missing,"focused-element"}}) {
+        focus_diagnostic=nullptr;
+        assert(composer_focus_identity(test.first,focus_control,focus_request,true,false,&focus_diagnostic)==ComposerFocus::Rejected);
+        assert(std::string(focus_diagnostic)==test.second);
+    }
+    auto role_changed=focused; role_changed.role="AXButton";
+    focus_diagnostic=nullptr;
+    assert(composer_focus_identity(role_changed,focus_control,focus_request,true,false,&focus_diagnostic)==ComposerFocus::Rejected);
+    assert(std::string(focus_diagnostic)=="focused-role");
+    focus_diagnostic=nullptr;
+    assert(composer_focus_identity(focused,focus_control,focus_request,true,true,&focus_diagnostic)==ComposerFocus::Rejected);
+    assert(std::string(focus_diagnostic)=="query-failed");
+    for (const char* first : {"target-pid","target-bounds-unavailable","target-geometry","target-role",
+            "focused-bounds-unavailable","query-failed"}) {
+        focus_diagnostic=nullptr; unsigned skipped=0;
+        assert(!(noted(false,first,&focus_diagnostic) && (++skipped!=0)));
+        assert(skipped==0 && std::string(focus_diagnostic)==first);
+        assert(composer_focus_identity(focused,focus_control,focus_request,false,false,&focus_diagnostic)==ComposerFocus::Rejected);
+        assert(std::string(focus_diagnostic)==first); // Later classification cannot relabel the held first failure.
+    }
+    for (const char* window : {"foreground","application","focus","geometry","inventory","identity","layer","display","stack"})
+        assert(std::string(window_input_cause({window}))==std::string("window-")+window);
+    assert(std::string(window_input_cause({}))=="window-unmeasured");
+    assert(std::string(input_relation("prompt","prompt","prompt"))=="expected");
+    assert(std::string(input_relation("old","prompt","old"))=="initial");
+    assert(std::string(input_relation("pro","prompt",""))=="prefix");
+    assert(std::string(input_relation("other","prompt",""))=="other");
+    InputValueRejection paste_rejected;
+    assert(related_paste_value("pro","prompt","",paste_rejected)==PastedValue::Pending && paste_rejected.site==nullptr);
+    assert(related_paste_value("prompt","prompt","",paste_rejected)==PastedValue::Ready && paste_rejected.site==nullptr);
+    assert(related_paste_value("other","prompt","",paste_rejected)==PastedValue::Rejected);
+    assert(std::string(paste_rejected.site)=="paste-relation" && std::string(paste_rejected.cause)=="value-other");
+    for (const auto& test : std::vector<std::pair<CFTypeRef,const char*>>{{nullptr,"value-unavailable"},{kCFBooleanTrue,"value-type"}}) {
+        PrivateInputValue value; focus_diagnostic=nullptr;
+        assert(!private_input_value(test.first,value.value,&focus_diagnostic));
+        assert(std::string(focus_diagnostic)==test.second);
+    }
+    const std::string oversized(1025,'x');
+    auto large=CFStringCreateWithCString(nullptr,oversized.c_str(),kCFStringEncodingUTF8);
+    PrivateInputValue bounded; focus_diagnostic=nullptr;
+    assert(!private_input_value(large,bounded.value,&focus_diagnostic) && std::string(focus_diagnostic)=="value-size");
+    CFRelease(large);
+    const UniChar invalid_utf16[] = {0xd800};
+    auto unencodable=CFStringCreateWithCharacters(nullptr,invalid_utf16,1);
+    focus_diagnostic=nullptr;
+    assert(!private_input_value(unencodable,bounded.value,&focus_diagnostic));
+    assert(std::string(focus_diagnostic)=="value-encoding");
+    CFRelease(unencodable);
     unsigned queries = 0, pauses = 0, keys = 0;
     assert(!settle_composer_focus([&] { ++queries; return ComposerFocus::Focused; },
         [] { return false; }, [&] { ++pauses; }));

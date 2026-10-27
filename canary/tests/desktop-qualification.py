@@ -182,6 +182,80 @@ class ClaudeNativeEvidenceTests(unittest.TestCase):
         self.assertEqual(value['submittedTurns'], 2)
         self.assertFalse(value['retryAttempted'])
 
+    def test_actual_mac_input_rejection_fixtures_survive_the_final_python_projection(self):
+        records = json.loads((ROOT / 'canary/tests/fixtures/claude-macos-input-value-rejections.json').read_text())
+        self.assertEqual(len(records), 5)
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'facts.json'
+            for record in records:
+                with self.subTest(site=record['inputValueRejection']['site']):
+                    path.write_text(json.dumps(record))
+                    self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [record])
+                    self.assertEqual(record['nativeStage'], 'input-value-mismatch')
+                    self.assertEqual(record['submittedTurns'], 0)
+                    self.assertFalse(record['retryAttempted'])
+
+    def test_mac_work_progress_retains_the_last_nonfinal_boundary(self):
+        base = self.mac_timeout() | dict(nativeProgress='finish', transportStarted=True, transportBudgetMs=1000)
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'facts.json'
+            for progress in q.CLAUDE_MAC_PROGRESS - {'finish'}:
+                value = base | {'nativeWorkProgress': progress}
+                path.write_text(json.dumps(value))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [value])
+            for change in ({'nativeWorkProgress': 'finish'}, {'nativeWorkProgress': None},
+                           {'nativeWorkProgress': {'tree': None}}, {'nativeWorkProgress': 'PRIVATE'},
+                           {'transportStarted': False}):
+                path.write_text(json.dumps(value | change))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+
+    def test_mac_input_rejection_binds_closed_existing_read_observations(self):
+        focus_causes = 'deadline query-failed application focused-element target-pid target-bounds-unavailable target-geometry target-role focused-pid focused-bounds-unavailable focused-geometry focused-role focused-identity window-unmeasured window-foreground window-application window-focus window-geometry window-inventory window-identity window-layer window-display window-stack'.split()
+        value_causes = ['query-failed', 'value-unavailable', 'value-type', 'value-size', 'value-encoding']
+        observations = [dict(site='paste-focus-before', cause=cause, valueRelation='unmeasured')
+                        for cause in focus_causes]
+        observations += [dict(site='paste-focus-after', cause=cause, valueRelation=relation)
+                         for cause in focus_causes
+                         for relation in ('unmeasured', 'expected', 'initial', 'prefix', 'other')]
+        observations += [dict(site=site, cause=cause, valueRelation='unmeasured')
+                         for site in ('paste-value', 'readback-value') for cause in value_causes]
+        observations += [dict(site=site, cause='value-other', valueRelation='other')
+                         for site in ('paste-relation', 'readback-value')]
+        base = self.mac_timeout() | dict(stage='input-value-mismatch', actionPhase='completed',
+            transportFailure=None, nativeStage='input-value-mismatch', nativeProgress='finish',
+            nativeWorkProgress='pasted-value', transportStarted=True, transportBudgetMs=1000)
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'facts.json'
+            for observation in observations:
+                value = base | {'inputValueRejection': observation}
+                path.write_text(json.dumps(value))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [value])
+            for field in ('site', 'cause', 'valueRelation'):
+                for invalid in (None, 1, {}, {'other': None}, 'PRIVATE'):
+                    observation = observations[-1] | {field: invalid}
+                    path.write_text(json.dumps(base | {'inputValueRejection': observation}))
+                    with self.assertRaises(ValueError):
+                        q.semantic_observations(root, 'claude-desktop')
+            for observation in (None, [], {}, observations[-1] | {'rawValue': 'PRIVATE'},
+                                dict(site='paste-focus-before', cause='target-geometry', valueRelation='expected'),
+                                dict(site='paste-value', cause='value-other', valueRelation='other'),
+                                dict(site='paste-relation', cause='value-other', valueRelation='prefix'),
+                                dict(site='readback-value', cause='value-other', valueRelation='expected')):
+                path.write_text(json.dumps(base | {'inputValueRejection': observation}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+            value = base | {'inputValueRejection': observations[-1]}
+            for context in ({'stage': 'completed'}, {'nativeStage': 'sent'}, {'transportStarted': False},
+                            {'copiedResponses': 1}, {'submittedTurns': 3}, {'retryAttempted': True},
+                            {'mechanism': 'claude-windows-native-chat'}):
+                path.write_text(json.dumps(value | context))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+            post_guard = value | dict(stage='action-uncertain', actionPhase='post-guard', transportFailure='timeout')
+            path.write_text(json.dumps(post_guard))
+            self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [post_guard])
+
     def test_copy_stability_diagnostic_is_closed_and_requires_a_changed_component(self):
         keys = ('roleSame', 'nameSame', 'descriptionSame', 'xSame', 'ySame', 'widthSame', 'heightSame')
         base = dict(schemaVersion=1, mechanism='claude-linux-native-chat', diagnosticsOnly=True,

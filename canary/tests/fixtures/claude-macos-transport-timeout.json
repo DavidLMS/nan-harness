@@ -6,6 +6,7 @@
   "inputVerifiedTurns": 2,
   "mechanism": "claude-native-chat",
   "nativeProgress": "tree",
+  "nativeWorkProgress": "tree",
   "providerObservation": null,
   "retryAttempted": false,
   "schemaVersion": 1,

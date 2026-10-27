@@ -2,6 +2,8 @@
 use super::Window;
 use std::fmt::Write as _;
 use zeroize::Zeroizing;
+mod input_value;
+pub(crate) use input_value::InputValueRejection;
 
 pub(crate) const CHAT_TURN_MAX_MILLIS: u32 = 15_000;
 
@@ -54,6 +56,7 @@ impl NativeProgress {
 #[cfg(any(target_os = "macos", all(test, unix)))]
 pub(crate) struct TransportObservation {
     pub(crate) progress: Option<NativeProgress>,
+    pub(crate) work: Option<NativeProgress>,
     pub(crate) started: bool,
     pub(crate) budget_ms: Option<u32>,
 }
@@ -409,6 +412,7 @@ pub(crate) struct ChatTurnReceipt {
     pub(crate) scope_shape: Option<FailureScopeShape>,
     pub(crate) composer_shape: Option<ComposerShape>,
     pub(crate) window_guard: Option<WindowGuardObservation>,
+    pub(crate) input_value_rejection: Option<InputValueRejection>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -530,28 +534,26 @@ impl ChatTurnReceipt {
             return None;
         }
         let (output, window_guard) = WindowGuardObservation::split(output, mode)?;
-        let (first, remainder) = output.split_once('\n')?;
-        let stage = ChatTurnStage::parse(&format!("{first}\n"))?;
+        let stage = ChatTurnStage::parse(&format!("{}\n", output.split_once('\n')?.0))?;
+        let (output, input_value_rejection) = InputValueRejection::split(output, mode, stage)?;
+        let (_, remainder) = output.split_once('\n')?;
+        let mut receipt = Self {
+            stage,
+            row_shape: None,
+            scope_shape: None,
+            composer_shape: None,
+            window_guard,
+            input_value_rejection,
+        };
         if remainder.is_empty() {
-            return Some(Self {
-                stage,
-                row_shape: None,
-                scope_shape: None,
-                composer_shape: None,
-                window_guard,
-            });
+            return Some(receipt);
         }
         if matches!(
             mode,
             "input" | "input-replace-owned" | "input-failure-owned"
         ) {
-            return Some(Self {
-                stage,
-                row_shape: None,
-                scope_shape: None,
-                composer_shape: Some(ComposerShape::parse(remainder.strip_suffix('\n')?)?),
-                window_guard,
-            });
+            receipt.composer_shape = Some(ComposerShape::parse(remainder.strip_suffix('\n')?)?);
+            return Some(receipt);
         }
         if !matches!(
             mode,
@@ -596,33 +598,29 @@ impl ChatTurnReceipt {
         {
             return None;
         }
-        Some(Self {
-            stage,
-            scope_shape,
-            composer_shape: None,
-            window_guard,
-            row_shape: Some(FailureRowShape {
-                source_version: "2.19675.0",
-                source_sha256: "87e6b710a540352fcd4f9a1f0f6a8f9f9b6377ca676fd99c3e4d8bc87653dceb",
-                navigation_source_sha256: "948270963cdf93cc411d95393157f5c7e2c06f18916d8c4ea1971828fb0c677c",
-                phase: "pre-disclosure",
-                counts: FailureRowCounts {
-                    source_rows: values[0],
-                    streaming_rows: values[1],
-                    exact_user_headings: values[2],
-                    exact_prompt_nodes: values[3],
-                    server_error_labels: values[4],
-                    retry_controls: values[5],
-                    details_controls: values[6],
-                    user_rows: values[7],
-                    error_rows: values[8],
-                    shared_parent_pairs: values[9],
-                    adjacent_pairs: values[10],
-                    assistant_headings_in_error_rows: values[11],
-                    duplicate_positions: values[12],
-                },
-            }),
-        })
+        receipt.scope_shape = scope_shape;
+        receipt.row_shape = Some(FailureRowShape {
+            source_version: "2.19675.0",
+            source_sha256: "87e6b710a540352fcd4f9a1f0f6a8f9f9b6377ca676fd99c3e4d8bc87653dceb",
+            navigation_source_sha256: "948270963cdf93cc411d95393157f5c7e2c06f18916d8c4ea1971828fb0c677c",
+            phase: "pre-disclosure",
+            counts: FailureRowCounts {
+                source_rows: values[0],
+                streaming_rows: values[1],
+                exact_user_headings: values[2],
+                exact_prompt_nodes: values[3],
+                server_error_labels: values[4],
+                retry_controls: values[5],
+                details_controls: values[6],
+                user_rows: values[7],
+                error_rows: values[8],
+                shared_parent_pairs: values[9],
+                adjacent_pairs: values[10],
+                assistant_headings_in_error_rows: values[11],
+                duplicate_positions: values[12],
+            },
+        });
+        Some(receipt)
     }
 }
 fn hex(value: &str) -> Zeroizing<String> {

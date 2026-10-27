@@ -12,7 +12,7 @@ use zeroize::Zeroizing;
 
 fn read_result(
     output: impl std::io::Read,
-    latest: &Mutex<Option<NativeProgress>>,
+    latest: &Mutex<(Option<NativeProgress>, Option<NativeProgress>)>,
 ) -> Result<Zeroizing<String>, FailureCategory> {
     // Progress has at most sixteen fixed frames. Keep the original receipt cap
     // separately; no unbounded private output or diagnostic text is retained.
@@ -36,7 +36,11 @@ fn read_result(
                 return Err(FailureCategory::Output);
             }
             previous = Some(stage as u8);
-            *latest.lock().map_err(|_| FailureCategory::Output)? = Some(stage);
+            let mut observed = latest.lock().map_err(|_| FailureCategory::Output)?;
+            observed.0 = Some(stage);
+            if stage != NativeProgress::Finish {
+                observed.1 = Some(stage);
+            }
         } else {
             receipt.extend_from_slice(&line);
             if receipt.len() as u64 > MAX_OUTPUT {
@@ -74,7 +78,7 @@ pub(super) fn run(
     observation.started = true;
     let stdin = child.stdin.take().ok_or(FailureCategory::Pipe)?;
     let stdout = child.stdout.take().ok_or(FailureCategory::Pipe)?;
-    let latest = Arc::new(Mutex::new(None));
+    let latest = Arc::new(Mutex::new((None, None)));
     std::thread::scope(|scope| {
         let writer = scope.spawn(move || write_input(stdin, None, input));
         let reader_progress = Arc::clone(&latest);
@@ -98,7 +102,10 @@ pub(super) fn run(
         }
         let written = writer.join();
         let output = reader.join();
-        observation.progress = latest.lock().ok().and_then(|value| *value);
+        if let Ok(value) = latest.lock() {
+            observation.progress = value.0;
+            observation.work = value.1;
+        }
         let written = written.map_err(|_| FailureCategory::Pipe)?;
         let output = output.map_err(|_| FailureCategory::Pipe)?;
         // Even a complete Sent receipt observed during teardown cannot change
@@ -145,10 +152,13 @@ mod tests {
 
     #[test]
     fn progress_is_closed_ordered_bounded_and_separate_from_the_receipt() {
-        let latest = Mutex::new(None);
+        let latest = Mutex::new((None, None));
         let raw = b"progress window\nprogress tree\nprogress finish\nturn sent\ncomposer 1 0 1\n";
         let output = read_result(&raw[..], &latest).unwrap();
-        assert_eq!(*latest.lock().unwrap(), Some(NativeProgress::Finish));
+        assert_eq!(
+            *latest.lock().unwrap(),
+            (Some(NativeProgress::Finish), Some(NativeProgress::Tree))
+        );
         assert!(ChatTurnReceipt::parse(&output, "input-failure-owned").is_some());
         for invalid in [
             b"progress tree\nprogress tree\n".to_vec(),
@@ -163,12 +173,15 @@ mod tests {
             ]
             .concat(),
         ] {
-            let latest = Mutex::new(None);
+            let latest = Mutex::new((None, None));
             assert_eq!(
                 read_result(invalid.as_slice(), &latest),
                 Err(FailureCategory::Output)
             );
-            assert_eq!(*latest.lock().unwrap(), Some(NativeProgress::Tree));
+            assert_eq!(
+                *latest.lock().unwrap(),
+                (Some(NativeProgress::Tree), Some(NativeProgress::Tree))
+            );
         }
         assert!(NativeProgress::parse(b"progress {\"tree\":null}\n").is_none());
         assert!(NativeProgress::parse(b"progress tree\r\n").is_none());
@@ -188,6 +201,11 @@ mod tests {
             assert_eq!(result, Err(FailureCategory::Timeout));
             assert_eq!(observation.budget_ms, Some(500));
             assert!(observation.started);
+            assert!(
+                observation
+                    .work
+                    .is_some_and(|stage| stage != NativeProgress::Finish)
+            );
             assert!(matches!(
                 observation.progress,
                 Some(NativeProgress::Tree | NativeProgress::Finish)

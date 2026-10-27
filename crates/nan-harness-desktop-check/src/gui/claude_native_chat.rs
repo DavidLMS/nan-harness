@@ -69,6 +69,10 @@ struct Facts {
     #[serde(skip_serializing_if = "Option::is_none")]
     native_progress: Option<crate::native::MacChatProgress>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    native_work_progress: Option<crate::native::MacChatProgress>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    input_value_rejection: Option<crate::native::InputValueRejection>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     transport_started: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     transport_budget_ms: Option<u32>,
@@ -96,6 +100,8 @@ impl Default for Facts {
             native_window_guard: None,
             native_stage: None,
             native_progress: None,
+            native_work_progress: None,
+            input_value_rejection: None,
             transport_started: None,
             transport_budget_ms: None,
             submitted_turns: 0,
@@ -114,6 +120,8 @@ impl Facts {
         self.native_window_guard = None;
         self.native_stage = None;
         self.native_progress = None;
+        self.native_work_progress = None;
+        self.input_value_rejection = None;
         self.transport_started = Some(false);
         self.transport_budget_ms = None;
         if input {
@@ -122,8 +130,26 @@ impl Facts {
     }
     fn observe_transport(&mut self, transport: crate::native::MacChatTransport) {
         self.native_progress = transport.progress;
+        self.native_work_progress = transport.work;
         self.transport_started = Some(transport.started);
         self.transport_budget_ms = transport.budget_ms;
+    }
+    fn observe_receipt(&mut self, receipt: crate::native::ChatTurnReceipt) {
+        self.stage = receipt.stage;
+        // These final native facts survive an independent post-guard failure;
+        // they never substitute for that guard or an action receipt on timeout.
+        self.native_stage = Some(receipt.stage);
+        self.input_value_rejection = receipt.input_value_rejection;
+        if let Some(shape) = receipt.row_shape {
+            self.row_shape = Some(shape);
+        }
+        if let Some(shape) = receipt.scope_shape {
+            self.scope_shape = Some(shape);
+        }
+        if let Some(shape) = receipt.composer_shape {
+            self.composer_shape = Some(shape);
+        }
+        self.native_window_guard = receipt.window_guard;
     }
 }
 struct SubmittedFailureTurn {
@@ -236,20 +262,7 @@ impl ClaudeNativeChatSession<'_> {
         self.facts.observe_transport(transport);
         let receipt = result?;
         let stage = receipt.stage;
-        self.facts.stage = stage;
-        // Retain bounded native facts even if the independent post-guard fails.
-        // These observations never turn an uncertain action into a success.
-        self.facts.native_stage = Some(stage);
-        if let Some(shape) = receipt.row_shape {
-            self.facts.row_shape = Some(shape);
-        }
-        if let Some(shape) = receipt.scope_shape {
-            self.facts.scope_shape = Some(shape);
-        }
-        if let Some(shape) = receipt.composer_shape {
-            self.facts.composer_shape = Some(shape);
-        }
-        self.facts.native_window_guard = receipt.window_guard;
+        self.facts.observe_receipt(receipt);
         self.facts.action_phase = Some(ChatActionPhase::PostGuard);
         self.gui
             .visual
@@ -518,6 +531,70 @@ impl ClaudeNativeChatSession<'_> {
 mod tests {
     use super::*;
     #[test]
+    fn actual_native_input_rejections_retain_closed_sites_without_advancing_turns() {
+        let sites = [
+            "paste-focus-before",
+            "paste-value",
+            "paste-focus-after",
+            "paste-relation",
+            "readback-value",
+        ];
+        let mut produced = Vec::new();
+        for (index, site) in sites.into_iter().enumerate() {
+            let (result, transport) =
+                crate::native::mac_chat_input_value_fixture(u8::try_from(index).unwrap());
+            let mut facts = Facts::default();
+            facts.begin_action(true);
+            facts.observe_transport(transport);
+            facts.observe_receipt(result.unwrap());
+            facts.action_phase = Some(ChatActionPhase::Completed);
+            let value = serde_json::to_value(&facts).unwrap();
+            assert_eq!(value["inputValueRejection"]["site"], site);
+            assert_eq!(value["nativeStage"], "input-value-mismatch");
+            assert_eq!(value["nativeProgress"], "finish");
+            assert_eq!(
+                value["nativeWorkProgress"],
+                if index == 4 {
+                    "readback-copy"
+                } else {
+                    "pasted-value"
+                }
+            );
+            assert_eq!(value["transportStarted"], true);
+            assert_eq!(value["transportBudgetMs"], 5000);
+            for count in ["submittedTurns", "inputVerifiedTurns", "copiedResponses"] {
+                assert_eq!(value[count], 0);
+            }
+            assert_eq!(value["retryAttempted"], false);
+            produced.push(value);
+            facts.stage = ChatTurnStage::ActionUncertain;
+            facts.action_phase = Some(ChatActionPhase::PostGuard);
+            facts.transport_failure = Some("timeout");
+            assert!(
+                serde_json::to_value(&facts)
+                    .unwrap()
+                    .get("inputValueRejection")
+                    .is_some()
+            );
+            facts.begin_action(true);
+            let reset = serde_json::to_value(&facts).unwrap();
+            for absent in ["nativeWorkProgress", "inputValueRejection", "nativeStage"] {
+                assert!(reset.get(absent).is_none());
+            }
+        }
+        let expected: Vec<serde_json::Value> = serde_json::from_str(include_str!(
+            "../../../../canary/tests/fixtures/claude-macos-input-value-rejections.json"
+        ))
+        .unwrap();
+        assert_eq!(produced, expected);
+        if let Some(path) = std::env::var_os("NANH_MAC_INPUT_VALUE_FIXTURE") {
+            open_private_new(Path::new(&path))
+                .unwrap()
+                .write_all(&serde_json::to_vec(&produced).unwrap())
+                .unwrap();
+        }
+    }
+    #[test]
     fn actual_native_progress_survives_transport_timeout_in_closed_facts() {
         let (result, observed) = crate::native::mac_chat_progress_fixture();
         assert_eq!(result, Err(crate::native::FailureCategory::Timeout));
@@ -535,6 +612,7 @@ mod tests {
         let bytes = serde_json::to_vec(&facts).unwrap();
         let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(value["nativeProgress"], "tree");
+        assert_eq!(value["nativeWorkProgress"], "tree");
         assert_eq!(value["transportStarted"], true);
         assert_eq!(value["transportBudgetMs"], 500);
         assert!(value.get("nativeStage").is_none());
@@ -559,6 +637,7 @@ mod tests {
         let mut facts = Facts {
             native_stage: Some(ChatTurnStage::Sent),
             native_progress: Some(crate::native::MacChatProgress::Finish),
+            native_work_progress: Some(crate::native::MacChatProgress::Press),
             transport_started: Some(true),
             transport_budget_ms: Some(1000),
             submitted_turns: 2,
@@ -580,6 +659,7 @@ mod tests {
         }
         facts.observe_transport(crate::native::MacChatTransport {
             progress: Some(crate::native::MacChatProgress::ReadbackCopy),
+            work: Some(crate::native::MacChatProgress::ReadbackCopy),
             started: true,
             budget_ms: Some(1234),
         });
@@ -588,6 +668,7 @@ mod tests {
         facts.transport_failure = Some("timeout");
         let value = serde_json::to_value(&facts).unwrap();
         assert_eq!(value["nativeProgress"], "readback-copy");
+        assert_eq!(value["nativeWorkProgress"], "readback-copy");
         assert_eq!(value["transportStarted"], true);
         assert_eq!(value["transportBudgetMs"], 1234);
         assert!(value.get("nativeStage").is_none());
