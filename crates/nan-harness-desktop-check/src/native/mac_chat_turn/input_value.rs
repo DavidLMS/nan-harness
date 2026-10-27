@@ -114,11 +114,58 @@ impl Relation {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+struct QueryFailure {
+    site: &'static str,
+    error: &'static str,
+}
+impl QueryFailure {
+    fn parse(site: &str, error: &str) -> Option<Self> {
+        fn label(value: &str, allowed: &[&'static str]) -> Option<&'static str> {
+            allowed.iter().copied().find(|allowed| *allowed == value)
+        }
+        Some(Self {
+            site: label(
+                site,
+                &[
+                    "prior-query",
+                    "app-timeout",
+                    "focused-element",
+                    "target-pid",
+                    "target-position",
+                    "target-size",
+                    "target-role",
+                    "focused-pid",
+                    "focused-position",
+                    "focused-size",
+                    "focused-role",
+                ],
+            )?,
+            error: label(
+                error,
+                &[
+                    "failure",
+                    "illegal-argument",
+                    "invalid-element",
+                    "cannot-complete",
+                    "attribute-unsupported",
+                    "not-implemented",
+                    "api-disabled",
+                    "no-value",
+                    "other",
+                ],
+            )?,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct InputValueRejection {
     site: Site,
     cause: Cause,
     value_relation: Relation,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    query_failure: Option<QueryFailure>,
 }
 impl InputValueRejection {
     pub(super) fn parse(line: &str) -> Option<Self> {
@@ -126,13 +173,18 @@ impl InputValueRejection {
             .strip_prefix("input-value-rejection ")?
             .split(' ')
             .collect();
-        if fields.len() != 3 {
+        if !matches!(fields.len(), 3 | 5) {
             return None;
         }
         let value = Self {
             site: Site::parse(fields[0])?,
             cause: Cause::parse(fields[1])?,
             value_relation: Relation::parse(fields[2])?,
+            query_failure: if fields.len() == 5 {
+                Some(QueryFailure::parse(fields[3], fields[4])?)
+            } else {
+                None
+            },
         };
         value.valid().then_some(value)
     }
@@ -140,6 +192,12 @@ impl InputValueRejection {
         use Cause as C;
         use Relation as R;
         use Site as S;
+        if self.query_failure.is_some()
+            && !(self.cause == C::QueryFailed
+                && matches!(self.site, S::PasteFocusBefore | S::PasteFocusAfter))
+        {
+            return false;
+        }
         let format = matches!(
             self.cause,
             C::QueryFailed | C::ValueUnavailable | C::ValueType | C::ValueSize | C::ValueEncoding
@@ -265,6 +323,66 @@ mod tests {
                 .is_some()
             );
         }
+    }
+    #[test]
+    fn query_failure_is_closed_and_requires_a_focus_query_rejection() {
+        for site in [
+            "prior-query",
+            "app-timeout",
+            "focused-element",
+            "target-pid",
+            "target-position",
+            "target-size",
+            "target-role",
+            "focused-pid",
+            "focused-position",
+            "focused-size",
+            "focused-role",
+        ] {
+            for error in [
+                "failure",
+                "illegal-argument",
+                "invalid-element",
+                "cannot-complete",
+                "attribute-unsupported",
+                "not-implemented",
+                "api-disabled",
+                "no-value",
+                "other",
+            ] {
+                let raw = format!(
+                    "turn input-value-mismatch\ncomposer 1 1 0\ninput-value-rejection paste-focus-before query-failed unmeasured {site} {error}\n"
+                );
+                let receipt = ChatTurnReceipt::parse(&raw, "input").unwrap();
+                let value = serde_json::to_value(receipt.input_value_rejection.unwrap()).unwrap();
+                assert_eq!(
+                    value["queryFailure"],
+                    serde_json::json!({"site": site, "error": error})
+                );
+                assert_eq!(value.as_object().unwrap().len(), 4);
+            }
+        }
+        for bad in [
+            "paste-value query-failed unmeasured target-size cannot-complete",
+            "readback-value query-failed unmeasured target-size cannot-complete",
+            "paste-focus-before target-geometry unmeasured target-size cannot-complete",
+            "paste-focus-before query-failed unmeasured PRIVATE cannot-complete",
+            "paste-focus-before query-failed unmeasured target-size PRIVATE",
+            "paste-focus-before query-failed unmeasured null cannot-complete",
+            "paste-focus-before query-failed unmeasured target-size null",
+            "paste-focus-before query-failed unmeasured {\"target-size\":null} cannot-complete",
+            "paste-focus-before query-failed unmeasured target-size {\"cannot-complete\":null}",
+            "paste-focus-before query-failed unmeasured target-size",
+            "paste-focus-before query-failed unmeasured target-size cannot-complete PRIVATE",
+        ] {
+            assert!(InputValueRejection::parse(&format!("input-value-rejection {bad}")).is_none());
+        }
+        let after = InputValueRejection::parse("input-value-rejection paste-focus-after query-failed expected focused-element cannot-complete").unwrap();
+        assert!(
+            serde_json::to_string(&after)
+                .unwrap()
+                .contains("queryFailure")
+        );
     }
     #[test]
     fn malformed_input_rejections_and_extra_receipt_data_are_rejected() {

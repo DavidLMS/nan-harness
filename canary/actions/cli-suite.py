@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from selection import CLI_HARNESSES, SYSTEMS, identity, resolve_model
-from cell import SEMVER, source_identity
+from cell import SEMVER, source_identity, MIMO_SESSION_DETAIL
 
 
 @dataclass(frozen=True)
@@ -462,6 +462,26 @@ def read_unresolved_manifest(path, harnesses, system, architecture, model):
     return _load_manifest(path, harnesses, system, architecture, model)[1]
 
 
+def emit_mimo_session_warning(path):
+    """Forward only the fixed advisory; private cell stdout stays discarded."""
+    try:
+        with path.open('rb') as source:
+            raw = source.read(1048577)
+        if len(raw) > 1048576:
+            return
+        value = json.loads(raw)
+        if (type(value) is dict and value.get('outcome') == 'passed'
+                and value.get('harness') == {'id': 'mimo-code', 'version': '0.1.16'}
+                and type(value.get('checks')) is list
+                and any(type(check) is dict and check.get('name') == 'live-tool'
+                        and check.get('status') == 'passed' and check.get('detail') == MIMO_SESSION_DETAIL
+                        for check in value['checks'])):
+            print('::warning::' + MIMO_SESSION_DETAIL)
+    except (OSError, ValueError, RecursionError):
+        # Advisory projection cannot change the already validated cell's verdict.
+        pass
+
+
 def resolve_main(argv):
     parser = argparse.ArgumentParser(description="Resolve official CLI versions")
     parser.add_argument("--harnesses", required=True)
@@ -566,6 +586,9 @@ def main():
                                                      if item.harness == harness))
                 failures.append(harness)
                 break
+        else:
+            if harness == 'mimo-code' and args.mode == 'live':
+                emit_mimo_session_warning(report)
     if failures:
         print("One or more hosted CLI cells failed; sanitized reports were retained.", file=sys.stderr)
         return 1

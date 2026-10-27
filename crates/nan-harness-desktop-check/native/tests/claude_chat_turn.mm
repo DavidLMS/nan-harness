@@ -2,6 +2,23 @@
 #include "../claude_chat_turn.cpp"
 #include <cassert>
 bool claude_owned_mac_window(std::uint64_t, pid_t, CGRect) { return false; }
+static MacWindowObservation press_window_observation;
+static bool press_window_result = false;
+static unsigned press_window_queries = 0;
+static std::uint64_t* press_expire_cutoff = nullptr;
+bool claude_owned_mac_window_observed(std::uint64_t, pid_t, CGRect, MacWindowObservation* observation) {
+    ++press_window_queries;
+    if (observation) *observation = press_window_observation;
+    if (press_expire_cutoff) *press_expire_cutoff = 0;
+    return press_window_result;
+}
+static void ready_press_request(Request& value) {
+    value.mode = "input-failure-owned";
+    value.owner = static_cast<unsigned>(getppid());
+    value.deadline = Clock::now() + std::chrono::seconds(5);
+    timespec ticks{}; assert(clock_gettime(CLOCK_MONOTONIC,&ticks) == 0);
+    value.cutoff = static_cast<std::uint64_t>(ticks.tv_sec)*1000 + static_cast<std::uint64_t>(ticks.tv_nsec)/1000000 + 5000;
+}
 MacOwnedWindowState claude_mac_window_state(std::uint64_t, pid_t, CGRect) { return MacOwnedWindowState::Rejected; }
 MacWindowObservation claude_mac_window_observation() { return {}; }
 static Node fixture(int parent, const char* role, const char* label, const char* current = "") {
@@ -16,6 +33,7 @@ int main(int argc, char** argv) {
         const bool timeout = request_line == "timeout";
         const auto rejection_index = request_line.rfind("input-rejection ",0) == 0
             ? request_line.substr(16) : "";
+        const auto press_index = request_line.rfind("press-rejection ",0) == 0 ? request_line.substr(16) : "";
         const auto completion_index = request_line.rfind("completion ",0) == 0 ? request_line.substr(11) : "";
         std::fill(request_line.begin(), request_line.end(), '\0');
         if (timeout) {
@@ -40,6 +58,26 @@ int main(int argc, char** argv) {
             std::this_thread::sleep_for(std::chrono::seconds(2));
             return 0;
         }
+        if (!press_index.empty()) {
+            if (press_index.size()!=1 || press_index[0]<'0' || press_index[0]>'5') return 3;
+            Request pressed; ready_press_request(pressed);
+            press_window_result = press_index != "3" && press_index != "4";
+            press_window_observation = press_index == "3"
+                ? MacWindowObservation{"focus","query-error","focused-window","cannot-complete"}
+                : MacWindowObservation{"geometry","ready","unqueried","unqueried"};
+            if (press_index == "1") pressed.cutoff = 0;
+            if (press_index == "2") press_expire_cutoff = &pressed.cutoff;
+            const auto error = press_index == "0" ? kAXErrorActionUnsupported
+                : press_index == "5" ? kAXErrorCannotComplete : kAXErrorSuccess;
+            unsigned dispatched = 0;
+            const char* result = dispatch_press_once(pressed,"sent",[&] { ++dispatched; return error; },
+                [&] { return owned_after_press(pressed); });
+            assert(dispatched == 1 && std::string(result) == "action-uncertain");
+            progress(NativeProgress::Window); progress(NativeProgress::Press); progress(NativeProgress::Finish);
+            std::cout << "turn action-uncertain\ncomposer 1 0 1\n";
+            write_press_rejection(std::cout,pressed.mode,pressed.press_rejection);
+            return 0;
+        }
         if (!rejection_index.empty()) {
             InputValueRejection rejected;
             PrivateInputValue value;
@@ -57,6 +95,11 @@ int main(int argc, char** argv) {
             } else if (rejection_index == "4") {
                 assert(std::string(input_readback_failure(true,false))=="input-value-mismatch");
                 rejected = {"readback-value","value-other","other"};
+            } else if (rejection_index == "5") {
+                FocusQuerySample query;
+                query.site = "target-size";
+                query.observe(kAXErrorInvalidUIElement);
+                rejected = {"paste-focus-before","query-failed","unmeasured",query.failure_site,input_ax_error(query.error)};
             } else return 3;
             progress(NativeProgress::Window);
             progress(rejection_index == "4" ? NativeProgress::ReadbackCopy : NativeProgress::PastedValue);
@@ -98,6 +141,36 @@ int main(int argc, char** argv) {
     assert(completion_remaining(cutoff_fixture)<=10);
     cutoff_fixture.millis=1;
     assert(completion_remaining(cutoff_fixture)<=1);
+    // One dispatch, no replay: actual press policy with injected return/guard results.
+    for (auto error : {kAXErrorActionUnsupported,kAXErrorCannotComplete,kAXErrorInvalidUIElement}) {
+        Request pressed; ready_press_request(pressed);
+        unsigned calls = 0, guards = 0;
+        assert(std::string(dispatch_press_once(pressed,"sent",[&] { ++calls; return error; },
+            [&] { ++guards; return true; })) == "action-uncertain");
+        assert(calls == 1 && guards == 0 && std::string(pressed.press_rejection.phase) == "perform-action");
+        assert(std::string(pressed.press_rejection.ax_error) == (error == kAXErrorActionUnsupported
+            ? "action-unsupported" : error == kAXErrorCannotComplete ? "cannot-complete" : "invalid-element"));
+    }
+    Request pressed; ready_press_request(pressed);
+    unsigned dispatches = 0;
+    press_window_result = true;
+    press_window_queries = 0;
+    assert(std::string(dispatch_press_once(pressed,"sent",[&] { ++dispatches; return kAXErrorSuccess; },
+        [&] { return owned_after_press(pressed); })) == "sent");
+    assert(dispatches == 1 && press_window_queries == 1 && !pressed.press_rejection.phase);
+    pressed.cutoff = 0;
+    assert(!owned_after_press(pressed));
+    assert(press_window_queries == 1 && std::string(pressed.press_rejection.cause) == "deadline-before");
+    ready_press_request(pressed); press_expire_cutoff = &pressed.cutoff;
+    assert(!owned_after_press(pressed));
+    assert(press_window_queries == 2 && std::string(pressed.press_rejection.cause) == "deadline-after");
+    press_expire_cutoff = nullptr; ready_press_request(pressed); press_window_result = false;
+    press_window_observation = {"focus","query-error","main-window","cannot-complete"};
+    assert(!owned_after_press(pressed));
+    assert(press_window_queries == 3 && std::string(pressed.press_rejection.cause) == "owned-window");
+    assert(std::string(pressed.press_rejection.window.query_stage) == "main-window");
+    assert(std::string(pressed.press_rejection.window.query_error) == "cannot-complete");
+
     Tree composer_tree;
     composer_tree.nodes = {fixture(-1, "AXWindow", ""), fixture(0, "AXTextArea", "Write your prompt to Claude"),
         fixture(0, "AXButton", "Send message"), fixture(-1, "AXButton", "Start task")};
@@ -214,6 +287,67 @@ int main(int argc, char** argv) {
     if (settle_pasted_value([&] { ++value_queries; return PastedValue::Rejected; },
             [] { return true; }, [&] { ++value_pauses; })) ++readback_keys;
     assert(value_queries==1 && readback_keys==0 && value_pauses==0);
+
+    // Only an exactly captured transient read can retire one passive sample.
+    const auto ready_window = MacOwnedWindowState::Ready;
+    FocusQuerySample transient;
+    transient.site = "focused-element";
+    transient.observe(kAXErrorCannotComplete);
+    assert(transient.waitable());
+    assert(focus_sample_state(transient,ComposerFocus::Rejected,ready_window,ready_window,true,false)
+        == ComposerFocus::PendingIdentity);
+    unsigned pastes = 1, sends = 0, samples = 0;
+    assert(settle_pasted_value([&] {
+        assert(pastes == 1 && sends == 0);
+        const auto state = ++samples == 1
+            ? focus_sample_state(transient,ComposerFocus::Rejected,ready_window,ready_window,true,false)
+            : focus_sample_state({},ComposerFocus::Focused,ready_window,ready_window,true,false);
+        return state == ComposerFocus::PendingIdentity ? PastedValue::Pending
+            : pasted_value_state("prompt","prompt",true,state == ComposerFocus::Focused);
+    }, [] { return true; }, [] {}));
+    ++sends;
+    assert(samples == 2 && pastes == 1 && sends == 1);
+    assert(!focus_query_sample && !ax_query_failed);
+    {
+        FocusQuerySample scoped;
+        FocusQueryScope scope(scoped);
+        assert(focus_query_sample == &scoped);
+        scoped.site = "target-position";
+        scoped.observe(kAXErrorCannotComplete);
+        assert(!ax_query_failed && scoped.waitable());
+    }
+    assert(!focus_query_sample && !ax_query_failed);
+    for (auto error : {kAXErrorNoValue,kAXErrorAttributeUnsupported,kAXErrorInvalidUIElement,
+            kAXErrorFailure,kAXErrorIllegalArgument,kAXErrorNotImplemented,kAXErrorAPIDisabled}) {
+        auto mixed = transient;
+        mixed.site = "target-size";
+        mixed.observe(error);
+        assert(!mixed.waitable() && mixed.error == error && std::string(mixed.failure_site) == "target-size");
+        assert(focus_sample_state(mixed,ComposerFocus::Rejected,ready_window,ready_window,true,false)
+            == ComposerFocus::Rejected);
+    }
+    for (const char* conflict : {"target-pid","target-geometry","target-role","focused-pid",
+            "focused-geometry","focused-role","focused-identity","target-bounds-unavailable"}) {
+        auto changed = transient;
+        const char* cause = nullptr;
+        assert(!changed.note(false,conflict,&cause) && !changed.waitable());
+        assert(focus_sample_state(changed,ComposerFocus::Rejected,ready_window,ready_window,true,false)
+            == ComposerFocus::Rejected);
+    }
+    for (auto before : {MacOwnedWindowState::Ready,MacOwnedWindowState::PendingFocus,MacOwnedWindowState::Rejected}) {
+        for (auto after : {MacOwnedWindowState::Ready,MacOwnedWindowState::PendingFocus,MacOwnedWindowState::Rejected}) {
+            const auto observed = focus_sample_state(transient,ComposerFocus::Rejected,before,after,true,false);
+            assert(observed == (before == MacOwnedWindowState::Rejected || after == MacOwnedWindowState::Rejected
+                ? ComposerFocus::Rejected : ComposerFocus::PendingIdentity));
+        }
+    }
+    assert(focus_sample_state(transient,ComposerFocus::Rejected,ready_window,ready_window,false,false)==ComposerFocus::Rejected);
+    assert(focus_sample_state(transient,ComposerFocus::Rejected,ready_window,ready_window,true,true)==ComposerFocus::Rejected);
+    samples = sends = 0;
+    bool original_cutoff = true;
+    assert(!settle_pasted_value([&] { ++samples; return PastedValue::Pending; },
+        [&] { return original_cutoff; }, [&] { original_cutoff = false; }));
+    assert(samples == 1 && pastes == 1 && sends == 0);
 
     Tree scope_tree;
     scope_tree.nodes = {fixture(-1, "AXWindow", ""), fixture(0, "AXWebArea", ""),

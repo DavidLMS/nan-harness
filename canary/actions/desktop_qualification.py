@@ -35,6 +35,12 @@ COMMIT = re.compile(r'[0-9a-f]{40}\Z')
 HASH = re.compile(r'[0-9a-f]{64}\Z')
 VERSION = re.compile(r'[0-9]+(?:\.[0-9]+){2}(?:[-+][A-Za-z0-9.-]+)?\Z')
 CLAUDE_MAC_PROGRESS = frozenset('window tree composer initial-value focus replace-select prompt-clipboard paste pasted-value readback readback-select readback-copy collapse send-tree press finish'.split())
+CLAUDE_MAC_WINDOW_QUERY = {
+    'failure': {'unmeasured', 'foreground', 'application', 'focus', 'geometry', 'inventory', 'identity', 'layer', 'display', 'stack'},
+    'focusStatus': {'unqueried', 'untrusted', 'query-error', 'focus-mismatch', 'not-standard', 'ready'},
+    'queryStage': {'unqueried', 'app-create', 'app-timeout', 'focused-window', 'main-window', 'focused-element', 'input-timeout', 'input-window', 'element-type', 'pid', 'window-timeout', 'role', 'subrole', 'position', 'size', 'geometry'},
+    'queryError': {'unqueried', 'failure', 'illegal-argument', 'invalid-element', 'cannot-complete', 'attribute-unsupported', 'not-implemented', 'api-disabled', 'no-value', 'other', 'empty-value', 'type-mismatch', 'owner-mismatch', 'geometry-invalid'},
+}
 
 
 def claude_windows_send_observation(value):
@@ -52,8 +58,9 @@ def claude_windows_send_observation(value):
 def claude_input_value_rejection(value):
     focus_causes = set('deadline query-failed application focused-element target-pid target-bounds-unavailable target-geometry target-role focused-pid focused-bounds-unavailable focused-geometry focused-role focused-identity window-unmeasured window-foreground window-application window-focus window-geometry window-inventory window-identity window-layer window-display window-stack'.split())
     value_causes = {'query-failed', 'value-unavailable', 'value-type', 'value-size', 'value-encoding'}
-    if (type(value) is not dict or set(value) != {'site', 'cause', 'valueRelation'}
-            or any(type(item) is not str for item in value.values())):
+    fields = {'site', 'cause', 'valueRelation'}
+    if (type(value) is not dict or set(value) not in (fields, fields | {'queryFailure'})
+            or any(type(value[key]) is not str for key in fields)):
         raise ValueError('invalid Claude input value rejection')
     site, cause, relation = value['site'], value['cause'], value['valueRelation']
     if not (
@@ -67,6 +74,17 @@ def claude_input_value_rejection(value):
             or cause == 'value-other' and relation == 'other')
     ):
         raise ValueError('inconsistent Claude input value rejection')
+    if 'queryFailure' in value:
+        query = value['queryFailure']
+        sites = {'prior-query', 'app-timeout', 'focused-element', 'target-pid', 'target-position',
+                 'target-size', 'target-role', 'focused-pid', 'focused-position', 'focused-size', 'focused-role'}
+        errors = {'failure', 'illegal-argument', 'invalid-element', 'cannot-complete',
+                  'attribute-unsupported', 'not-implemented', 'api-disabled', 'no-value', 'other'}
+        if (cause != 'query-failed' or site not in {'paste-focus-before', 'paste-focus-after'}
+                or type(query) is not dict or set(query) != {'site', 'error'}
+                or type(query['site']) is not str or query['site'] not in sites
+                or type(query['error']) is not str or query['error'] not in errors):
+            raise ValueError('invalid Claude input query failure')
     return dict(value)
 
 
@@ -75,6 +93,39 @@ def claude_composer_shape(value):
             or any(type(count) is not int or not 0 <= count <= 1024 for count in value.values())
             or sum(value.values()) > 1024):
         raise ValueError('invalid Claude composer shape')
+    return dict(value)
+
+
+def claude_native_press_rejection(value):
+    modes = {'input', 'input-replace-owned', 'input-failure-owned', 'copy', 'retry', 'retry-temporal',
+             'failure-details', 'failure-details-temporal'}
+    errors = {'failure', 'illegal-argument', 'invalid-element', 'cannot-complete', 'action-unsupported',
+              'attribute-unsupported', 'not-implemented', 'api-disabled', 'no-value', 'other'}
+    if (type(value) is not dict or type(value.get('mode')) is not str or value['mode'] not in modes
+            or type(value.get('phase')) is not str):
+        raise ValueError('invalid Claude native press rejection')
+    if value['phase'] == 'perform-action':
+        if (set(value) != {'mode', 'phase', 'axError'}
+                or type(value['axError']) is not str or value['axError'] not in errors):
+            raise ValueError('invalid Claude native press error')
+    elif value['phase'] == 'post-guard':
+        if type(value.get('cause')) is not str:
+            raise ValueError('invalid Claude native press guard cause')
+        if value['cause'] in {'deadline-before', 'deadline-after'}:
+            if set(value) != {'mode', 'phase', 'cause'}:
+                raise ValueError('invalid Claude native press deadline')
+        elif value['cause'] == 'owned-window':
+            window = value.get('window')
+            if (set(value) != {'mode', 'phase', 'cause', 'window'}
+                    or type(window) is not dict or set(window) != set(CLAUDE_MAC_WINDOW_QUERY)
+                    or any(type(item) is not str or item not in CLAUDE_MAC_WINDOW_QUERY[key]
+                           for key, item in window.items())
+                    or window['failure'] in {'unmeasured', 'layer'}):
+                raise ValueError('invalid Claude native press window proof')
+        else:
+            raise ValueError('unknown Claude native press guard cause')
+    else:
+        raise ValueError('unknown Claude native press phase')
     return dict(value)
 
 
@@ -1753,7 +1804,7 @@ def semantic_observations(directory, app, platform=None):
             stages.update('tree-depth tree-nodes tree-name-limit tree-text-limit tree-window-limit tree-process-limit'.split())
             stages.update('clipboard-owner clipboard-allocation clipboard-lock clipboard-empty clipboard-set clipboard-close clipboard-guard-before clipboard-guard-after clipboard-deadline-before clipboard-deadline-after clipboard-open-deadline'.split())
             phase_fields = {'actionPhase', 'transportFailure'}
-            if (app != 'claude-desktop' or set(value) - {'providerObservation', 'guardRejection', 'rowShape', 'scopeShape', 'failureAuthority', 'failureScopeCounts', 'operationTiming', 'nativeAction', 'nativeStage', 'nativeProgress', 'nativeWorkProgress', 'nativeSendObservation', 'composerShape', 'nativeWindowGuard', 'transportStarted', 'transportBudgetMs', 'inputValueRejection', 'nativeCompletion'} not in (fields, fields | phase_fields) or value['diagnosticsOnly'] is not True
+            if (app != 'claude-desktop' or set(value) - {'providerObservation', 'guardRejection', 'rowShape', 'scopeShape', 'failureAuthority', 'failureScopeCounts', 'operationTiming', 'nativeAction', 'nativeStage', 'nativeProgress', 'nativeWorkProgress', 'nativeSendObservation', 'composerShape', 'nativeWindowGuard', 'transportStarted', 'transportBudgetMs', 'inputValueRejection', 'nativeCompletion', 'nativePressRejection'} not in (fields, fields | phase_fields) or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in stages
                     or any(type(value[key]) is not bool for key in flags)
                     or any(type(value[key]) is not int or not 0 <= value[key] <= 3 for key in counts)
@@ -1765,10 +1816,7 @@ def semantic_observations(directory, app, platform=None):
                 allowed = {
                     'action': {'input', 'input-replace-owned', 'input-failure-owned', 'copy', 'retry-ready', 'retry', 'failure-details', 'failure-details-ready', 'failure-details-temporal', 'failure-details-ready-temporal', 'retry-ready-temporal', 'retry-temporal'},
                     'site': {'entry', 'collect-before', 'collect-after'},
-                    'failure': {'unmeasured', 'foreground', 'application', 'focus', 'geometry', 'inventory', 'identity', 'layer', 'display', 'stack'},
-                    'focusStatus': {'unqueried', 'untrusted', 'query-error', 'focus-mismatch', 'not-standard', 'ready'},
-                    'queryStage': {'unqueried', 'app-create', 'app-timeout', 'focused-window', 'main-window', 'focused-element', 'input-timeout', 'input-window', 'element-type', 'pid', 'window-timeout', 'role', 'subrole', 'position', 'size', 'geometry'},
-                    'queryError': {'unqueried', 'failure', 'illegal-argument', 'invalid-element', 'cannot-complete', 'attribute-unsupported', 'not-implemented', 'api-disabled', 'no-value', 'other', 'empty-value', 'type-mismatch', 'owner-mismatch', 'geometry-invalid'},
+                    **CLAUDE_MAC_WINDOW_QUERY,
                 }
                 if (mechanism != 'claude-native-chat' or type(guard) is not dict or set(guard) != set(allowed)
                         or any(type(item) is not str or item not in allowed[key] for key, item in guard.items())):
@@ -1841,6 +1889,13 @@ def semantic_observations(directory, app, platform=None):
                         or value['submittedTurns'] > 2 or value['retryAttempted']):
                     raise ValueError('unbound Claude input value rejection')
                 record['inputValueRejection'] = claude_input_value_rejection(value['inputValueRejection'])
+            if 'nativePressRejection' in value:
+                if (mechanism != 'claude-native-chat' or value.get('transportStarted') is not True
+                        or value.get('nativeStage') != 'action-uncertain' or value['stage'] != 'action-uncertain'
+                        or value.get('actionPhase') not in {'completed', 'post-guard'}
+                        or value['actionPhase'] == 'completed' and value.get('transportFailure') is not None):
+                    raise ValueError('unbound Claude native press rejection')
+                record['nativePressRejection'] = claude_native_press_rejection(value['nativePressRejection'])
             if 'nativeCompletion' in value:
                 completion = value['nativeCompletion']
                 if (mechanism != 'claude-native-chat' or value.get('transportStarted') is not True

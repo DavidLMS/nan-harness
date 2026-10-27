@@ -16,6 +16,7 @@
 
 #include "mac_owned_window.hpp"
 bool claude_owned_mac_window(std::uint64_t, pid_t, CGRect);
+bool claude_owned_mac_window_observed(std::uint64_t, pid_t, CGRect, MacWindowObservation*);
 MacOwnedWindowState claude_mac_window_state(std::uint64_t, pid_t, CGRect);
 MacWindowObservation claude_mac_window_observation();
 namespace {
@@ -36,6 +37,8 @@ struct InputValueRejection {
     const char* site = nullptr;
     const char* cause = nullptr;
     const char* relation = "unmeasured";
+    const char* query_site = nullptr;
+    const char* query_error = nullptr;
 };
 // Classify only the first already-evaluated failure; never evaluate a skipped
 // AX expression or change the original predicate's truth value.
@@ -57,7 +60,25 @@ static const char* input_relation(const std::string& value, const std::string& p
     return prompt.compare(0, value.size(), value) == 0 ? "prefix" : "other";
 }
 static void write_input_rejection(std::ostream& output, const InputValueRejection& value) {
-    output << "input-value-rejection " << value.site << ' ' << value.cause << ' ' << value.relation << '\n';
+    output << "input-value-rejection " << value.site << ' ' << value.cause << ' ' << value.relation;
+    if (value.query_site) output << ' ' << value.query_site << ' ' << value.query_error;
+    output << '\n';
+}
+struct PressRejection {
+    const char* phase = nullptr;
+    const char* cause = nullptr;
+    const char* ax_error = nullptr;
+    MacWindowObservation window;
+};
+static void write_press_rejection(std::ostream& output, const std::string& mode, const PressRejection& value) {
+    output << "press-rejection " << mode << ' ' << value.phase << ' ';
+    if (value.ax_error) output << value.ax_error;
+    else {
+        output << value.cause;
+        if (std::string(value.cause) == "owned-window") output << ' ' << value.window.failure
+            << ' ' << value.window.focus_status << ' ' << value.window.query_stage << ' ' << value.window.query_error;
+    }
+    output << '\n';
 }
 struct Request {
     std::string mode, prompt, marker, sentinel;
@@ -70,6 +91,7 @@ struct Request {
     mutable const char* window_site = nullptr;
     mutable MacWindowObservation window_observation;
     mutable InputValueRejection input_rejection;
+    mutable PressRejection press_rejection;
     ~Request() { for (auto value : {&prompt, &marker, &sentinel}) std::fill(value->begin(), value->end(), '\0'); }
 };
 static bool decode(const std::string& hex, std::string& result) {
@@ -135,6 +157,24 @@ static bool wait_owned_window(const Request& request, const char* site = "entry"
         [&] { return within(request); },
         [] { std::this_thread::sleep_for(std::chrono::milliseconds(20)); });
 }
+// Capture only the branches of the existing post-press proof. The observer
+// overload executes the same native window queries, never a diagnostic reread.
+static bool owned_after_press(const Request& request) {
+    if (!within(request)) {
+        request.press_rejection = {"post-guard","deadline-before"};
+        return false;
+    }
+    MacWindowObservation observation;
+    if (!claude_owned_mac_window_observed(request.window,request.pid,request.bounds,&observation)) {
+        request.press_rejection = {"post-guard","owned-window",nullptr,observation};
+        return false;
+    }
+    if (!within(request)) {
+        request.press_rejection = {"post-guard","deadline-after"};
+        return false;
+    }
+    return true;
+}
 static std::string text(CFTypeRef value, const char** failure = nullptr) {
     if (!noted(value, "value-unavailable", failure)
         || !noted(CFGetTypeID(value) == CFStringGetTypeID(), "value-type", failure)) return {};
@@ -143,10 +183,57 @@ static std::string text(CFTypeRef value, const char** failure = nullptr) {
     return buffer;
 }
 static bool ax_query_failed = false;
+static const char* input_ax_error(AXError error) {
+    switch (error) {
+        case kAXErrorFailure: return "failure";
+        case kAXErrorIllegalArgument: return "illegal-argument";
+        case kAXErrorInvalidUIElement: return "invalid-element";
+        case kAXErrorCannotComplete: return "cannot-complete";
+        case kAXErrorAttributeUnsupported: return "attribute-unsupported";
+        case kAXErrorNotImplemented: return "not-implemented";
+        case kAXErrorAPIDisabled: return "api-disabled";
+        case kAXErrorNoValue: return "no-value";
+        default: return "other";
+    }
+}
+struct FocusQuerySample {
+    const char* site = "prior-query";
+    const char* failure_site = nullptr;
+    AXError error = kAXErrorSuccess;
+    bool hard = false, conflict = false;
+    unsigned errors = 0;
+    bool failed() const { return error != kAXErrorSuccess; }
+    void observe(AXError observed) {
+        if (observed == kAXErrorSuccess) return;
+        ++errors;
+        const bool terminal = observed != kAXErrorCannotComplete;
+        // Prefer the actual hard error when a sample contains both kinds.
+        if (!failed() || (terminal && !hard)) { error = observed; failure_site = site; }
+        hard = hard || terminal;
+    }
+    bool note(bool valid, const char* cause, const char** failure) {
+        if (!valid && std::string(cause) != "query-failed") conflict = true;
+        return noted(valid,cause,failure);
+    }
+    bool waitable() const { return error == kAXErrorCannotComplete && !hard && !conflict; }
+};
+static FocusQuerySample* focus_query_sample = nullptr;
+struct FocusQueryScope {
+    FocusQuerySample& sample;
+    explicit FocusQueryScope(FocusQuerySample& value) : sample(value) { focus_query_sample = &sample; }
+    ~FocusQueryScope() { focus_query_sample = nullptr; }
+};
 static CFTypeRef attribute(AXUIElementRef element, CFStringRef name) {
     CFTypeRef value = nullptr;
+    if (focus_query_sample) {
+        const bool target = std::string(focus_query_sample->site).rfind("target-",0) == 0;
+        if (CFEqual(name,kAXPositionAttribute)) focus_query_sample->site = target ? "target-position" : "focused-position";
+        if (CFEqual(name,kAXSizeAttribute)) focus_query_sample->site = target ? "target-size" : "focused-size";
+    }
     AXError error = AXUIElementCopyAttributeValue(element, name, &value);
-    if (error != kAXErrorSuccess && error != kAXErrorNoValue && error != kAXErrorAttributeUnsupported) ax_query_failed = true;
+    if (focus_query_sample) focus_query_sample->observe(error);
+    if (error != kAXErrorSuccess && error != kAXErrorNoValue && error != kAXErrorAttributeUnsupported
+        && !(focus_query_sample && error == kAXErrorCannotComplete)) ax_query_failed = true;
     return error == kAXErrorSuccess ? value : nullptr;
 }
 static std::string string_attribute(AXUIElementRef element, CFStringRef name, const char** failure = nullptr) {
@@ -352,14 +439,27 @@ static bool key(CGKeyCode code, bool command) {
     CFRelease(down); CFRelease(up);
     return true;
 }
+template<class Perform, class Guard>
+static const char* dispatch_press_once(const Request& request, const char* success, Perform perform, Guard guard) {
+    const auto error = perform();
+    if (error != kAXErrorSuccess) {
+        request.press_rejection = {"perform-action",nullptr,error == kAXErrorActionUnsupported
+            ? "action-unsupported" : input_ax_error(error)};
+        return "action-uncertain";
+    }
+    return guard() ? success : "action-uncertain";
+}
+static const char* dispatch_press(const Request& request, AXUIElementRef element, const char* success) {
+    return dispatch_press_once(request,success,[&] { return AXUIElementPerformAction(element,kAXPressAction); },
+        [&] { return owned_after_press(request); });
+}
 static const char* press(const Request& request, const Node& node, const char* success) {
     progress(NativeProgress::Press);
     request.deadline_phase = "deadline-press";
     if (!target(node, request) || !owned(request)) return "control";
     Tree fresh;
     if (!fresh.collect(request) || !retained(fresh, node) || !owned(request)) return "control";
-    if (AXUIElementPerformAction(node.element, kAXPressAction) != kAXErrorSuccess) return "action-uncertain";
-    return owned(request) ? success : "action-uncertain";
+    return dispatch_press(request,node.element,success);
 }
 // Classify the already-read value without another accessibility query.
 static const char* initial_input_failure(CFTypeRef value, bool query_failed, bool replace_owned = false) {
@@ -405,23 +505,9 @@ static ComposerFocus composer_focus_identity(const FocusIdentity& focused, const
     }
     return ComposerFocus::PendingIdentity;
 }
-static ComposerFocus focused_composer(const Request& request, const Node& control, const char** failure = nullptr) {
-    const auto rejected = [&](const char* cause) { noted(false, cause, failure); return ComposerFocus::Rejected; };
-    const bool initial_time = within(request);
-    if (!initial_time || ax_query_failed) return rejected(initial_time ? "query-failed" : "deadline");
-    const auto before_window = claude_mac_window_state(request.window, request.pid, request.bounds);
-    const bool before_time = within(request);
-    if (!before_time || before_window == MacOwnedWindowState::Rejected)
-        return rejected(before_time ? window_input_cause(claude_mac_window_observation()) : "deadline");
-    AXUIElementRef app = AXUIElementCreateApplication(request.pid);
-    if (!app) return rejected("application");
-    if (AXUIElementSetMessagingTimeout(app, .1F) != kAXErrorSuccess) {
-        CFRelease(app);
-        return rejected("query-failed");
-    }
-    CFTypeRef value = nullptr;
-    const auto error = AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute, &value);
-    CFRelease(app);
+static ComposerFocus read_composer_focus(const Request& request, const Node& control,
+                                         AXError error, CFTypeRef value, FocusQuerySample& sample,
+                                         const char** failure) {
     ComposerFocus state = ComposerFocus::Rejected;
     const char* identity_failure = nullptr;
     if (error == kAXErrorSuccess && value && CFGetTypeID(value) == AXUIElementGetTypeID()) {
@@ -429,35 +515,99 @@ static ComposerFocus focused_composer(const Request& request, const Node& contro
         focused.element = static_cast<AXUIElementRef>(value);
         CGRect target_bounds;
         pid_t target_pid = 0;
-        const bool target_unchanged = noted(AXUIElementGetPid(control.element, &target_pid) == kAXErrorSuccess, "query-failed", &identity_failure)
-            && noted(target_pid == static_cast<pid_t>(request.pid), "target-pid", &identity_failure)
-            && [&] { const bool valid = rectangle(control.element, target_bounds);
-                return noted(valid, ax_query_failed ? "query-failed" : "target-bounds-unavailable", &identity_failure); }()
-            && noted(CGRectEqualToRect(target_bounds, control.bounds), "target-geometry", &identity_failure)
-            && [&] { const bool same = string_attribute(control.element, kAXRoleAttribute) == control.role;
-                return noted(same, ax_query_failed ? "query-failed" : "target-role", &identity_failure); }();
-        const bool queried = noted(AXUIElementGetPid(focused.element, &focused.pid) == kAXErrorSuccess, "query-failed", &identity_failure)
-            && [&] { const bool valid = rectangle(focused.element, focused.bounds);
-                return noted(valid, ax_query_failed ? "query-failed" : "focused-bounds-unavailable", &identity_failure); }();
-        if (queried) focused.role = string_attribute(focused.element, kAXRoleAttribute);
-        state = composer_focus_identity(focused, control, request, target_unchanged, !queried || ax_query_failed, &identity_failure);
+        sample.site = "target-pid";
+        const auto target_pid_error = AXUIElementGetPid(control.element, &target_pid);
+        sample.observe(target_pid_error);
+        const bool target_unchanged = sample.note(target_pid_error == kAXErrorSuccess, "query-failed", &identity_failure)
+            && sample.note(target_pid == static_cast<pid_t>(request.pid), "target-pid", &identity_failure)
+            && [&] { sample.site = "target-position"; const auto prior = sample.errors;
+                const bool valid = rectangle(control.element, target_bounds);
+                return sample.note(valid, sample.errors != prior ? "query-failed" : "target-bounds-unavailable", &identity_failure); }()
+            && sample.note(CGRectEqualToRect(target_bounds, control.bounds), "target-geometry", &identity_failure)
+            && [&] { sample.site = "target-role"; const auto prior = sample.errors;
+                const bool same = string_attribute(control.element, kAXRoleAttribute) == control.role;
+                return sample.note(same, sample.errors != prior ? "query-failed" : "target-role", &identity_failure); }();
+        sample.site = "focused-pid";
+        const auto focused_pid_error = AXUIElementGetPid(focused.element, &focused.pid);
+        sample.observe(focused_pid_error);
+        const bool queried = sample.note(focused_pid_error == kAXErrorSuccess, "query-failed", &identity_failure)
+            && [&] { sample.site = "focused-position"; const auto prior = sample.errors;
+                const bool valid = rectangle(focused.element, focused.bounds);
+                return sample.note(valid, sample.errors != prior ? "query-failed" : "focused-bounds-unavailable", &identity_failure); }();
+        bool role_read = false;
+        if (queried) { sample.site = "focused-role"; const auto prior = sample.errors;
+            focused.role = string_attribute(focused.element, kAXRoleAttribute);
+            role_read = sample.errors == prior;
+            if (role_read && focused.role.empty()) sample.conflict = true;
+        }
+        // A transient read cannot conceal any independently observed conflict.
+        if (focused_pid_error == kAXErrorSuccess && focused.pid != static_cast<pid_t>(request.pid)) sample.conflict = true;
+        if (queried && (!CGRectContainsRect(request.bounds,focused.bounds)
+            || (CFEqual(focused.element,control.element)
+                && (!CGRectEqualToRect(focused.bounds,control.bounds) || (role_read && focused.role != control.role))))) sample.conflict = true;
+        state = composer_focus_identity(focused, control, request, target_unchanged, !queried || ax_query_failed || sample.failed(), &identity_failure);
     } else {
         identity_failure = error == kAXErrorSuccess ? "focused-element" : "query-failed";
     }
+    if (error == kAXErrorSuccess && (!value || CFGetTypeID(value) != AXUIElementGetTypeID())) sample.conflict = true;
+    if (failure) *failure = identity_failure;
+    return state;
+}
+static ComposerFocus focus_sample_state(const FocusQuerySample& sample, ComposerFocus state,
+                                        MacOwnedWindowState before, MacOwnedWindowState after,
+                                        bool in_time, bool hard_query) {
+    if (!in_time || before == MacOwnedWindowState::Rejected || after == MacOwnedWindowState::Rejected)
+        return ComposerFocus::Rejected;
+    if (sample.waitable() && !hard_query) return ComposerFocus::PendingIdentity;
+    if (state == ComposerFocus::Rejected || hard_query) return ComposerFocus::Rejected;
+    return before == MacOwnedWindowState::PendingFocus || after == MacOwnedWindowState::PendingFocus
+        ? ComposerFocus::PendingIdentity : state;
+}
+static ComposerFocus focused_composer(const Request& request, const Node& control, const char** failure = nullptr, FocusQuerySample* observation = nullptr) {
+    FocusQuerySample sample;
+    const auto rejected = [&](const char* cause) { noted(false, cause, failure); return ComposerFocus::Rejected; };
+    const bool initial_time = within(request);
+    if (!initial_time || ax_query_failed) {
+        if (initial_time && observation) { observation->failure_site = "prior-query"; observation->error = static_cast<AXError>(-1); }
+        return rejected(initial_time ? "query-failed" : "deadline");
+    }
+    const auto before_window = claude_mac_window_state(request.window, request.pid, request.bounds);
+    const bool before_time = within(request);
+    if (!before_time || before_window == MacOwnedWindowState::Rejected)
+        return rejected(before_time ? window_input_cause(claude_mac_window_observation()) : "deadline");
+    AXUIElementRef app = AXUIElementCreateApplication(request.pid);
+    if (!app) return rejected("application");
+    sample.site = "app-timeout";
+    const auto timeout_error = AXUIElementSetMessagingTimeout(app, .1F);
+    if (timeout_error != kAXErrorSuccess) {
+        sample.observe(timeout_error);
+        if (observation) *observation = sample;
+        CFRelease(app);
+        return rejected("query-failed");
+    }
+    FocusQueryScope scope(sample);
+    sample.site = "focused-element";
+    CFTypeRef value = nullptr;
+    const auto error = AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute, &value);
+    sample.observe(error);
+    CFRelease(app);
+    const char* identity_failure = nullptr;
+    const auto state = read_composer_focus(request,control,error,value,sample,&identity_failure);
     if (value) CFRelease(value);
+    if (observation) *observation = sample;
     if (!within(request)) return rejected("deadline");
     const auto after_window = claude_mac_window_state(request.window, request.pid, request.bounds);
     const bool after_time = within(request);
-    if (!after_time || after_window == MacOwnedWindowState::Rejected || state == ComposerFocus::Rejected)
+    const auto settled = focus_sample_state(sample,state,before_window,after_window,after_time,ax_query_failed);
+    if (settled == ComposerFocus::Rejected)
         return rejected(!after_time ? "deadline" : after_window == MacOwnedWindowState::Rejected
             ? window_input_cause(claude_mac_window_observation()) : identity_failure ? identity_failure : "focused-identity");
     // Exact composer identity remains required for readiness. Incomplete window
     // proof only allows another passive query under this same absolute cutoff.
-    return before_window == MacOwnedWindowState::PendingFocus || after_window == MacOwnedWindowState::PendingFocus
-        ? ComposerFocus::PendingIdentity : state;
+    return settled;
 }
-// Focus is requested once by input(). Only a valid earlier focus identity may
-// settle passively; uncertainty is terminal and no key is issued while pending.
+// Focus is requested once by input(). Only a valid earlier identity or an
+// exactly captured CannotComplete may settle passively; no key is issued while pending.
 template<class Query, class Within, class Pause>
 static bool settle_composer_focus(Query query, Within within_deadline, Pause pause) {
     while (within_deadline()) {
@@ -511,9 +661,14 @@ static PastedValue related_paste_value(const std::string& value, const std::stri
 }
 static PastedValue pasted_composer_value(const Request& request, const Node& control, const std::string& initial) {
     const char* focus_failure = nullptr;
-    const auto before=focused_composer(request,control,&focus_failure);
+    FocusQuerySample before_query;
+    const auto before=focused_composer(request,control,&focus_failure,&before_query);
     if (before==ComposerFocus::Rejected) {
         request.input_rejection = {"paste-focus-before", focus_failure, "unmeasured"};
+        if (std::string(focus_failure) == "query-failed" && before_query.failure_site) {
+            request.input_rejection.query_site = before_query.failure_site;
+            request.input_rejection.query_error = input_ax_error(before_query.error);
+        }
         return PastedValue::Rejected;
     }
     if (before==ComposerFocus::PendingIdentity) return PastedValue::Pending;
@@ -524,11 +679,17 @@ static PastedValue pasted_composer_value(const Request& request, const Node& con
     const bool valid=private_input_value(value,observed.value,&value_failure);
     if (value) CFRelease(value);
     focus_failure = nullptr;
-    const auto after=focused_composer(request,control,&focus_failure);
+    FocusQuerySample after_query;
+    const auto after=focused_composer(request,control,&focus_failure,&after_query);
     if (!valid || ax_query_failed || after==ComposerFocus::Rejected) {
         request.input_rejection = !valid || value_query_failed
             ? InputValueRejection{"paste-value", value_failure ? value_failure : "query-failed", "unmeasured"}
             : InputValueRejection{"paste-focus-after", focus_failure, input_relation(observed.value,request.prompt,initial)};
+        if (std::string(request.input_rejection.site) == "paste-focus-after"
+            && std::string(focus_failure) == "query-failed" && after_query.failure_site) {
+            request.input_rejection.query_site = after_query.failure_site;
+            request.input_rejection.query_error = input_ax_error(after_query.error);
+        }
         return PastedValue::Rejected;
     }
     if (after==ComposerFocus::PendingIdentity) return PastedValue::Pending;
@@ -946,8 +1107,7 @@ static const char* open_failure_details(const Request& request, const Tree& tree
         || !CFEqual(fresh.nodes[current].element, tree.nodes[index].element) || !owned(request)) return "control";
     progress(NativeProgress::Press);
     request.deadline_phase = "deadline-press";
-    if (AXUIElementPerformAction(fresh.nodes[current].element, kAXPressAction) != kAXErrorSuccess) return "action-uncertain";
-    return owned(request) ? "failure-details-opened" : "action-uncertain";
+    return dispatch_press(request,fresh.nodes[current].element,"failure-details-opened");
 }
 // This mode additionally requires a Rust-held clean/Sent/request-specific failure
 // capability. Native cross-call identity is the nonce user Heading, not a CF handle.
@@ -1013,8 +1173,7 @@ static const char* temporal_action(const Request& request, const Tree& tree) {
     if (ready) return details?"failure-details-ready":"retry-ready";
     progress(NativeProgress::Press);
     request.deadline_phase="deadline-press";
-    if (AXUIElementPerformAction(fresh.nodes[current].element,kAXPressAction)!=kAXErrorSuccess) return "action-uncertain";
-    return owned(request)?(details?"failure-details-opened":"retried"):"action-uncertain";
+    return dispatch_press(request,fresh.nodes[current].element,details?"failure-details-opened":"retried");
 }
 static const char* action(const Request& request, const Tree& tree) {
     if (request.mode.find("-temporal") != std::string::npos) return temporal_action(request, tree);
@@ -1100,6 +1259,8 @@ int claude_chat_turn() {
                 std::cout << '\n';
             }
         }
+        if (std::string(stage) == "action-uncertain" && value.press_rejection.phase)
+            write_press_rejection(std::cout,value.mode,value.press_rejection);
         if (value.window_site) {
             const auto& observation = value.window_observation;
             std::cout << "window-guard " << value.window_site << ' ' << observation.failure << ' '

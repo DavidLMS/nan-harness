@@ -3,7 +3,9 @@ use super::Window;
 use std::fmt::Write as _;
 use zeroize::Zeroizing;
 mod input_value;
+mod press;
 pub(crate) use input_value::InputValueRejection;
+pub(crate) use press::PressRejection;
 
 pub(crate) const CHAT_TURN_MAX_MILLIS: u32 = 15_000;
 
@@ -464,6 +466,7 @@ pub(crate) struct ChatTurnReceipt {
     pub(crate) composer_shape: Option<ComposerShape>,
     pub(crate) window_guard: Option<WindowGuardObservation>,
     pub(crate) input_value_rejection: Option<InputValueRejection>,
+    pub(crate) press_rejection: Option<PressRejection>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -586,6 +589,7 @@ impl ChatTurnReceipt {
         }
         let (output, window_guard) = WindowGuardObservation::split(output, mode)?;
         let stage = ChatTurnStage::parse(&format!("{}\n", output.split_once('\n')?.0))?;
+        let (output, press_rejection) = PressRejection::split(output, mode, stage)?;
         let (output, input_value_rejection) = InputValueRejection::split(output, mode, stage)?;
         let (_, remainder) = output.split_once('\n')?;
         let mut receipt = Self {
@@ -595,6 +599,7 @@ impl ChatTurnReceipt {
             composer_shape: None,
             window_guard,
             input_value_rejection,
+            press_rejection,
         };
         if remainder.is_empty() {
             return Some(receipt);

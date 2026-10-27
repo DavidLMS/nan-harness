@@ -2,6 +2,7 @@
 """Focused offline contracts for the hosted CLI execution pair."""
 
 import importlib.util
+from contextlib import redirect_stdout
 import io
 import json
 import os
@@ -45,6 +46,42 @@ cli_suite = load("cli-suite")
 
 
 class CliExecutionTests(unittest.TestCase):
+    def test_suite_forwards_only_the_fixed_validated_mimo_advisory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name in ('nan', 'canary'):
+                (root / name).write_bytes(b'synthetic executable')
+            manifest = root / 'manifest.json'
+            manifest.write_text(json.dumps({'harnesses': [dict(harness='mimo-code', version='0.1.16',
+                system='linux', architecture='aarch64', source='github:XiaomiMiMo/MiMo-Code',
+                package='', model='qwen3.6', ref='')]}))
+            report = root / 'reports/linux-aarch64-mimo-code.json'
+            argv = ['cli-suite.py', '--harnesses', 'mimo-code', '--mode', 'live', '--trigger', 'release',
+                    '--tag', 'v0.1.27', '--model', 'qwen3.6', '--binary', str(root / 'nan'),
+                    '--canary', str(root / 'canary'), '--directory', str(root / 'cells'),
+                    '--output', str(root / 'reports'), '--run-id', 'run-1', '--system', 'linux',
+                    '--architecture', 'aarch64', '--source-kind', 'release', '--source-sha', 'a' * 40,
+                    '--nan-version', '0.1.27', '--manifest', str(manifest)]
+            for detail in (cell.MIMO_SESSION_DETAIL, 'PRIVATE_MODEL_RESPONSE'):
+                with self.subTest(recognized=detail == cell.MIMO_SESSION_DETAIL):
+                    calls = []
+                    def run(command, **kwargs):
+                        calls.append(command[2])
+                        self.assertEqual(kwargs['stdout'], cell.subprocess.DEVNULL)
+                        self.assertEqual(kwargs['stderr'], cell.subprocess.DEVNULL)
+                        if command[2] == 'report':
+                            report.write_text(json.dumps(dict(outcome='passed',
+                                harness={'id': 'mimo-code', 'version': '0.1.16'},
+                                checks=[dict(name='live-tool', status='passed', detail=detail)])))
+                        return SimpleNamespace(returncode=0)
+                    output = io.StringIO()
+                    with patch.object(sys, 'argv', argv), patch.object(cli_suite.subprocess, 'run', side_effect=run), redirect_stdout(output):
+                        self.assertEqual(cli_suite.main(), 0)
+                    self.assertEqual(calls, ['install', 'conformance', 'live', 'report'])
+                    expected = '::warning::' + cell.MIMO_SESSION_DETAIL + '\n' if detail == cell.MIMO_SESSION_DETAIL else ''
+                    self.assertEqual(output.getvalue(), expected)
+                    self.assertNotIn('PRIVATE_', output.getvalue())
+
     def test_windows_installer_marker_exposes_only_closed_category(self):
         with tempfile.TemporaryDirectory() as temporary:
             marker = Path(temporary) / "installer-result.json"

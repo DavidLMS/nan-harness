@@ -143,5 +143,38 @@
     "transportBudgetMs": 5000,
     "transportFailure": null,
     "transportStarted": true
+  },
+  {
+    "actionPhase": "completed",
+    "clipboardCleared": false,
+    "composerShape": {
+      "editors": 1,
+      "sendMessages": 0,
+      "startTasks": 1
+    },
+    "copiedResponses": 0,
+    "diagnosticsOnly": true,
+    "inputValueRejection": {
+      "site": "paste-focus-before",
+      "cause": "query-failed",
+      "valueRelation": "unmeasured",
+      "queryFailure": {
+        "site": "target-size",
+        "error": "invalid-element"
+      }
+    },
+    "inputVerifiedTurns": 0,
+    "mechanism": "claude-native-chat",
+    "nativeProgress": "finish",
+    "nativeStage": "input-value-mismatch",
+    "nativeWorkProgress": "pasted-value",
+    "providerObservation": null,
+    "retryAttempted": false,
+    "schemaVersion": 1,
+    "stage": "input-value-mismatch",
+    "submittedTurns": 0,
+    "transportBudgetMs": 5000,
+    "transportFailure": null,
+    "transportStarted": true
   }
 ]

@@ -12,6 +12,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Verify completed MiMo 0.1.16 live tasks from the exact isolated native session
   when stdout is empty, retaining its console-output limitation in canary reports
   without changing the installed harness or accepting incomplete task evidence.
+- Keep Claude macOS qualification on the retained composer during precisely
+  identified transient Accessibility reads, preserving the original deadline
+  and single input action while retaining closed query-failure diagnostics.
+- Forward the fixed MiMo session-evidence advisory from validated reports to
+  Actions while keeping private cell output suppressed.
 
 ## [0.1.27] - 2026-10-27
 
