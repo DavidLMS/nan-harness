@@ -18,10 +18,12 @@ use crate::workspace::ConformanceWorkspace;
 use nan_harness_core::HarnessKind;
 use std::ffi::OsString;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use thiserror::Error;
 
+#[cfg(test)]
+mod inventory_diagnostic;
 mod scenarios;
 use super::environment;
 
@@ -42,6 +44,8 @@ pub struct PublishedConformanceRunner {
     nan_harness: PathBuf,
     harness: HarnessKind,
     hermes_stream_json: bool,
+    #[cfg(test)]
+    mimo_inventory_format: Option<inventory_diagnostic::MimoFormat>,
 }
 
 impl PublishedConformanceRunner {
@@ -58,6 +62,8 @@ impl PublishedConformanceRunner {
             nan_harness,
             harness,
             hermes_stream_json: false,
+            #[cfg(test)]
+            mimo_inventory_format: None,
         }
     }
 
@@ -133,6 +139,37 @@ impl PublishedConformanceRunner {
         scenario
     }
 
+    fn process_arguments(
+        &self,
+        registration: HarnessRegistration,
+        workspace: &Path,
+        provider_url: &str,
+        kind: &RunKind,
+        marker: &str,
+    ) -> Vec<OsString> {
+        let mut arguments = vec![
+            OsString::from(registration.binary_name()),
+            OsString::from("--provider-base-url"),
+            OsString::from(provider_url),
+            OsString::from("--"),
+        ];
+        arguments.extend(headless_arguments(
+            registration.kind,
+            kind,
+            marker,
+            workspace,
+            self.hermes_stream_json,
+        ));
+        #[cfg(test)]
+        inventory_diagnostic::select_format(
+            &mut arguments,
+            self.mimo_inventory_format,
+            registration.kind,
+            kind,
+        );
+        arguments
+    }
+
     async fn run_process(
         &self,
         registration: HarnessRegistration,
@@ -141,19 +178,13 @@ impl PublishedConformanceRunner {
         kind: RunKind,
         marker: &str,
     ) -> Result<TerminalOutput, ConformanceError> {
-        let mut arguments = vec![
-            OsString::from(registration.binary_name()),
-            OsString::from("--provider-base-url"),
-            OsString::from(provider.base_url()),
-            OsString::from("--"),
-        ];
-        arguments.extend(headless_arguments(
-            registration.kind,
+        let arguments = self.process_arguments(
+            registration,
+            workspace.path(),
+            provider.base_url(),
             &kind,
             marker,
-            workspace.path(),
-            self.hermes_stream_json,
-        ));
+        );
         let home = workspace.path().join("home");
         fs::create_dir_all(&home).map_err(ConformanceError::Environment)?;
         let command = TerminalCommand::new(&self.nan_harness, workspace.path())

@@ -9,18 +9,68 @@ import json
 import os
 from pathlib import Path
 import shutil
+import re
 import subprocess
 import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 PROBE = ROOT / "canary/guest/probe-harness.ps1"
+CURRENT_DOCTOR_SCHEMA = 9
 CELL_SPEC = importlib.util.spec_from_file_location("probe_cell", ROOT / "canary/actions/cell.py")
 CELL = importlib.util.module_from_spec(CELL_SPEC)
 CELL_SPEC.loader.exec_module(CELL)
 
 
 class WindowsProbeContracts(unittest.TestCase):
+    def test_native_doctor_fixture_tracks_the_actual_cli_producer_schema(self):
+        models = (ROOT / 'crates/nan-harness-cli/src/commands/doctor/models.rs').read_text()
+        version = re.search(r'const DOCTOR_SCHEMA_VERSION: u8 = ([0-9]+);', models)
+        self.assertIsNotNone(version)
+        self.assertEqual(int(version.group(1)), CURRENT_DOCTOR_SCHEMA)
+        source = PROBE.read_text()
+        self.assertIn(f'Is-BoundedInteger $value.schemaVersion {CURRENT_DOCTOR_SCHEMA}', source)
+        self.assertIn('$value.schemaVersion -notin @(8,9)', source)
+
+    def test_real_pwsh_mimo_checks_project_actual_report_and_preserve_exit_verdict(self):
+        pwsh = shutil.which("pwsh")
+        if not pwsh:
+            self.skipTest("pwsh unavailable; actual check producer is verified on Windows")
+        for statuses in [("passed", "failed"), ("failed", "passed"), ("passed", "passed")]:
+            with self.subTest(statuses=statuses), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                marker = root / "probe-result.json"
+                checks = [{"name": name, "status": status, "durationMilliseconds": 12 + index}
+                          for index, (name, status) in enumerate(zip(("contract", "native-configuration"), statuses))]
+                failed = "failed" in statuses
+                scenarios = [{"name": name, "status": "failed" if failed and name == "tool-round-trip" else "passed",
+                              "checks": checks if name == "tool-round-trip" else [{"name": "contract", "status": "passed", "durationMilliseconds": 1}],
+                              "durationMilliseconds": 25 if name == "tool-round-trip" else 1}
+                             for name in ("inventory", "tool-round-trip", "sentinel", "external-prerequisite")]
+                report = {"schemaVersion": 2, "harness": "mimo-code", "outcome": "failed" if failed else "passed",
+                          "scenarios": scenarios, "durationMilliseconds": 28}
+                producer = root / "synthetic-canary.ps1"
+                def run(value):
+                    producer.write_text("Write-Output '" + json.dumps(value) + "'; exit " + str(int(failed)) + "\n")
+                    env = dict(os.environ, NAN_CANARY_PROBE_RESULT=str(marker))
+                    result = subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-File", str(PROBE),
+                        "-Harness", "mimo-code", "-Stage", "deterministic-contract", "-NanBinary", str(producer),
+                        "-Canary", str(producer), "-Version", "0.1.16"],
+                        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+                    return result.returncode, json.loads(marker.read_text(encoding="utf-8-sig"))
+                code, observed = run(report)
+                self.assertEqual(code, int(failed))
+                self.assertEqual(observed["status"], "failed" if failed else "passed")
+                self.assertEqual(observed["conformanceChecks"], checks)
+                self.assertEqual(observed["exitCode"], int(failed))
+                for invalid in (checks[:1], [{**checks[0], "name": "PRIVATE"}, checks[1]],
+                                [{**checks[0], "output": "PRIVATE"}, checks[1]],
+                                [{**checks[0], "durationMilliseconds": True}, checks[1]]):
+                    scenarios[1]["checks"] = invalid
+                    _, observed = run(report)
+                    self.assertNotIn("conformanceChecks", observed)
+                    self.assertNotIn("PRIVATE", json.dumps(observed))
+
     def test_live_marker_accepts_only_closed_diagnostic_categories(self):
         with tempfile.TemporaryDirectory() as tmp:
             marker = Path(tmp) / "marker.json"
@@ -173,7 +223,7 @@ class WindowsProbeContracts(unittest.TestCase):
             producer = root / "doctor-producer.ps1"
             producer.write_text(
                 "@'\n"
-                '{"schemaVersion":8,"offline":true,"harness":"fx","level":"ok",'
+                f'{{"schemaVersion":{CURRENT_DOCTOR_SCHEMA},"offline":true,"harness":"fx","level":"ok",'
                 '"installed":true,"version":"1.2.3",'
                 '"minimumSupportedVersion":"1.0.0",'
                 '"lastCompatibleVersion":"1.2.3",'
@@ -195,7 +245,12 @@ class WindowsProbeContracts(unittest.TestCase):
             value = __import__("json").loads(marker.read_text(encoding="utf-8-sig"))
             self.assertEqual(value["status"], "passed")
             self.assertEqual(value["exitCode"], 0)
-            for invalid in ("true", "8.5", '"8"', "9223372036854775808"):
+            current = producer.read_text()
+            producer.write_text(current.replace(f'"schemaVersion":{CURRENT_DOCTOR_SCHEMA}', '"schemaVersion":8'))
+            legacy = subprocess.run(command, env=env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(legacy.returncode, 0)
+            self.assertEqual(json.loads(marker.read_text(encoding="utf-8-sig"))["status"], "passed")
+            for invalid in ("true", "9.5", '"9"', "7", "10", "9223372036854775808"):
                 producer.write_text(
                     "Write-Output '{\"schemaVersion\":" + invalid + ",\"offline\":true,"
                     "\"harness\":\"fx\",\"level\":\"ok\",\"installed\":true,"
@@ -209,7 +264,7 @@ class WindowsProbeContracts(unittest.TestCase):
             for field in ("compatibleAt", "liveVerifiedAt"):
                 for invalid_timestamp in ("123", "true", "{}"):  # timestamps must remain Rust strings
                     producer.write_text(
-                        "Write-Output '{\"schemaVersion\":8,\"offline\":true,"
+                        f"Write-Output '{{\"schemaVersion\":{CURRENT_DOCTOR_SCHEMA},\"offline\":true,"
                         "\"harness\":\"fx\",\"level\":\"ok\",\"installed\":true,"
                         "\"version\":\"1.2.3\",\"" + field + "\":" + invalid_timestamp + ","
                         "\"warnings\":[],\"safeToShare\":true}'\nexit 0\n",
@@ -296,7 +351,7 @@ class WindowsProbeContracts(unittest.TestCase):
         self.assertIn("$Value.status -isnot [string]", source)
         self.assertNotIn("$value.schemaVersion -isnot [int]", source)
         self.assertIn("Is-BoundedInteger $Value.schemaVersion 2", source)
-        self.assertIn("Is-BoundedInteger $value.schemaVersion 8", source)
+        self.assertIn(f"Is-BoundedInteger $value.schemaVersion {CURRENT_DOCTOR_SCHEMA}", source)
         self.assertIn("function Is-DoctorOptionalString", source)
         self.assertIn("compatibleAt','liveVerifiedAt", source)
         self.assertIn("'inventoryFailureReasons'", source)

@@ -22,12 +22,14 @@ def jobs(path):
 
 
 def condition(job, *, mode='live', live=True, comparison=False, approval='success',
-              cancelled=False, prerequisite='success', has_cells='true', ref='refs/heads/main'):
+              cancelled=False, prerequisite='success', input_validation='success',
+              has_cells='true', ref='refs/heads/main'):
     expression = re.search(r'^    if: (.+)$', job, re.M).group(1)
     expression = expression.removeprefix('${{').removesuffix('}}').strip()
     values = {'inputs.mode': mode, 'inputs.live': live, 'inputs.omp_usage_comparison': comparison,
               'needs.approve-live.result': approval, 'needs.prepare.result': prerequisite,
               'needs.select.result': prerequisite, 'needs.select.outputs.has_cells': has_cells,
+              'needs.validate-inputs.result': input_validation,
               'github.ref': ref}
     for key in sorted(values, key=len, reverse=True):
         expression = re.sub(r'(?<![\w.-])' + re.escape(key) + r'(?![\w.-])', repr(values[key]), expression)
@@ -47,6 +49,48 @@ def condition(job, *, mode='live', live=True, comparison=False, approval='succes
 
 
 class LiveApproval(unittest.TestCase):
+    def test_inventory_observation_routes_only_to_the_credential_free_reusable_job(self):
+        workflow = jobs(WORKFLOWS / 'windows-cli-diagnostic.yml')
+        observer = workflow['mimo-inventory-observation']
+        self.assertIn('needs: validate-inputs', observer)
+        self.assertIn('uses: ./.github/workflows/mimo-inventory-diagnostic.yml', observer)
+        self.assertNotIn('environment:', observer)
+        self.assertNotIn('secrets', observer)
+        mode = 'mimo-inventory-observation'
+        self.assertTrue(condition(observer, mode=mode, approval='skipped'))
+        self.assertTrue(condition(observer, mode=mode, ref='refs/heads/diagnostic', approval='skipped'))
+        self.assertFalse(condition(observer, mode=mode, cancelled=True))
+        for validation in ('failure', 'cancelled', 'skipped', 'timed_out'):
+            self.assertFalse(condition(observer, mode=mode, input_validation=validation))
+        for other_mode in ('live', 'deterministic', 'native-diagnostic', 'codex-diagnostic'):
+            self.assertFalse(condition(observer, mode=other_mode))
+        for name in ('approve-live', 'diagnostic', 'omp-usage-comparison'):
+            for comparison in (False, True):
+                with self.subTest(job=name, comparison=comparison):
+                    self.assertFalse(condition(workflow[name], mode=mode, comparison=comparison,
+                                               approval='success'))
+
+    def test_failed_windows_input_validation_blocks_review_and_credentials_even_with_approval(self):
+        workflow = jobs(WORKFLOWS / 'windows-cli-diagnostic.yml')
+        validator = workflow['validate-inputs']
+        self.assertIn('permissions: {}', validator)
+        self.assertNotIn('environment:', validator)
+        self.assertNotIn('secrets.', validator)
+        for name in ('approve-live', 'diagnostic', 'omp-usage-comparison'):
+            job = workflow[name]
+            self.assertIsNotNone(re.search(r'^    needs: (?:validate-inputs|\[[^\n]*validate-inputs[^\n]*\])$', job, re.M))
+            comparison = name == 'omp-usage-comparison'
+            self.assertTrue(condition(job, comparison=comparison))
+            for validation in ('failure', 'cancelled', 'skipped', 'timed_out'):
+                for mode in ('live', 'deterministic'):
+                    with self.subTest(job=name, validation=validation, mode=mode):
+                        self.assertFalse(condition(job, mode=mode, comparison=comparison,
+                                                   input_validation=validation, approval='success'))
+        # Deterministic diagnostics still need valid inputs when there is no review at all.
+        self.assertTrue(condition(workflow['diagnostic'], mode='deterministic', approval='skipped'))
+        self.assertFalse(condition(workflow['diagnostic'], mode='deterministic', approval='skipped',
+                                   input_validation='failure'))
+
     def test_every_live_worker_has_a_direct_fail_closed_approval_dependency(self):
         observed = set()
         for filename, names in CONSUMERS.items():

@@ -20,6 +20,34 @@ def report(**updates):
     value.update(updates); return value
 
 class WindowsSummaryTests(unittest.TestCase):
+    def test_mimo_checks_and_existing_progress_survive_closed_summary_without_promoting_failure(self):
+        value = report()
+        value["harnesses"][0]["harness"] = "mimo-code"
+        checks = [{"name": "contract", "status": "passed", "durationMilliseconds": 12},
+                  {"name": "native-configuration", "status": "failed", "durationMilliseconds": 34}]
+        detail = {"conformanceChecks": checks, "progress": {"progressStatus": "valid", "progress": {
+            "schema_version": 1, "scenario": "tool-round-trip", "stage": "native-configuration",
+            "status": "failed", "elapsed_milliseconds": 34}}}
+        value["harnesses"][0]["phases"]["deterministic-contract"]["diagnostic"] = detail
+        view = summary.safe_view(value)
+        self.assertEqual(view["totals"]["failed"], 1)
+        self.assertIn("contract=passed(12ms),native-configuration=failed(34ms)", summary.render(view))
+        self.assertIn("stage=native-configuration", summary.render(view))
+        for key, item in [("durationMilliseconds", True), ("durationMilliseconds", -1),
+                          ("durationMilliseconds", 86400001), ("status", {"failed": None}),
+                          ("name", "PRIVATE"), ("output", "PRIVATE")]:
+            checks[0][key] = item
+            with self.assertRaises(summary.UnsafeReport) as raised:
+                summary.safe_view(value)
+            self.assertNotIn("PRIVATE", str(raised.exception))
+            checks[0] = {"name": "contract", "status": "passed", "durationMilliseconds": 12}
+        for phase, harness in [("install", "mimo-code"), ("deterministic-contract", "codex")]:
+            changed = report()
+            changed["harnesses"][0]["harness"] = harness
+            changed["harnesses"][0]["phases"][phase]["diagnostic"] = {"conformanceChecks": checks}
+            with self.assertRaises(summary.UnsafeReport):
+                summary.safe_view(changed)
+
     def test_skips_cannot_be_counted_as_passes_or_applied_to_available_harnesses(self):
         value = report(harnesses=[{"harness": "fx", "outcome": "skipped", "phases": {
             name: {"status": "SKIPPED", "reason": summary.WINDOWS_SKIP_REASON}

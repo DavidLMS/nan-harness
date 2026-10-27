@@ -1,0 +1,97 @@
+name: MiMo inventory output observation
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        description: Immutable diagnostic candidate
+        required: true
+        type: string
+        default: v0.1.26
+      release_commit:
+        description: Exact immutable candidate commit
+        required: true
+        type: string
+        default: 0be5d88fdefe020e8c302f6538756869042c01fd
+      asset_run_id:
+        description: Canonical main Release gate run containing the attested assets
+        required: true
+        type: string
+        default: '40475697974'
+      manifest_sha256:
+        description: Independently verified checksum manifest digest
+        required: true
+        type: string
+        default: 6e64b201b4057c5300c33077bfed8e0fc7975081fb33f52600ae7d66f0324cab
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: mimo-inventory-observation-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  observe:
+    name: Observe four fixed native Windows inventory cases
+    runs-on: windows-2025
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify the exact observation source
+        run: |
+          if ((git rev-parse HEAD) -cne $env:GITHUB_SHA) { throw 'observation checkout differs' }
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.22.1
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: '3.12'
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: mimo-inventory-observer-v1
+      - name: Compile the source-only observer without running a harness
+        run: |
+          cargo test --locked -p nan-harness-test-support --lib --no-run
+          if ($LASTEXITCODE -ne 0) { throw 'observer compilation failed' }
+      - name: Verify the immutable release pair independently
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_COMMIT: ${{ inputs.release_commit }}
+          ASSET_RUN_ID: ${{ inputs.asset_run_id }}
+          MANIFEST_SHA256: ${{ inputs.manifest_sha256 }}
+        run: |
+          python -B canary/actions/windows_release_assets.py --repository $env:GITHUB_REPOSITORY `
+            --tag $env:RELEASE_TAG --commit $env:RELEASE_COMMIT --controller $env:GITHUB_SHA `
+            --run-id $env:ASSET_RUN_ID --manifest-sha256 $env:MANIFEST_SHA256 `
+            --directory (Join-Path $env:RUNNER_TEMP 'mimo-inventory-attested-release') `
+            --provenance (Join-Path $env:RUNNER_TEMP 'mimo-inventory-release-provenance.json')
+          if ($LASTEXITCODE -ne 0) { throw 'release identity verification failed' }
+      - name: Observe JSON and default output without qualification authority
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python -B canary/actions/mimo_inventory_diagnostic.py `
+            --binary $env:NAN_DIAGNOSTIC_RELEASE_BINARY `
+            --provenance (Join-Path $env:RUNNER_TEMP 'mimo-inventory-release-provenance.json') `
+            --source-sha $env:GITHUB_SHA `
+            --directory (Join-Path $env:RUNNER_TEMP 'mimo-inventory-observation')
+          if ($LASTEXITCODE -ne 0) { throw 'inventory observation did not complete' }
+      - name: Upload only validated observations and public release provenance
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mimo-inventory-observation-${{ github.run_id }}
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/mimo-inventory-observation/mimo-inventory-diagnostic.json
+            ${{ runner.temp }}/mimo-inventory-release-provenance.json

@@ -231,6 +231,16 @@ async function driveDom() {
     } else facts.errorCategory = null;
     saveFacts(); return;
   }
+  if (qualify && process.platform === 'darwin' && request.action === 'submit' && request.purpose === 'failure') {
+    const prepared = await require('./hermes-before-failure.cjs').prepare({ page,
+      owned: () => ownedEndpoint(deadline), deadline, sample: sampleRetryInterior,
+      stable: stableCandidate, pause: delay });
+    facts.firstRunPreparation = prepared.stage;
+    if (!prepared.ready) {
+      facts.errorCategory = prepared.stage === 'uncertain' ? 'submit-action-failed' : 'submit-action-intercepted';
+      saveFacts(); return;
+    }
+  }
   const errorCards = page.locator('[data-role="assistant"][data-slot="aui_assistant-message-root"] [role="alert"]:visible');
   const retryButton = errorCards.getByRole('button', { name: 'Retry', exact: true });
   async function errorProof() {

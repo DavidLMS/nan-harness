@@ -170,6 +170,50 @@ class ClaudeNativeEvidenceTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 q.semantic_observations(root, 'claude-desktop')
 
+    def test_actual_unconfirmed_native_completions_never_confirm_actions(self):
+        records = json.loads((ROOT / 'canary/tests/fixtures/claude-macos-unconfirmed-completions.json').read_text())
+        self.assertEqual(len(records), 5)
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'facts.json'
+            for record in records:
+                path.write_text(json.dumps(record))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [record])
+                self.assertEqual(record['stage'], 'action-uncertain')
+                self.assertNotIn('nativeStage', record)
+                self.assertEqual([record[key] for key in ('submittedTurns', 'inputVerifiedTurns', 'copiedResponses')], [2, 2, 2])
+                self.assertFalse(record['retryAttempted'])
+        self.assertEqual(records[1]['nativeCompletion']['stage'], 'sent')
+        self.assertEqual(records[1]['transportFailure'], 'timeout')
+        self.assertNotIn('composerShape', records[2]['nativeCompletion'])
+
+    def test_native_completion_requires_a_failed_started_mac_transport_and_closed_values(self):
+        base = self.mac_timeout() | dict(transportStarted=True, transportBudgetMs=500,
+            nativeCompletion=dict(stage='composer', remainingMs=100))
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'facts.json'
+            changes = [dict(transportStarted=False), dict(actionPhase='completed'),
+                dict(actionPhase='post-guard'), dict(nativeStage='composer'),
+                dict(transportFailure=None), dict(transportFailure='spawn'),
+                dict(mechanism='claude-windows-native-chat'), dict(transportBudgetMs=99)]
+            for completion in (None, [], {}, dict(stage='PRIVATE', remainingMs=100),
+                    dict(stage={'sent': None}, remainingMs=100), dict(stage='sent', remainingMs=True),
+                    dict(stage='sent', remainingMs=-1), dict(stage='sent', remainingMs=501),
+                    dict(stage='sent', remainingMs=15001), dict(stage='sent', remainingMs=0, rawOutput='PRIVATE'),
+                    dict(stage='sent', remainingMs=0, composerShape=None),
+                    dict(stage='sent', remainingMs=0, composerShape=dict(editors=True, startTasks=0, sendMessages=0)),
+                    dict(stage='sent', remainingMs=0, composerShape=dict(editors=1024, startTasks=1, sendMessages=0))):
+                changes.append(dict(nativeCompletion=completion))
+            for change in changes:
+                path.write_text(json.dumps(base | change))
+                with self.subTest(change=change), self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+            for failure in ('timeout', 'nonzero-exit', 'output', 'pipe'):
+                for remaining in (0, 500):
+                    record = base | dict(transportFailure=failure,
+                        nativeCompletion=dict(stage='sent', remainingMs=remaining))
+                    path.write_text(json.dumps(record))
+                    self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [record])
+
     def test_actual_mac_producer_transport_and_facts_preserve_the_timeout(self):
         value = json.loads((ROOT / 'canary/tests/fixtures/claude-macos-transport-timeout.json').read_text())
         with tempfile.TemporaryDirectory() as root:
@@ -5776,6 +5820,33 @@ class WindowsLauncherObservationTests(unittest.TestCase):
 
 
 class HermesRetryScopeObservationTests(unittest.TestCase):
+    def test_actual_first_run_receipts_preserve_refusal_without_qualifying(self):
+        records = json.loads((ROOT / 'canary/tests/fixtures/hermes-first-run-preparation.json').read_text())
+        self.assertEqual(len(records), 7)
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'hermes.json'
+            for value in records:
+                path.write_text(json.dumps(value))
+                record = q.semantic_observations(root, 'hermes-desktop', 'macos')[0]
+                self.assertEqual(record['firstRunPreparation'], value['firstRunPreparation'])
+                self.assertEqual(record['inputSubmitted'], value['inputSubmitted'])
+                self.assertFalse(record['responseVerified'])
+                self.assertNotIn('qualification', record)
+                for platform in ('linux', 'windows'):
+                    with self.assertRaises(ValueError):
+                        q.semantic_observations(root, 'hermes-desktop', platform)
+            for invalid in (None, True, {'dismissed': None}, 'PRIVATE'):
+                path.write_text(json.dumps(records[0] | dict(firstRunPreparation=invalid)))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'hermes-desktop', 'macos')
+            for stage in ('blocked', 'uncertain'):
+                path.write_text(json.dumps(records[0] | dict(firstRunPreparation=stage)))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'hermes-desktop', 'macos')
+            value = records[0] | dict(firstRunPreparation='absent')
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'hermes-desktop', 'macos')[0]['firstRunPreparation'], 'absent')
+
     def test_actual_refusal_fixture_is_closed_and_keeps_legacy_receipts_valid(self):
         value = json.loads((ROOT / 'canary/tests/fixtures/hermes-retry-scope.json').read_text())
         with tempfile.TemporaryDirectory() as root:

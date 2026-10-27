@@ -16,11 +16,11 @@ MODES = frozenset(("deterministic", "live", "native-diagnostic"))
 SHA = re.compile(r"^[0-9a-f]{40}$")
 TOKEN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 CAUSE = re.compile(r"^WIN-[A-Z0-9_]+-[0-9a-f]{12}$")
-REASONS = frozenset(("official-version-resolved", "official-metadata-unavailable", "official-metadata-error", "native-runtime-present", "native-installer-complete", "installer-failed", "install-failed", "installer-installer-failed", "installer-official-metadata-probe-failed", "installer-timeout", "installer-launch-failed", "installer-nonzero", "installer-private-cleanup-failed", "probe-diagnostic", "probe-failed", "probe-nonzero", "probe-timeout", "probe-launch-failed", "verified", "version-doctor-failed", "prerequisites-failed", "metadata-failed", "build-failed", "phase-unfinished", "deterministic-mode", "credential-not-configured", "private-cleanup-failed", "required-runtime-missing", "private-environment-error", "not-started", "unfinished", "deadline-exhausted", "cleanup-failed"))
+REASONS = frozenset(("official-version-resolved", "official-metadata-unavailable", "official-metadata-error", "native-runtime-present", "native-installer-complete", "installer-failed", "install-failed", "installer-installer-failed", "installer-official-metadata-probe-failed", "installer-timeout", "installer-launch-failed", "installer-nonzero", "installer-private-cleanup-failed", "probe-diagnostic", "probe-failed", "probe-nonzero", "probe-timeout", "probe-launch-failed", "verified", "version-doctor-failed", "deterministic-contract-failed", "prerequisites-failed", "metadata-failed", "build-failed", "phase-unfinished", "deterministic-mode", "credential-not-configured", "private-cleanup-failed", "required-runtime-missing", "private-environment-error", "not-started", "unfinished", "deadline-exhausted", "cleanup-failed"))
 SEMVER = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$")
 SUBPHASES = frozenset(("metadata", "download", "archive", "asset-selection", "execute", "install", "virtualenv", "cleanup", "unknown"))
 PROGRESS_SCENARIOS = frozenset(("inventory", "sentinel", "tool-round-trip", "external-prerequisite"))
-PROGRESS_STAGES = frozenset(("scenario", "process", "provider-shutdown", "cleanup"))
+PROGRESS_STAGES = frozenset(("scenario", "process", "provider-shutdown", "cleanup", "native-configuration"))
 PROGRESS_STATUSES = frozenset(("started", "passed", "failed"))
 EXECUTABLES = frozenset(("unknown", "npm-node", "npm-cmd", "pwsh", "py-launcher", "python", "uv", "git", "github-api", "http-download", "official-metadata", "archive", "archive-extract"))
 ASSET_REASONS = frozenset(("release-empty", "expected-asset-missing", "expected-executable-missing", "invalid-archive", "empty-download", "windows-mapping-missing", "windows-asset-missing", "metadata-request-failed", "metadata-inconclusive", "invalid-ref", "invalid-version"))
@@ -47,7 +47,7 @@ PROBE_ASSERTION_CODES = frozenset((
 PROBE_MARKER_FIELDS = frozenset({
     "schemaVersion", "stage", "status", "diagnostics", "exitCode", "doctorVersion",
     "doctorExpectedVersion", "doctorReason", "doctorSchemaReason", "discoveryCode",
-    "inventoryFailureReasons", "inventoryProcess", "failedScenarios",
+    "inventoryFailureReasons", "inventoryProcess", "failedScenarios", "conformanceChecks",
 })
 PROBE_DIAGNOSTICS = frozenset(("doctor-child-launch", "doctor-exit-nonzero", "doctor-output-invalid", "doctor-schema-invalid", "doctor-version-missing", "doctor-version-invalid", "doctor-version-mismatch", "doctor-exit-missing", "conformance-child-launch", "conformance-exit-nonzero", "conformance-output-invalid", "conformance-schema-invalid", "conformance-scenario-missing", "conformance-scenario-failed", "conformance-inventory-failed", "conformance-inventory-operational-failed", "conformance-check-invalid", "conformance-exit-missing", "live-child-launch", "live-exit-nonzero", "live-exit-missing", "live-credential-missing", "live-tool-evidence-missing", "live-read-marker-missing", "live-completion-marker-missing", "live-bridge-sentinel", "live-usage-invalid", "live-usage-missing", "live-usage-unreadable", "live-usage-malformed", "live-usage-schema-invalid", "live-usage-not-observed", "live-usage-unsupported", "live-usage-summary-missing", "probe-unexpected-failure"))
 INVENTORY_PROCESS_STATUSES = frozenset(("completed", "nonzero-exit", "launch-error", "environment-error", "timeout", "missing-output", "capture-error", "cleanup-error"))
@@ -106,11 +106,23 @@ def _inventory_process(value, label):
         raise UnsafeReport(f"invalid {label} inventory process")
     return {key: value[key] for key in ("status", "exitCode", "osErrorCode", "timeoutMilliseconds", "cleanupStage", "cleanupStream") if key in value}
 
-def _diagnostic(value, label):
+def _diagnostic(value, label, harness=None):
     if not isinstance(value, dict):
         raise UnsafeReport(f"invalid {label} diagnostic")
     result = {}
     for key, item in value.items():
+        if key == "conformanceChecks":
+            if harness != "mimo-code" or label != "deterministic-contract" or type(item) is not list or len(item) != 2:
+                raise UnsafeReport(f"invalid {label} conformance checks")
+            for check, name in zip(item, ("contract", "native-configuration")):
+                if (type(check) is not dict or set(check) != {"name", "status", "durationMilliseconds"}
+                        or type(check["name"]) is not str or check["name"] != name
+                        or type(check["status"]) is not str or check["status"] not in {"passed", "failed"}
+                        or type(check["durationMilliseconds"]) is not int
+                        or not 0 <= check["durationMilliseconds"] <= 86400000):
+                    raise UnsafeReport(f"invalid {label} conformance checks")
+            result[key] = [dict(check) for check in item]
+            continue
         if key in {"subphase", "executable", "assetReason"}:
             choices = {"subphase": SUBPHASES, "executable": EXECUTABLES, "assetReason": ASSET_REASONS}[key]
             if item not in choices: raise UnsafeReport(f"invalid {label} diagnostic")
@@ -212,7 +224,7 @@ def _diagnostic(value, label):
         result[key] = item
     return result
 
-def _phase(value, label):
+def _phase(value, label, harness=None):
     if not isinstance(value, dict) or set(value) - {"status", "reason", "causalId", "causeGroup", "diagnostic", "causeDetails"} or value.get("status") not in STATUSES:
         raise UnsafeReport(f"invalid {label}")
     result = {"status": value["status"]}
@@ -224,9 +236,9 @@ def _phase(value, label):
         if key in value:
             result[key] = _cause(value[key], f"{label} {key}")
     if "diagnostic" in value:
-        result["diagnostic"] = _diagnostic(value["diagnostic"], label)
+        result["diagnostic"] = _diagnostic(value["diagnostic"], label, harness)
     if "causeDetails" in value:
-        result["causeDetails"] = _diagnostic(value["causeDetails"], label)
+        result["causeDetails"] = _diagnostic(value["causeDetails"], label, harness)
     return result
 
 def safe_view(report):
@@ -254,7 +266,7 @@ def safe_view(report):
             if (item["harness"] not in WINDOWS_UNAVAILABLE or
                     item["outcome"] != "skipped" or phases != expected):
                 raise UnsafeReport("invalid platform skip")
-        harnesses.append({"harness": item["harness"], "outcome": item["outcome"], "phases": {name: _phase(phases[name], name) for name in PHASES if name in phases}})
+        harnesses.append({"harness": item["harness"], "outcome": item["outcome"], "phases": {name: _phase(phases[name], name, item["harness"]) for name in PHASES if name in phases}})
     if len({item["harness"] for item in harnesses}) != len(harnesses):
         raise UnsafeReport("duplicate harness")
     totals = report.get("totals")
@@ -293,7 +305,10 @@ def render(view):
                 inventory_process = value["diagnostic"].get("inventoryProcess")
                 if inventory_process:
                     details.append("inventoryProcess=" + ",".join(f"{k}={v}" for k, v in inventory_process.items()))
-                diagnostic = {k: v for k, v in value["diagnostic"].items() if k not in {"progress", "inventoryProcess", "assertions"}}
+                checks = value["diagnostic"].get("conformanceChecks")
+                if checks:
+                    details.append("checks=" + ",".join(f"{check['name']}={check['status']}({check['durationMilliseconds']}ms)" for check in checks))
+                diagnostic = {k: v for k, v in value["diagnostic"].items() if k not in {"progress", "inventoryProcess", "assertions", "conformanceChecks"}}
                 if diagnostic:
                     details.append("diagnostic=" + ",".join(f"{k}={v}" for k, v in diagnostic.items()))
             if value.get("causeDetails"):

@@ -1,6 +1,6 @@
 //! Bounded diagnostic framing for the existing single macOS Chat helper action.
 use super::{FailureCategory, MAX_OUTPUT, write_input};
-use crate::native::mac_chat_turn::{NativeProgress, TransportObservation};
+use crate::native::mac_chat_turn::{NativeCompletion, NativeProgress, TransportObservation};
 use std::{
     io::{BufRead as _, BufReader},
     path::Path,
@@ -12,11 +12,12 @@ use zeroize::Zeroizing;
 
 fn read_result(
     output: impl std::io::Read,
-    latest: &Mutex<(Option<NativeProgress>, Option<NativeProgress>)>,
+    latest: &Mutex<TransportObservation>,
+    budget_ms: u32,
 ) -> Result<Zeroizing<String>, FailureCategory> {
     // Progress has at most sixteen fixed frames. Keep the original receipt cap
     // separately; no unbounded private output or diagnostic text is retained.
-    let mut input = BufReader::new(output.take(MAX_OUTPUT + 16 * 128 + 1));
+    let mut input = BufReader::new(output.take(MAX_OUTPUT + 17 * 128 + 1));
     let mut receipt = Zeroizing::new(Vec::new());
     let mut previous = None;
     loop {
@@ -37,10 +38,20 @@ fn read_result(
             }
             previous = Some(stage as u8);
             let mut observed = latest.lock().map_err(|_| FailureCategory::Output)?;
-            observed.0 = Some(stage);
-            if stage != NativeProgress::Finish {
-                observed.1 = Some(stage);
+            if observed.completion.is_some() && stage != NativeProgress::Finish {
+                return Err(FailureCategory::Output);
             }
+            observed.progress = Some(stage);
+            if stage != NativeProgress::Finish {
+                observed.work = Some(stage);
+            }
+        } else if receipt.is_empty() && line.starts_with(b"completion ") {
+            let value = NativeCompletion::parse(&line, budget_ms).ok_or(FailureCategory::Output)?;
+            let mut observed = latest.lock().map_err(|_| FailureCategory::Output)?;
+            if observed.completion.is_some() || observed.progress == Some(NativeProgress::Finish) {
+                return Err(FailureCategory::Output);
+            }
+            observed.completion = Some(value);
         } else {
             receipt.extend_from_slice(&line);
             if receipt.len() as u64 > MAX_OUTPUT {
@@ -78,11 +89,12 @@ pub(super) fn run(
     observation.started = true;
     let stdin = child.stdin.take().ok_or(FailureCategory::Pipe)?;
     let stdout = child.stdout.take().ok_or(FailureCategory::Pipe)?;
-    let latest = Arc::new(Mutex::new((None, None)));
+    let latest = Arc::new(Mutex::new(TransportObservation::default()));
+    let budget_ms = observation.budget_ms.unwrap_or(0);
     std::thread::scope(|scope| {
         let writer = scope.spawn(move || write_input(stdin, None, input));
         let reader_progress = Arc::clone(&latest);
-        let reader = scope.spawn(move || read_result(stdout, &reader_progress));
+        let reader = scope.spawn(move || read_result(stdout, &reader_progress, budget_ms));
         let status = loop {
             if Instant::now() >= deadline {
                 break None;
@@ -103,8 +115,9 @@ pub(super) fn run(
         let written = writer.join();
         let output = reader.join();
         if let Ok(value) = latest.lock() {
-            observation.progress = value.0;
-            observation.work = value.1;
+            observation.progress = value.progress;
+            observation.work = value.work;
+            observation.completion = value.completion;
         }
         let written = written.map_err(|_| FailureCategory::Pipe)?;
         let output = output.map_err(|_| FailureCategory::Pipe)?;
@@ -126,6 +139,41 @@ mod tests {
     use super::*;
     use crate::native::mac_chat_turn::ChatTurnReceipt;
     use std::os::unix::fs::PermissionsExt as _;
+    #[test]
+    fn one_completion_is_retained_before_finish_and_cannot_replace_a_receipt() {
+        let observed = Mutex::new(TransportObservation::default());
+        let raw = b"progress composer\ncompletion composer 100 1 0 0\n";
+        let output = read_result(raw.as_slice(), &observed, 500).unwrap();
+        assert!(output.is_empty());
+        assert!(ChatTurnReceipt::parse(&output, "input").is_none());
+        let value = serde_json::to_value(observed.lock().unwrap().completion.unwrap()).unwrap();
+        assert_eq!(value["stage"], "composer");
+        assert_eq!(value["composerShape"]["sendMessages"], 0);
+        for raw in [
+            "completion composer 100\ncompletion composer 100\n",
+            "progress finish\ncompletion composer 100\n",
+            "completion composer 100\nprogress tree\n",
+            "completion composer 501\n",
+            "completion PRIVATE 100\n",
+        ] {
+            assert_eq!(
+                read_result(
+                    raw.as_bytes(),
+                    &Mutex::new(TransportObservation::default()),
+                    500
+                ),
+                Err(FailureCategory::Output)
+            );
+        }
+        let raw=b"progress composer\ncompletion sent 100 1 0 1\nprogress finish\nturn sent\ncomposer 1 0 1\n";
+        let output = read_result(
+            raw.as_slice(),
+            &Mutex::new(TransportObservation::default()),
+            500,
+        )
+        .unwrap();
+        assert!(ChatTurnReceipt::parse(&output, "input").is_some());
+    }
 
     fn scripted(
         suffix: &str,
@@ -152,13 +200,14 @@ mod tests {
 
     #[test]
     fn progress_is_closed_ordered_bounded_and_separate_from_the_receipt() {
-        let latest = Mutex::new((None, None));
+        let latest = Mutex::new(TransportObservation::default());
         let raw = b"progress window\nprogress tree\nprogress finish\nturn sent\ncomposer 1 0 1\n";
-        let output = read_result(&raw[..], &latest).unwrap();
+        let output = read_result(&raw[..], &latest, 500).unwrap();
         assert_eq!(
-            *latest.lock().unwrap(),
-            (Some(NativeProgress::Finish), Some(NativeProgress::Tree))
+            latest.lock().unwrap().progress,
+            Some(NativeProgress::Finish)
         );
+        assert_eq!(latest.lock().unwrap().work, Some(NativeProgress::Tree));
         assert!(ChatTurnReceipt::parse(&output, "input-failure-owned").is_some());
         for invalid in [
             b"progress tree\nprogress tree\n".to_vec(),
@@ -173,15 +222,13 @@ mod tests {
             ]
             .concat(),
         ] {
-            let latest = Mutex::new((None, None));
+            let latest = Mutex::new(TransportObservation::default());
             assert_eq!(
-                read_result(invalid.as_slice(), &latest),
+                read_result(invalid.as_slice(), &latest, 500),
                 Err(FailureCategory::Output)
             );
-            assert_eq!(
-                *latest.lock().unwrap(),
-                (Some(NativeProgress::Tree), Some(NativeProgress::Tree))
-            );
+            assert_eq!(latest.lock().unwrap().progress, Some(NativeProgress::Tree));
+            assert_eq!(latest.lock().unwrap().work, Some(NativeProgress::Tree));
         }
         assert!(NativeProgress::parse(b"progress {\"tree\":null}\n").is_none());
         assert!(NativeProgress::parse(b"progress tree\r\n").is_none());
