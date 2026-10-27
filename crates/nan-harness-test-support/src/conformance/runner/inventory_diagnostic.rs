@@ -213,7 +213,8 @@ async fn observe_inventory(
     record
 }
 
-#[tokio::test]
+// Match the published canary's provider scheduling while measuring output loss.
+#[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires an explicitly staged release CLI and stock MiMo on PATH"]
 async fn native_mimo_inventory_output() {
     let binary = PathBuf::from(
