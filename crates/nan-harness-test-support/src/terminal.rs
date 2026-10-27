@@ -591,18 +591,39 @@ mod tests {
         let _ = unrelated.wait();
     }
 
+    #[test]
+    #[ignore = "subprocess fixture"]
+    fn bounded_output_fixture() {
+        use std::io::Write as _;
+
+        let mut stdout = std::io::stdout().lock();
+        stdout.write_all(&vec![0; 100_000]).expect("fixture output");
+        stdout.write_all(b"CAPTURE_TAIL_OK").expect("fixture tail");
+        stdout.flush().expect("fixture flush");
+        // End with the marker rather than the test harness's own completion summary.
+        std::process::exit(0);
+    }
+
     #[tokio::test]
     async fn captured_output_is_bounded() {
         let workspace = tempfile::tempdir().expect("workspace should exist");
-        let output = TerminalCommand::new("/bin/sh", workspace.path())
-            .args(["-c", "head -c 100000 /dev/zero && printf CAPTURE_TAIL_OK"])
-            .run()
-            .await
-            .expect("command should complete");
+        let output = TerminalCommand::new(
+            std::env::current_exe().expect("test executable"),
+            workspace.path(),
+        )
+        .args([
+            "--ignored",
+            "--exact",
+            "terminal::tests::bounded_output_fixture",
+            "--nocapture",
+        ])
+        .run()
+        .await
+        .expect("command should complete");
         assert!(output.status.success());
         assert!(output.stdout.ends_with("CAPTURE_TAIL_OK"));
         assert!(output.stdout.contains("output truncated"));
-        assert!(output.stdout.len() <= super::MAX_CAPTURE_BYTES);
+        assert_eq!(output.stdout.len(), super::MAX_CAPTURE_BYTES);
     }
 
     #[cfg(windows)]

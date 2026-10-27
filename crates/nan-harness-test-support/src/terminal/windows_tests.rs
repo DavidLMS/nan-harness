@@ -20,16 +20,25 @@ fn empty_fixture() {}
 #[test]
 #[ignore = "subprocess fixture"]
 fn quiet_parent_fixture() {
-    let mut child = Command::new(std::env::current_exe().expect("test executable"))
+    // Rust's stable Windows Command inherits every inheritable handle, even when its selected
+    // stdio is NUL. Python's close_fds whitelist excludes the root's capture handles from the
+    // final leaf. Wait for this bootstrap to exit so only that quiet owned leaf can remain.
+    // Python is also a prerequisite of the native Windows workflow's Hermes lifecycle checks.
+    let status = Command::new("python.exe")
+        .args([
+            "-I",
+            "-S",
+            "-c",
+            "import os, subprocess, sys; subprocess.Popen(sys.argv[1:], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True); os._exit(0)",
+        ])
+        .arg(std::env::current_exe().expect("test executable"))
         .args(["--ignored", "--exact", LEAF_FIXTURE])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .spawn()
-        .expect("quiet owned descendant");
-    std::thread::spawn(move || {
-        let _ = child.wait();
-    });
+        .status()
+        .expect("quiet descendant bootstrap");
+    assert!(status.success(), "quiet descendant bootstrap must succeed");
 }
 
 #[test]
@@ -106,7 +115,29 @@ async fn diagnostic_detects_owned_descendant_after_root_exit_and_both_eofs() {
     .timeout(Duration::from_secs(10))
     .diagnose(CaptureMode::Pipe, None)
     .await;
-    assert_eq!(output.event, ProcessEvent::Exited);
+    assert_eq!(
+        output.event,
+        ProcessEvent::Exited,
+        "quiet descendant observation: event={:?} code={:?} stdoutEof={} stderrEof={} stdoutReader={:?} stderrReader={:?} cleanup={:?} cleanupStage={:?} atFailureState={:?} atFailureCount={} residualState={:?} residualCount={} osCode={:?} durationMs={} stdoutEofMs={:?} stderrEofMs={:?} stdoutCleanupEofMs={:?} stderrCleanupEofMs={:?}",
+        output.event,
+        output.status.and_then(|status| status.code()),
+        output.stdout_eof,
+        output.stderr_eof,
+        output.stdout_reader,
+        output.stderr_reader,
+        output.cleanup,
+        output.cleanup_stage,
+        output.survivors_at_failure.state,
+        output.survivors_at_failure.count,
+        output.survivors_residual.state,
+        output.survivors_residual.count,
+        output.os_error_code,
+        output.duration.as_millis(),
+        output.stdout_eof_after.map(|time| time.as_millis()),
+        output.stderr_eof_after.map(|time| time.as_millis()),
+        output.stdout_eof_after_cleanup.map(|time| time.as_millis()),
+        output.stderr_eof_after_cleanup.map(|time| time.as_millis()),
+    );
     assert!(output.status.expect("root status").success());
     assert!(output.stdout_eof && output.stderr_eof);
     assert_eq!(output.cleanup, None);
