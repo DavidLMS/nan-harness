@@ -7,6 +7,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.26] - 2026-10-27
+
 ### Fixed
 
 - Bring the retained Codex Retry button into view before click verification
@@ -1068,7 +1070,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.25...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.26...HEAD
+[0.1.26]: https://github.com/DavidLMS/nan-harness/compare/v0.1.25...v0.1.26
 [0.1.25]: https://github.com/DavidLMS/nan-harness/compare/v0.1.24...v0.1.25
 [0.1.24]: https://github.com/DavidLMS/nan-harness/compare/v0.1.23...v0.1.24
 [0.1.23]: https://github.com/DavidLMS/nan-harness/compare/v0.1.22...v0.1.23
