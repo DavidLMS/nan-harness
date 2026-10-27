@@ -171,7 +171,7 @@ class ProbeHarnessTests(unittest.TestCase):
             env["NAN_CANARY_MODEL"] = model
         if marker:
             env["NAN_CANARY_PROBE_RESULT"] = str(marker_path)
-        result = subprocess.run(["bash", str(PROBE), harness], env=env,
+        result = subprocess.run(["bash", str(PROBE), harness], env=env, stdin=subprocess.DEVNULL,
                                 capture_output=True, text=True, timeout=30)
         return result, marker_path
 
