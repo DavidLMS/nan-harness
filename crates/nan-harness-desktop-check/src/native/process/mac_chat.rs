@@ -180,9 +180,13 @@ mod tests {
             "print('progress window\\nprogress tree',flush=True);time.sleep(2)",
             "print('progress window\\nprogress finish\\nturn sent\\ncomposer 1 0 1',flush=True);time.sleep(2)",
         ] {
-            let mut observation = TransportObservation::default();
+            let mut observation = TransportObservation {
+                budget_ms: Some(500),
+                ..TransportObservation::default()
+            };
             let result = scripted(script, Duration::from_millis(500), &mut observation);
             assert_eq!(result, Err(FailureCategory::Timeout));
+            assert_eq!(observation.budget_ms, Some(500));
             assert!(observation.started);
             assert!(matches!(
                 observation.progress,
