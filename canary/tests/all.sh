@@ -56,7 +56,7 @@ for test_script in \
   windows-release-assets.py \
   mimo-inventory-diagnostic.py mimo-inventory-workflow.py \
   mimo-conformance-diagnostic.py mimo-conformance-workflow.py \
-  mimo-live-observation.py mimo-live-diagnostic.py mimo-live-workflow.py \
+  mimo-session-observation.py mimo-live-observation.py mimo-live-diagnostic.py mimo-live-workflow.py \
   probe-harness.py \
   probe-harness-windows.py \
   codex-diagnostic.py \

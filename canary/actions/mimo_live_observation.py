@@ -83,11 +83,16 @@ def usage(path):
 
 
 def validate(value):
-    if (type(value) is not dict or set(value) != {"schemaVersion", "stage", "stdout", "stderr", "usage"}
-            or type(value["schemaVersion"]) is not int or value["schemaVersion"] != 1
+    required = {"schemaVersion", "stage", "stdout", "stderr", "usage"}
+    if (type(value) is not dict or type(value.get("schemaVersion")) is not int
+            or value["schemaVersion"] not in (1, 2)
+            or set(value) != (required | {"trajectory"} if value["schemaVersion"] == 2 else required)
             or type(value["stage"]) is not str or value["stage"] not in STAGES
             or type(value["usage"]) is not str or value["usage"] not in ("observed", "missing", "invalid", "other")):
         raise ValueError("invalid closed observation")
+    if value["schemaVersion"] == 2:
+        from mimo_session_observation import validate as validate_trajectory
+        validate_trajectory(value["trajectory"])
     for name in ("stdout", "stderr"):
         item = value[name]
         if (type(item) is not dict or set(item) != {"status", "events", "readMarker", "completionMarker", "bridgeSentinel"}
@@ -121,13 +126,25 @@ def read_observation(path):
         return None
 
 
+def noninteractive_prompt(prompt):
+    """Mirror MiMo 0.1.16's single positional argument and empty non-TTY stdin."""
+    if type(prompt) is not str or not prompt or len(prompt) > 65536:
+        return ""
+    message = '"' + prompt.replace('"', '\\"') + '"' if " " in prompt else prompt
+    return message + "\n"
+
+
 def main():
     if len(sys.argv) != 7 or sys.argv[5] not in STAGES:
         return 1
     output, error, evidence = (Path(item) for item in sys.argv[1:4])
     marker = sys.argv[4].encode("ascii")
-    value = validate(dict(schemaVersion=1, stage=sys.argv[5], stdout=stream(output, marker),
-                          stderr=stream(error, marker), usage=usage(evidence)))
+    from mimo_session_observation import collect as collect_trajectory
+    # A different persisted stdin suffix cannot bind to this exact expected text.
+    expected = "" if os.isatty(0) else noninteractive_prompt(os.environ.get("NAN_CANARY_MIMO_EXPECTED_PROMPT", ""))
+    trajectory = collect_trajectory(output.parent, sys.argv[4], expected)
+    value = validate(dict(schemaVersion=2, stage=sys.argv[5], stdout=stream(output, marker),
+                          stderr=stream(error, marker), usage=usage(evidence), trajectory=trajectory))
     # The controller chooses a fresh destination in its private cell directory.
     descriptor = os.open(sys.argv[6], os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(descriptor, "w", encoding="utf-8") as target:

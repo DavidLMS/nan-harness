@@ -152,8 +152,15 @@ live probe against the exact attested v0.1.27 binaries. It requires one upstream
 live approval and uses the separate main-only workers environment. It preserves
 the canonical install, live command, timeout, single attempt and assertions.
 An opt-in observer projects bounded JSON event counts, marker predicates and
-usage status before ephemeral capture cleanup. It retains no response text,
-tool arguments, identifiers or paths. Missing or invalid observations remain
+usage status before ephemeral capture cleanup. It also reads only the fresh
+owned session database, binding its sole principal user turn to MiMo 0.1.16's
+exact quoting and empty non-TTY stdin representation of the private prompt.
+Other persisted input remains unbound. Bounded principal-turn, tool-state and error-family counts plus
+final-answer marker predicates distinguish persisted execution from event
+output; they never replace the live assertions. Database reads use read-only
+mode and reject unbound profiles, overrides, ambiguous turns and oversized
+records. It retains no response text, tool arguments, identifiers or paths.
+Missing or invalid observations remain
 unproven; they cannot change the probe verdict. The diagnostic artifact and
 public release provenance are not release qualification receipts.
 
