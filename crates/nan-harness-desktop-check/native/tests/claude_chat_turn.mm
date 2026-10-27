@@ -19,7 +19,17 @@ static void ready_press_request(Request& value) {
     timespec ticks{}; assert(clock_gettime(CLOCK_MONOTONIC,&ticks) == 0);
     value.cutoff = static_cast<std::uint64_t>(ticks.tv_sec)*1000 + static_cast<std::uint64_t>(ticks.tv_nsec)/1000000 + 5000;
 }
-MacOwnedWindowState claude_mac_window_state(std::uint64_t, pid_t, CGRect) { return MacOwnedWindowState::Rejected; }
+static unsigned strict_window_reads = 0, copy_entry_window_reads = 0;
+static bool copy_entry_ready = false;
+MacOwnedWindowState claude_mac_window_state(std::uint64_t, pid_t, CGRect) {
+    ++strict_window_reads;
+    return MacOwnedWindowState::Rejected;
+}
+MacOwnedWindowState claude_mac_copy_entry_window_state(std::uint64_t id, pid_t pid, CGRect bounds) {
+    ++copy_entry_window_reads;
+    assert(id == 17 && pid == 7 && CGRectEqualToRect(bounds,CGRectMake(10,20,800,600)));
+    return copy_entry_ready ? MacOwnedWindowState::Ready : MacOwnedWindowState::Rejected;
+}
 MacWindowObservation claude_mac_window_observation() { return {}; }
 static Node fixture(int parent, const char* role, const char* label, const char* current = "") {
     return {nullptr, parent, role, label, current, CGRectZero, true};
@@ -230,6 +240,7 @@ int main(int argc, char** argv) {
     assert(std::string(mac_window_rejection(safe)) == "unmeasured");
     assert(classify_mac_owned_window(MacFocusRead::ReadyHeld,safe)==MacOwnedWindowState::Ready);
     assert(classify_mac_owned_window(MacFocusRead::CannotComplete,safe)==MacOwnedWindowState::PendingFocus);
+    assert(classify_mac_owned_window(MacFocusRead::FreshInputSnapshot,safe)==MacOwnedWindowState::PendingFocus);
     assert(classify_mac_owned_window(MacFocusRead::Rejected,safe)==MacOwnedWindowState::Rejected);
     for (unsigned missing=0; missing<7; ++missing) {
         auto unsafe=safe;
@@ -242,11 +253,73 @@ int main(int argc, char** argv) {
             case 5: unsafe.display_contained=false; break;
             default: unsafe.stack_clear=false;
         }
-        for (auto focus : {MacFocusRead::ReadyHeld, MacFocusRead::CannotComplete, MacFocusRead::Rejected})
+        for (auto focus : {MacFocusRead::ReadyHeld, MacFocusRead::CannotComplete, MacFocusRead::FreshInputSnapshot, MacFocusRead::Rejected})
             assert(classify_mac_owned_window(focus,unsafe)==MacOwnedWindowState::Rejected);
         const char* reasons[] = {"foreground", "application", "identity", "geometry", "layer", "display", "stack"};
         assert(std::string(mac_window_rejection(unsafe)) == reasons[missing]);
     }
+    const MacWindowObservation busy_focus{"focus","query-error","main-window","cannot-complete"};
+    assert(classify_mac_focus_read(busy_focus,false,MacFocusPolicy::Strict)==MacFocusRead::CannotComplete);
+    assert(classify_mac_focus_read(busy_focus,false,MacFocusPolicy::CopyEntry)==MacFocusRead::CannotComplete);
+    const MacWindowObservation stale_input{"focus","query-error","input-window","invalid-element"};
+    assert(classify_mac_focus_read(stale_input,false,MacFocusPolicy::Strict)==MacFocusRead::Rejected);
+    assert(classify_mac_focus_read(stale_input,false,MacFocusPolicy::CopyEntry)==MacFocusRead::FreshInputSnapshot);
+    assert(classify_mac_focus_read(stale_input,true,MacFocusPolicy::CopyEntry)==MacFocusRead::FreshInputSnapshot);
+    assert(classify_mac_focus_read({"unmeasured","ready","unqueried","unqueried"},false,MacFocusPolicy::CopyEntry)==MacFocusRead::Rejected);
+    for (const char* site : {"focused-element","input-timeout","focused-window","main-window","pid","role","position","size"}) {
+        auto wrong_site = stale_input; wrong_site.query_stage = site;
+        assert(classify_mac_focus_read(wrong_site,false,MacFocusPolicy::CopyEntry)==MacFocusRead::Rejected);
+    }
+    for (const char* error : {"no-value","attribute-unsupported","illegal-argument","failure","api-disabled"}) {
+        auto hard = stale_input; hard.query_error = error;
+        assert(classify_mac_focus_read(hard,false,MacFocusPolicy::CopyEntry)==MacFocusRead::Rejected);
+    }
+    for (const char* status : {"focus-mismatch","not-standard","untrusted","unqueried"}) {
+        auto foreign = stale_input; foreign.focus_status = status;
+        assert(classify_mac_focus_read(foreign,false,MacFocusPolicy::CopyEntry)==MacFocusRead::Rejected);
+    }
+    unsigned snapshot_reads = 0, copy_actions = 0;
+    assert(settle_owned_window([&] {
+        assert(copy_actions == 0);
+        return classify_mac_owned_window(++snapshot_reads == 1
+            ? classify_mac_focus_read(stale_input,false,MacFocusPolicy::CopyEntry) : MacFocusRead::ReadyHeld,safe);
+    }, [] { return true; }, [] {}));
+    // Snapshot readiness alone never dispatches Copy.
+    assert(snapshot_reads == 2 && copy_actions == 0);
+    FocusQuerySample retained_invalid;
+    retained_invalid.site = "target-role";
+    retained_invalid.observe(kAXErrorInvalidUIElement);
+    assert(focus_sample_state(retained_invalid,ComposerFocus::Rejected,
+        MacOwnedWindowState::Ready,MacOwnedWindowState::Ready,true,false)==ComposerFocus::Rejected);
+    snapshot_reads = 0;
+    bool snapshot_time = true;
+    assert(!settle_owned_window([&] {
+        ++snapshot_reads; return classify_mac_owned_window(MacFocusRead::FreshInputSnapshot,safe);
+    }, [&] { return snapshot_time; }, [&] { snapshot_time = false; }));
+    assert(snapshot_reads == 1 && copy_actions == 0);
+    Request copy_entry; ready_press_request(copy_entry);
+    copy_entry.window = 17; copy_entry.pid = 7; copy_entry.bounds = CGRectMake(10,20,800,600);
+    copy_entry.mode = "copy"; copy_entry_ready = true;
+    assert(wait_owned_window(copy_entry));
+    // The separate, unchanged legacy bool can still refuse before an action.
+    // Its native query is stubbed false; readiness must not bypass that proof.
+    if (owned(copy_entry)) ++copy_actions;
+    assert(copy_actions == 0);
+    assert(copy_entry_window_reads == 1 && strict_window_reads == 0);
+    for (const char* site : {"collect-before","collect-after"}) {
+        assert(!wait_owned_window(copy_entry,site));
+        assert(copy_entry_window_reads == 1);
+    }
+    for (const char* mode : {"input","input-replace-owned","input-failure-owned","retry","retry-temporal","failure-details-temporal"}) {
+        copy_entry.mode = mode;
+        assert(!wait_owned_window(copy_entry));
+        assert(copy_entry_window_reads == 1);
+    }
+    assert(strict_window_reads == 8);
+    copy_entry.mode = "copy"; copy_entry.cutoff = 0;
+    assert(!wait_owned_window(copy_entry));
+    assert(copy_entry_window_reads == 1 && strict_window_reads == 8 && copy_actions == 0);
+
     unsigned passive_reads=0, passive_pauses=0, actions=1;
     bool past_deadline=false;
     const auto settled_window = settle_composer_focus([&] {

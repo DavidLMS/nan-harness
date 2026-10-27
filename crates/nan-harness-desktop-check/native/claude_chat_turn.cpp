@@ -18,6 +18,7 @@
 bool claude_owned_mac_window(std::uint64_t, pid_t, CGRect);
 bool claude_owned_mac_window_observed(std::uint64_t, pid_t, CGRect, MacWindowObservation*);
 MacOwnedWindowState claude_mac_window_state(std::uint64_t, pid_t, CGRect);
+MacOwnedWindowState claude_mac_copy_entry_window_state(std::uint64_t, pid_t, CGRect);
 MacWindowObservation claude_mac_window_observation();
 namespace {
 using Clock = std::chrono::steady_clock;
@@ -147,7 +148,9 @@ static bool settle_owned_window(Query query, Within within_deadline, Pause pause
 static bool wait_owned_window(const Request& request, const char* site = "entry") {
     return settle_owned_window(
         [&] {
-            const auto state = claude_mac_window_state(request.window, request.pid, request.bounds);
+            const auto state = request.mode == "copy" && std::string_view(site) == "entry"
+                ? claude_mac_copy_entry_window_state(request.window, request.pid, request.bounds)
+                : claude_mac_window_state(request.window, request.pid, request.bounds);
             if (state == MacOwnedWindowState::Rejected) {
                 request.window_site = site;
                 request.window_observation = claude_mac_window_observation();
