@@ -101,7 +101,10 @@ fn printf_in_path(paths: &[std::path::PathBuf], pathext: &str) -> bool {
                 Ok(metadata) if metadata.is_file() => return true,
                 Ok(_) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(_) => panic!("controlled printf presence could not be inspected"),
+                Err(error) => panic!(
+                    "controlled printf presence metadata error: {:?}",
+                    error.kind()
+                ),
             }
         }
     }
