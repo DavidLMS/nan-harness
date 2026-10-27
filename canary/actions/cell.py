@@ -59,6 +59,7 @@ if os.name == "nt":
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from selection import CLI_HARNESSES, PLATFORMS as HOSTED_PLATFORMS, resolve_model
 from hermes_diagnostics import DIAGNOSTIC_CODES, safe_frames
+from mimo_live_observation import read_observation
 
 HARNESSES = CLI_HARNESSES
 SEMVER = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?\Z")
@@ -1254,13 +1255,14 @@ def windows_probe_result(path):
     return value
 
 
-def live(args, _state):
+def live(args, _state, observe=None):
     if not os.environ.get("NAN_API_KEY"):
         raise RuntimeError("live stage requires an explicitly supplied key")
     if args.harness == "gentle-shell":
         return gentle_probe(args, live=True)
     environment = cell_environment(args.directory)
     environment.pop("NAN_CANARY_HERMES_STREAM_JSON", None)
+    environment.pop("NAN_CANARY_MIMO_OBSERVATION", None)
     if args.harness == "hermes" and hermes_machine_frontend(getattr(args, "harness_version", "")):
         environment["NAN_CANARY_HERMES_STREAM_JSON"] = "1"
     environment["NAN_CANARY_NAN_COMMAND"] = str(args.binary)
@@ -1271,6 +1273,12 @@ def live(args, _state):
     # Forward slashes keep the path valid for Git Bash on native Windows.
     environment["NAN_CANARY_PROBE_RESULT"] = marker.as_posix()
     windows = os.name == "nt"
+    observation = args.directory / "mimo-live-observation.private.json"
+    if observe is not None:
+        if windows or args.harness != "mimo-code":
+            raise ValueError("live observation is available only for Unix MiMo")
+        observation.unlink(missing_ok=True)
+        environment["NAN_CANARY_MIMO_OBSERVATION"] = str(observation)
     probe = ROOT / ("canary/guest/probe-harness.ps1" if windows else "canary/guest/probe-harness.sh")
     if windows:
         # Match the native batch runner: PowerShell 7 preserves embedded quotes
@@ -1285,8 +1293,12 @@ def live(args, _state):
         status = private_command(command, args.directory, timeout=600, live=True,
                                  allow_failure=True, environment=environment)
         result = windows_probe_result(marker) if windows else probe_result(marker)
+        if observe is not None:
+            observe(read_observation(observation))
     finally:
         marker.unlink(missing_ok=True)
+        if observe is not None:
+            observation.unlink(missing_ok=True)
     if status == 0 and result is not None and result["status"] == "passed":
         return 1
     if result is not None and result["stage"] == "cleanup":

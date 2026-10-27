@@ -93,6 +93,18 @@ class ReleaseAssetsTests(unittest.TestCase):
             self.assertEqual({path.name for path in directory.iterdir()}, {
                 "SHA256SUMS", assets.PLATFORM_ASSETS["windows"]["harness"], assets.PLATFORM_ASSETS["windows"]["canary"]})
 
+    def test_linux_pair_uses_the_same_attested_canonical_archive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.setup_case(Path(tmp))
+            self.args.system = "linux"
+            cli, canary, receipt = assets.stage(self.args, self.fetch, self.command)
+            self.assertEqual(cli.name, "nan-harness-aarch64-unknown-linux-musl")
+            self.assertEqual(canary.name, "nan-harness-canary-aarch64-unknown-linux-musl")
+            self.assertEqual({item.name for item in self.args.directory.iterdir()}, {cli.name, canary.name, "SHA256SUMS"})
+            self.assertEqual(receipt["nanHarnessSha256"], hashlib.sha256(self.files[cli.name]).hexdigest())
+            self.assertEqual(receipt["canarySha256"], hashlib.sha256(self.files[canary.name]).hexdigest())
+            self.assertEqual(self.commands[-1][-1], "--deny-self-hosted-runners")
+
     def test_invalid_run_artifact_and_tag_never_reach_extraction_or_attestation(self):
         changes = [("run", "head_branch", "PRIVATE"), ("run", "path", ".github/workflows/release.yml"),
                    ("run", "head_repository", {"full_name": "foreign/repository"}),
