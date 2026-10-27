@@ -57,6 +57,11 @@ int main(int argc, char** argv) {
             } else if (rejection_index == "4") {
                 assert(std::string(input_readback_failure(true,false))=="input-value-mismatch");
                 rejected = {"readback-value","value-other","other"};
+            } else if (rejection_index == "5") {
+                FocusQuerySample query;
+                query.site = "target-size";
+                query.observe(kAXErrorInvalidUIElement);
+                rejected = {"paste-focus-before","query-failed","unmeasured",query.failure_site,input_ax_error(query.error)};
             } else return 3;
             progress(NativeProgress::Window);
             progress(rejection_index == "4" ? NativeProgress::ReadbackCopy : NativeProgress::PastedValue);
@@ -214,6 +219,67 @@ int main(int argc, char** argv) {
     if (settle_pasted_value([&] { ++value_queries; return PastedValue::Rejected; },
             [] { return true; }, [&] { ++value_pauses; })) ++readback_keys;
     assert(value_queries==1 && readback_keys==0 && value_pauses==0);
+
+    // Only an exactly captured transient read can retire one passive sample.
+    const auto ready_window = MacOwnedWindowState::Ready;
+    FocusQuerySample transient;
+    transient.site = "focused-element";
+    transient.observe(kAXErrorCannotComplete);
+    assert(transient.waitable());
+    assert(focus_sample_state(transient,ComposerFocus::Rejected,ready_window,ready_window,true,false)
+        == ComposerFocus::PendingIdentity);
+    unsigned pastes = 1, sends = 0, samples = 0;
+    assert(settle_pasted_value([&] {
+        assert(pastes == 1 && sends == 0);
+        const auto state = ++samples == 1
+            ? focus_sample_state(transient,ComposerFocus::Rejected,ready_window,ready_window,true,false)
+            : focus_sample_state({},ComposerFocus::Focused,ready_window,ready_window,true,false);
+        return state == ComposerFocus::PendingIdentity ? PastedValue::Pending
+            : pasted_value_state("prompt","prompt",true,state == ComposerFocus::Focused);
+    }, [] { return true; }, [] {}));
+    ++sends;
+    assert(samples == 2 && pastes == 1 && sends == 1);
+    assert(!focus_query_sample && !ax_query_failed);
+    {
+        FocusQuerySample scoped;
+        FocusQueryScope scope(scoped);
+        assert(focus_query_sample == &scoped);
+        scoped.site = "target-position";
+        scoped.observe(kAXErrorCannotComplete);
+        assert(!ax_query_failed && scoped.waitable());
+    }
+    assert(!focus_query_sample && !ax_query_failed);
+    for (auto error : {kAXErrorNoValue,kAXErrorAttributeUnsupported,kAXErrorInvalidUIElement,
+            kAXErrorFailure,kAXErrorIllegalArgument,kAXErrorNotImplemented,kAXErrorAPIDisabled}) {
+        auto mixed = transient;
+        mixed.site = "target-size";
+        mixed.observe(error);
+        assert(!mixed.waitable() && mixed.error == error && std::string(mixed.failure_site) == "target-size");
+        assert(focus_sample_state(mixed,ComposerFocus::Rejected,ready_window,ready_window,true,false)
+            == ComposerFocus::Rejected);
+    }
+    for (const char* conflict : {"target-pid","target-geometry","target-role","focused-pid",
+            "focused-geometry","focused-role","focused-identity","target-bounds-unavailable"}) {
+        auto changed = transient;
+        const char* cause = nullptr;
+        assert(!changed.note(false,conflict,&cause) && !changed.waitable());
+        assert(focus_sample_state(changed,ComposerFocus::Rejected,ready_window,ready_window,true,false)
+            == ComposerFocus::Rejected);
+    }
+    for (auto before : {MacOwnedWindowState::Ready,MacOwnedWindowState::PendingFocus,MacOwnedWindowState::Rejected}) {
+        for (auto after : {MacOwnedWindowState::Ready,MacOwnedWindowState::PendingFocus,MacOwnedWindowState::Rejected}) {
+            const auto observed = focus_sample_state(transient,ComposerFocus::Rejected,before,after,true,false);
+            assert(observed == (before == MacOwnedWindowState::Rejected || after == MacOwnedWindowState::Rejected
+                ? ComposerFocus::Rejected : ComposerFocus::PendingIdentity));
+        }
+    }
+    assert(focus_sample_state(transient,ComposerFocus::Rejected,ready_window,ready_window,false,false)==ComposerFocus::Rejected);
+    assert(focus_sample_state(transient,ComposerFocus::Rejected,ready_window,ready_window,true,true)==ComposerFocus::Rejected);
+    samples = sends = 0;
+    bool original_cutoff = true;
+    assert(!settle_pasted_value([&] { ++samples; return PastedValue::Pending; },
+        [&] { return original_cutoff; }, [&] { original_cutoff = false; }));
+    assert(samples == 1 && pastes == 1 && sends == 0);
 
     Tree scope_tree;
     scope_tree.nodes = {fixture(-1, "AXWindow", ""), fixture(0, "AXWebArea", ""),

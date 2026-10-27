@@ -155,7 +155,7 @@ impl Facts {
             self.native_completion = transport.completion;
         }
     }
-    fn observe_receipt(&mut self, receipt: crate::native::ChatTurnReceipt) {
+    fn observe_receipt(&mut self, receipt: &crate::native::ChatTurnReceipt) {
         self.native_completion = None;
         self.stage = receipt.stage;
         // These final native facts survive an independent post-guard failure;
@@ -286,7 +286,7 @@ impl ClaudeNativeChatSession<'_> {
             .observe_failed_completion(transport, result.is_err());
         let receipt = result?;
         let stage = receipt.stage;
-        self.facts.observe_receipt(receipt);
+        self.facts.observe_receipt(&receipt);
         self.facts.action_phase = Some(ChatActionPhase::PostGuard);
         self.gui
             .visual
@@ -565,7 +565,7 @@ mod tests {
         facts.observe_transport(observed);
         facts.observe_failed_completion(observed, false);
         assert!(facts.native_completion.is_none());
-        facts.observe_receipt(receipt);
+        facts.observe_receipt(&receipt);
         assert!(facts.native_completion.is_none());
         facts.begin_action(true);
         facts.action_phase = Some(ChatActionPhase::Transport);
@@ -623,7 +623,7 @@ mod tests {
             assert_eq!(value["retryAttempted"], false);
             produced.push(value);
             facts.observe_receipt(
-                crate::native::ChatTurnReceipt::parse("turn sent\ncomposer 1 0 1\n", "input")
+                &crate::native::ChatTurnReceipt::parse("turn sent\ncomposer 1 0 1\n", "input")
                     .unwrap(),
             );
             assert!(facts.native_completion.is_none());
@@ -665,6 +665,7 @@ mod tests {
             "paste-focus-after",
             "paste-relation",
             "readback-value",
+            "paste-focus-before",
         ];
         let mut produced = Vec::new();
         for (index, site) in sites.into_iter().enumerate() {
@@ -673,10 +674,18 @@ mod tests {
             let mut facts = Facts::default();
             facts.begin_action(true);
             facts.observe_transport(transport);
-            facts.observe_receipt(result.unwrap());
+            facts.observe_receipt(&result.unwrap());
             facts.action_phase = Some(ChatActionPhase::Completed);
             let value = serde_json::to_value(&facts).unwrap();
             assert_eq!(value["inputValueRejection"]["site"], site);
+            if index == 5 {
+                assert_eq!(
+                    value["inputValueRejection"]["queryFailure"],
+                    serde_json::json!({
+                        "site": "target-size", "error": "invalid-element"
+                    })
+                );
+            }
             assert_eq!(value["nativeStage"], "input-value-mismatch");
             assert_eq!(value["nativeProgress"], "finish");
             assert_eq!(

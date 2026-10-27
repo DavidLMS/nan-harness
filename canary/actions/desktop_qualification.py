@@ -52,8 +52,9 @@ def claude_windows_send_observation(value):
 def claude_input_value_rejection(value):
     focus_causes = set('deadline query-failed application focused-element target-pid target-bounds-unavailable target-geometry target-role focused-pid focused-bounds-unavailable focused-geometry focused-role focused-identity window-unmeasured window-foreground window-application window-focus window-geometry window-inventory window-identity window-layer window-display window-stack'.split())
     value_causes = {'query-failed', 'value-unavailable', 'value-type', 'value-size', 'value-encoding'}
-    if (type(value) is not dict or set(value) != {'site', 'cause', 'valueRelation'}
-            or any(type(item) is not str for item in value.values())):
+    fields = {'site', 'cause', 'valueRelation'}
+    if (type(value) is not dict or set(value) not in (fields, fields | {'queryFailure'})
+            or any(type(value[key]) is not str for key in fields)):
         raise ValueError('invalid Claude input value rejection')
     site, cause, relation = value['site'], value['cause'], value['valueRelation']
     if not (
@@ -67,6 +68,17 @@ def claude_input_value_rejection(value):
             or cause == 'value-other' and relation == 'other')
     ):
         raise ValueError('inconsistent Claude input value rejection')
+    if 'queryFailure' in value:
+        query = value['queryFailure']
+        sites = {'prior-query', 'app-timeout', 'focused-element', 'target-pid', 'target-position',
+                 'target-size', 'target-role', 'focused-pid', 'focused-position', 'focused-size', 'focused-role'}
+        errors = {'failure', 'illegal-argument', 'invalid-element', 'cannot-complete',
+                  'attribute-unsupported', 'not-implemented', 'api-disabled', 'no-value', 'other'}
+        if (cause != 'query-failed' or site not in {'paste-focus-before', 'paste-focus-after'}
+                or type(query) is not dict or set(query) != {'site', 'error'}
+                or type(query['site']) is not str or query['site'] not in sites
+                or type(query['error']) is not str or query['error'] not in errors):
+            raise ValueError('invalid Claude input query failure')
     return dict(value)
 
 

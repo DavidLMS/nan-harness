@@ -228,7 +228,7 @@ class ClaudeNativeEvidenceTests(unittest.TestCase):
 
     def test_actual_mac_input_rejection_fixtures_survive_the_final_python_projection(self):
         records = json.loads((ROOT / 'canary/tests/fixtures/claude-macos-input-value-rejections.json').read_text())
-        self.assertEqual(len(records), 5)
+        self.assertEqual(len(records), 6)
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'facts.json'
             for record in records:
@@ -238,6 +238,24 @@ class ClaudeNativeEvidenceTests(unittest.TestCase):
                     self.assertEqual(record['nativeStage'], 'input-value-mismatch')
                     self.assertEqual(record['submittedTurns'], 0)
                     self.assertFalse(record['retryAttempted'])
+
+    def test_mac_input_query_failure_is_closed_and_bound_to_focus_rejection(self):
+        base = dict(site='paste-focus-before', cause='query-failed', valueRelation='unmeasured')
+        sites = ('prior-query', 'app-timeout', 'focused-element', 'target-pid', 'target-position',
+                 'target-size', 'target-role', 'focused-pid', 'focused-position', 'focused-size', 'focused-role')
+        errors = ('failure', 'illegal-argument', 'invalid-element', 'cannot-complete',
+                  'attribute-unsupported', 'not-implemented', 'api-disabled', 'no-value', 'other')
+        for site in sites:
+            for error in errors:
+                value = base | {'queryFailure': {'site': site, 'error': error}}
+                self.assertEqual(q.claude_input_value_rejection(value), value)
+        for change in ({'queryFailure': None}, {'queryFailure': {'site': 'PRIVATE', 'error': 'cannot-complete'}},
+                       {'queryFailure': {'site': 'focused-element', 'error': 'PRIVATE'}},
+                       {'queryFailure': {'site': 'focused-element', 'error': 'cannot-complete', 'message': 'PRIVATE'}},
+                       {'site': 'paste-value'}, {'cause': 'target-geometry'}):
+            value = base | {'queryFailure': {'site': 'focused-element', 'error': 'cannot-complete'}} | change
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                q.claude_input_value_rejection(value)
 
     def test_mac_work_progress_retains_the_last_nonfinal_boundary(self):
         base = self.mac_timeout() | dict(nativeProgress='finish', transportStarted=True, transportBudgetMs=1000)

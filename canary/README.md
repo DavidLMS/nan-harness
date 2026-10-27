@@ -82,6 +82,17 @@ hosted activation and disposable profiles. The aggregate binds every tested
 binary hash to the release tag and commit. These deterministic Desktop probes
 complement the existing 52-cell live CLI gate; both must pass before publication.
 
+Claude macOS input qualification retains its original composer and absolute
+deadline after the single paste. Only an exactly captured Accessibility
+`CannotComplete` read may settle through further passive queries, bracketed by
+the existing held-window checks. A later sample must fully prove the same
+control, PID, role, bounds, focus and exact value before any next action. Hard or
+mixed errors, observed identity changes and expired budgets remain terminal;
+no focus, clipboard, paste, copy or Send action is replayed. Failed focus reads
+can retain a closed optional query site/error in `inputValueRejection`, without
+control values, paths or native error messages. This checker behavior does not
+change the installed application or the immutable CLI under qualification.
+
 ## Daily hosted compatibility
 
 `.github/workflows/harness-canary.yml` runs at 05:00 `Europe/Madrid`, including
