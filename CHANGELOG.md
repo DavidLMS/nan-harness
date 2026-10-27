@@ -7,6 +7,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Verify completed MiMo 0.1.16 live tasks from the exact isolated native session
+  when stdout is empty, retaining its console-output limitation in canary reports
+  without changing the installed harness or accepting incomplete task evidence.
+
 ## [0.1.27] - 2026-10-27
 
 ### Fixed

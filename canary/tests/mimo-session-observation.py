@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Synthetic owned SQLite trajectories must remain private and observation-only."""
+"""Synthetic owned SQLite trajectories and strict live-task evidence stay private."""
 import hashlib
 import json
 import os
@@ -69,6 +69,55 @@ class NativeSessionTests(unittest.TestCase):
         self.assertNotIn('PRIVATE_', json.dumps(value))
         self.assertEqual(observation.validate(value), value)
         return value
+
+    def live_evidence(self):
+        return observation.collect(self.root, MARKER, PROMPT, require_live_task=True)
+
+    def bind_read(self):
+        with self.connection() as db:
+            db.execute("UPDATE part SET data=json_set(data,'$.state.input.file_path',?) WHERE id='PRIVATE_READ'",
+                       (str(self.root / 'read-target.txt'),))
+
+    def test_live_evidence_requires_the_exact_target_and_a_fully_completed_turn(self):
+        self.assertEqual(self.live_evidence()['status'], 'unavailable')
+        self.bind_read()
+        self.assertEqual(self.live_evidence()['status'], 'observed')
+        with self.connection() as db:
+            db.execute("UPDATE part SET data=json_set(data,'$.state.input.file_path','read-target.txt') WHERE id='PRIVATE_READ'")
+        self.assertEqual(self.live_evidence()['status'], 'observed')
+
+    def test_live_evidence_rejects_incomplete_failed_or_wrong_turn_facts(self):
+        self.bind_read()
+        cases = (
+            ("UPDATE part SET data=json_set(data,'$.state.status','running') WHERE id='PRIVATE_READ'", ()),
+            ("UPDATE part SET data=json_set(data,'$.state.output','wrong marker') WHERE id='PRIVATE_READ'", ()),
+            ("UPDATE part SET data=json_set(data,'$.text','wrong answer') WHERE id='PRIVATE_TEXT'", ()),
+            ("UPDATE part SET data=json_set(data,'$.text','different prompt') WHERE id='PRIVATE_USER_TEXT'", ()),
+            ("UPDATE message SET data=json_remove(data,'$.time.completed') WHERE id='PRIVATE_ASSISTANT'", ()),
+            ("UPDATE message SET data=json_set(data,'$.finish','length') WHERE id='PRIVATE_ASSISTANT'", ()),
+            ("UPDATE message SET data=json_set(data,'$.finish','other') WHERE id='PRIVATE_ASSISTANT'", ()),
+            ("UPDATE message SET data=json_set(data,'$.error',json(?)) WHERE id='PRIVATE_ASSISTANT'",
+             (json.dumps({'name': 'APIError', 'data': {'statusCode': 401}}),)),
+            ("UPDATE part SET data=json_set(data,'$.state.output',?) WHERE id='PRIVATE_READ'", (MARKER + ' NH-BRIDGE-error',)),
+            ("UPDATE session SET directory='other directory'", ()),
+        )
+        baseline = self.database.read_bytes()
+        for query, arguments in cases:
+            with self.subTest(query=query):
+                self.database.write_bytes(baseline)
+                with self.connection() as db:
+                    db.execute(query, arguments)
+                self.assertEqual(self.live_evidence()['status'], 'unavailable')
+
+    def test_live_evidence_rejects_a_failed_tool_even_after_a_successful_read(self):
+        self.bind_read()
+        self.part('PRIVATE_FAILED_TOOL', 'PRIVATE_ASSISTANT', dict(type='tool', tool='shell', state={'status': 'error'}))
+        self.assertEqual(self.live_evidence()['status'], 'unavailable')
+
+    def test_live_evidence_cannot_adopt_a_newer_incomplete_assistant(self):
+        self.bind_read()
+        self.assistant('PRIVATE_INCOMPLETE', 3, time={'created': 3}, finish='stop')
+        self.assertEqual(self.live_evidence()['status'], 'unavailable')
 
     def unavailable(self, reason):
         value = self.collect()
