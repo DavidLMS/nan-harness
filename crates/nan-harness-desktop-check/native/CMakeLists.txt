@@ -102,6 +102,17 @@ add_custom_target(nanh-uia-chat-input-contract ALL
   DEPENDS nanh-uia-chat-input-test
   COMMENT "Verify private Windows Chat framing and passive readiness predicates")
 
+add_executable(nanh-uia-chat-send-diagnostic-test tests/uia_chat_send_diagnostic.cpp)
+if(MSVC)
+  target_compile_options(nanh-uia-chat-send-diagnostic-test PRIVATE /UNDEBUG)
+else()
+  target_compile_options(nanh-uia-chat-send-diagnostic-test PRIVATE -UNDEBUG)
+endif()
+add_custom_target(nanh-uia-chat-send-diagnostic-contract ALL
+  COMMAND $<TARGET_FILE:nanh-uia-chat-send-diagnostic-test>
+  DEPENDS nanh-uia-chat-send-diagnostic-test
+  COMMENT "Verify payload-free Windows Chat Send observations")
+
 add_executable(nanh-uia-chat-scope-test tests/uia_chat_scope.cpp)
 if(MSVC)
   target_compile_options(nanh-uia-chat-scope-test PRIVATE /UNDEBUG)

@@ -3,6 +3,8 @@ use super::Window;
 use std::fmt::Write as _;
 use std::time::Duration;
 use zeroize::Zeroizing;
+mod send_observation;
+pub(crate) use send_observation::SendObservation;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]

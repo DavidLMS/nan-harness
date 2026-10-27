@@ -67,6 +67,7 @@ const PROGRESS: [&str; 16] = [
 pub(crate) struct WindowsChatProgress {
     pub(crate) latest: Option<&'static str>,
     pub(crate) work: Option<&'static str>,
+    pub(crate) send: Option<windows_chat_turn::SendObservation>,
 }
 
 fn progress(line: &str) -> Option<usize> {
@@ -77,8 +78,11 @@ fn progress(line: &str) -> Option<usize> {
 fn read_result(
     input: &mut impl Read,
     sender: &mpsc::SyncSender<Result<Zeroizing<String>, FailureCategory>>,
+    input_mode: bool,
 ) -> Result<Zeroizing<String>, FailureCategory> {
     let mut previous = None;
+    let mut send_previous = None;
+    let mut send_frames = 0;
     loop {
         let mut line = frame(input)?;
         if line.starts_with("progress ") {
@@ -87,6 +91,23 @@ fn read_result(
                 return Err(FailureCategory::Output);
             }
             previous = Some(stage);
+            sender.send(Ok(line)).map_err(|_| FailureCategory::Pipe)?;
+        } else if line.starts_with("send-observation ") {
+            // The native <=15s wait pauses >=20ms between scans and emits at
+            // most eight frames per scan. Keep the original line/receipt caps.
+            send_frames += 1;
+            let observation =
+                windows_chat_turn::SendObservation::parse(&line).ok_or(FailureCategory::Output)?;
+            if !input_mode
+                || previous != Some(12)
+                || send_frames > 8192
+                || send_previous
+                    .as_ref()
+                    .is_some_and(|prior| !observation.follows(prior))
+            {
+                return Err(FailureCategory::Output);
+            }
+            send_previous = Some(observation);
             sender.send(Ok(line)).map_err(|_| FailureCategory::Pipe)?;
         } else {
             line.push_str(&receipt(input)?);
@@ -133,13 +154,14 @@ pub(in crate::native) fn run(
     let mut input = owner.child.stdin.take().ok_or(FailureCategory::Pipe)?;
     let mut output = owner.child.stdout.take().ok_or(FailureCategory::Pipe)?;
     let (sender, receiver) = mpsc::sync_channel(2);
+    let input_mode = mode == "input-replace-owned";
     owner.reader = Some(thread::spawn(move || {
         let ready = frame(&mut output);
         let failed = ready.is_err();
         if sender.send(ready).is_err() || failed {
             return;
         }
-        let result = read_result(&mut output, &sender);
+        let result = read_result(&mut output, &sender, input_mode);
         let _ = sender.send(result);
     }));
     let receive = || {
@@ -173,6 +195,8 @@ pub(in crate::native) fn run(
             if label != "finish" {
                 observed_progress.work = Some(label);
             }
+        } else if let Some(observation) = windows_chat_turn::SendObservation::parse(&line) {
+            observed_progress.send = Some(observation);
         } else {
             break line;
         }
@@ -205,6 +229,27 @@ pub(in crate::native) fn run(
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    fn native_send_wire() -> String {
+        let temp = tempfile::tempdir().unwrap();
+        let executable = temp.path().join("send-fixture");
+        let source =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("native/tests/uia_chat_send_diagnostic.cpp");
+        let compiled = Command::new("c++")
+            .args(["-std=c++17", "-Wall", "-Wextra", "-Werror"])
+            .arg(&source)
+            .arg("-o")
+            .arg(&executable)
+            .output()
+            .unwrap();
+        assert!(
+            compiled.status.success(),
+            "native Send fixture must compile"
+        );
+        let output = Command::new(&executable).arg("--wire").output().unwrap();
+        assert!(output.status.success());
+        String::from_utf8(output.stdout).unwrap()
+    }
+
     fn scripted(
         suffix: &str,
         budget: Duration,
@@ -356,5 +401,128 @@ mod tests {
         );
         assert_eq!(observed.latest, Some("finish"));
         assert_eq!(observed.work, Some("tree"));
+    }
+
+    #[test]
+    fn native_send_producer_survives_failed_transport_without_promoting_a_receipt() {
+        let wire = native_send_wire();
+        let expected = windows_chat_turn::SendObservation::parse(&format!(
+            "{}\n",
+            wire.lines().last().unwrap()
+        ));
+        let prefix =
+            format!("print('progress send',flush=True)\nprint({wire:?},end='',flush=True)\n");
+        for (suffix, failure, budget) in [
+            (
+                "import time; time.sleep(2)",
+                FailureCategory::Timeout,
+                Duration::from_millis(500),
+            ),
+            (
+                "import time; print('turn sent',flush=True); time.sleep(2)",
+                FailureCategory::Timeout,
+                Duration::from_millis(500),
+            ),
+            (
+                "print('turn sent',flush=True); raise SystemExit(3)",
+                FailureCategory::NonzeroExit,
+                Duration::from_secs(10),
+            ),
+            (
+                "print('send-observation PRIVATE 2 1',flush=True)",
+                FailureCategory::Output,
+                Duration::from_secs(10),
+            ),
+            (
+                "print('X'*129,flush=True)",
+                FailureCategory::Output,
+                Duration::from_secs(10),
+            ),
+        ] {
+            let mut observed = WindowsChatProgress::default();
+            assert_eq!(
+                scripted(
+                    &format!("{prefix}{suffix}"),
+                    budget,
+                    "input-replace-owned",
+                    &mut observed
+                )
+                .unwrap_err(),
+                failure
+            );
+            assert_eq!(observed.send, expected);
+        }
+        let values: Vec<_> = wire
+            .lines()
+            .map(|line| {
+                serde_json::to_value(
+                    windows_chat_turn::SendObservation::parse(&format!("{line}\n")).unwrap(),
+                )
+                .unwrap()
+            })
+            .collect();
+        let shared: Vec<serde_json::Value> = serde_json::from_str(include_str!(
+            "../../../../../canary/tests/fixtures/claude-windows-send-observation.json"
+        ))
+        .unwrap();
+        assert_eq!(values, shared);
+        if let Some(path) = std::env::var_os("NANH_WINDOWS_SEND_FIXTURE") {
+            let mut file = nan_harness_private_fs::open_private_new(Path::new(&path)).unwrap();
+            serde_json::to_writer(&mut file, &values).unwrap();
+            file.sync_all().unwrap();
+        }
+    }
+
+    #[test]
+    fn send_observation_outside_input_send_phase_is_rejected() {
+        for (prefix, mode) in [
+            ("", "input-replace-owned"),
+            ("progress send\n", "copy"),
+            ("progress send\nprogress finish\n", "input-replace-owned"),
+        ] {
+            let mut observed = WindowsChatProgress::default();
+            let emitted = format!("{prefix}send-observation tree-scan 0 0\nturn sent\n");
+            assert_eq!(
+                scripted(
+                    &format!("print({emitted:?},end='',flush=True)"),
+                    Duration::from_secs(10),
+                    mode,
+                    &mut observed
+                )
+                .unwrap_err(),
+                FailureCategory::Output
+            );
+            assert!(observed.send.is_none());
+        }
+    }
+
+    #[test]
+    fn expired_send_transport_does_not_spawn_or_invent_observations() {
+        let mut observed = WindowsChatProgress::default();
+        let window = Window {
+            id: 1,
+            pid: 2,
+            bounds: xa11y::Rect {
+                x: 0,
+                y: 0,
+                width: 300,
+                height: 400,
+            },
+            name: String::new(),
+            layer: 0,
+        };
+        assert_eq!(
+            run(
+                Path::new("not-a-helper"),
+                &window,
+                "input-replace-owned",
+                ["prompt", "marker", "sentinel"],
+                Instant::now(),
+                &mut observed
+            )
+            .unwrap_err(),
+            FailureCategory::Timeout
+        );
+        assert!(observed.latest.is_none() && observed.work.is_none() && observed.send.is_none());
     }
 }

@@ -1,5 +1,6 @@
 // Separate action command; the passive inventory entry never reaches this code.
 #include "uia_chat_input.hpp"
+#include "uia_chat_send_diagnostic.hpp"
 #include <thread>
 namespace {
 struct ChatInput {
@@ -15,6 +16,7 @@ struct ChatInput {
     const wchar_t* send_name=L"Start task";
     UiaChatCapability original;
     const char* stage="request";
+    UiaChatSendDiagnostic send_diagnostic{std::cout};
     void progress(const char* stage) {
         std::cout<<"progress "<<stage<<'\n'<<std::flush;
     }
@@ -99,32 +101,47 @@ struct ChatInput {
         return std::string(collection.mode_status)=="chat" && owned();
     }
     UiaChatInputValue retain_send() {
+        using Phase=UiaChatSendDiagnostic::Phase;
+        send_diagnostic.mark(Phase::PasteCheck);
         if(pasted()!=UiaChatInputValue::Ready)return UiaChatInputValue::Rejected;
+        send_diagnostic.mark(Phase::PasteChecked);
+        struct Released {
+            UiaChatSendDiagnostic& observation;
+            ~Released(){observation.mark(Phase::Released);}
+        } released{send_diagnostic};
         Collection fresh;fresh.request=collection.request;fresh.deadline=collection.deadline;
+        const auto release=[&](UiaChatInputValue result) {
+            send_diagnostic.mark(Phase::Release);return result;
+        };
         fresh.collect_chat=true;fresh.automation=collection.automation;fresh.walker=collection.walker;
         fresh.root_process.value=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,fresh.request.pid);
         if(!live_creation(fresh.root_process.value,fresh.root_creation)
-            || fresh.root_creation!=collection.root_creation || !fresh.guard()
-            || !fresh.append(root.Get(),0))return UiaChatInputValue::Rejected;
-        if(fresh.classic_controls.size()!=1)return UiaChatInputValue::Rejected;
+            || fresh.root_creation!=collection.root_creation || !fresh.guard())return release(UiaChatInputValue::Rejected);
+        send_diagnostic.mark(Phase::TreeScan);
+        const bool appended=fresh.append(root.Get(),0);
+        send_diagnostic.scan_completed();
+        if(!appended)return release(UiaChatInputValue::Rejected);
+        if(fresh.classic_controls.size()!=1)return release(UiaChatInputValue::Rejected);
         BOOL same=FALSE;
         if(FAILED(collection.automation->CompareElements(editor.Get(),fresh.classic_controls.front().Get(),&same))
-            || !same || !owned())return UiaChatInputValue::Rejected;
+            || !same || !owned())return release(UiaChatInputValue::Rejected);
         const auto count=fresh.start_controls.size()+fresh.send_controls.size();
-        if(count==0)return UiaChatInputValue::Pending;
-        if(count!=1)return UiaChatInputValue::Rejected;
+        if(count==0){send_diagnostic.pending();return release(UiaChatInputValue::Pending);}
+        if(count!=1)return release(UiaChatInputValue::Rejected);
+        send_diagnostic.mark(Phase::CandidateCheck);
         const auto candidate=fresh.start_controls.empty()?fresh.send_controls.front():fresh.start_controls.front();
         const auto name=fresh.start_controls.empty()?L"Send message":L"Start task";
         std::array<long,4> bounds{};bool enabled=false;
         if(!fresh.mode_attached(candidate.Get(),root.Get())
             || !fresh.source_control(candidate.Get(),UIA_ButtonControlTypeId,name,bounds,enabled)
-            || !fresh.guard() || !owned())return UiaChatInputValue::Rejected;
-        if(!enabled)return UiaChatInputValue::Pending;
+            || !fresh.guard() || !owned())return release(UiaChatInputValue::Rejected);
+        if(!enabled){send_diagnostic.pending();return release(UiaChatInputValue::Pending);}
         ComPtr<IUIAutomationInvokePattern> action;
         if(FAILED(candidate->GetCurrentPatternAs(UIA_InvokePatternId,IID_PPV_ARGS(&action))) || !action)
-            return UiaChatInputValue::Rejected;
+            return release(UiaChatInputValue::Rejected);
         send=candidate;send_name=name;invoke=action;original.start_bounds=bounds;
-        return target(true)?UiaChatInputValue::Ready:UiaChatInputValue::Rejected;
+        send_diagnostic.mark(Phase::TargetCheck);
+        return release(target(true)?UiaChatInputValue::Ready:UiaChatInputValue::Rejected);
     }
     UiaChatInputValue focus() {
         if(!target())return UiaChatInputValue::Rejected;

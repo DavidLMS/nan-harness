@@ -70,6 +70,8 @@ struct Facts {
     native_progress: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     native_work_progress: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    native_send_observation: Option<crate::native::SendObservation>,
     transport_failure: Option<&'static str>,
     operation_timing: OperationTiming,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -95,6 +97,7 @@ impl Default for Facts {
             native_stage: None,
             native_progress: None,
             native_work_progress: None,
+            native_send_observation: None,
             transport_failure: None,
             operation_timing: OperationTiming::default(),
             guard_rejection: None,
@@ -105,6 +108,24 @@ impl Default for Facts {
             copied_responses: 0,
             retry_attempted: false,
             clipboard_cleared: false,
+        }
+    }
+}
+impl Facts {
+    fn retain_failed_send(
+        &mut self,
+        mode: &str,
+        observation: Option<crate::native::SendObservation>,
+    ) {
+        if mode == "input-replace-owned"
+            && self.action_phase == Some("transport")
+            && self.native_stage.is_none()
+            && matches!(
+                self.transport_failure,
+                Some("timeout" | "nonzero-exit" | "output" | "pipe")
+            )
+        {
+            self.native_send_observation = observation;
         }
     }
 }
@@ -179,6 +200,7 @@ impl ClaudeWindowsChatSession<'_> {
         marker: &str,
         deadline: Instant,
     ) -> Result<WindowsChatStage, Reason> {
+        self.facts.native_send_observation = None;
         if Instant::now() >= deadline {
             return Err(Reason::Timeout);
         }
@@ -256,6 +278,7 @@ impl ClaudeWindowsChatSession<'_> {
             }
             Err(reason) => {
                 self.facts.stage = WindowsChatStage::ActionUncertain;
+                self.facts.retain_failed_send(mode, progress.send);
                 return Err(reason);
             }
         };
@@ -477,6 +500,7 @@ mod tests {
         assert!(value.get("workspace").is_none());
         assert!(value.get("guardRejection").is_none());
         assert!(value.get("nativeWorkProgress").is_none());
+        assert!(value.get("nativeSendObservation").is_none());
         let observed = serde_json::to_value(Facts {
             native_progress: Some("finish"),
             native_work_progress: Some("tree"),
@@ -501,5 +525,63 @@ mod tests {
             Err(Reason::CleanupFailed)
         );
         assert!(verified_clipboard_clear(|| Ok(()), || Ok(Zeroizing::new(String::new()))).is_ok());
+    }
+
+    #[test]
+    fn failed_send_projection_never_counts_or_certifies_a_native_receipt() {
+        let observation =
+            crate::native::SendObservation::parse("send-observation release 2 1\n").unwrap();
+        for (mode, phase, stage, failure, retained) in [
+            (
+                "input-replace-owned",
+                "transport",
+                None,
+                Some("timeout"),
+                true,
+            ),
+            (
+                "input-replace-owned",
+                "transport",
+                None,
+                Some("output"),
+                true,
+            ),
+            ("copy", "transport", None, Some("timeout"), false),
+            (
+                "input-replace-owned",
+                "post-guard",
+                None,
+                Some("timeout"),
+                false,
+            ),
+            (
+                "input-replace-owned",
+                "transport",
+                Some(WindowsChatStage::Sent),
+                Some("timeout"),
+                false,
+            ),
+            ("input-replace-owned", "transport", None, None, false),
+        ] {
+            let mut facts = Facts {
+                stage: WindowsChatStage::ActionUncertain,
+                action_phase: Some(phase),
+                native_action: Some(mode),
+                native_stage: stage,
+                transport_failure: failure,
+                submitted_turns: 2,
+                input_verified_turns: 2,
+                copied_responses: 2,
+                ..Facts::default()
+            };
+            facts.retain_failed_send(mode, Some(observation.clone()));
+            let value = serde_json::to_value(facts).unwrap();
+            assert_eq!(value.get("nativeSendObservation").is_some(), retained);
+            assert_eq!(value["stage"], "action-uncertain");
+            assert_eq!(value["submittedTurns"], 2);
+            assert_eq!(value["inputVerifiedTurns"], 2);
+            assert_eq!(value["copiedResponses"], 2);
+            assert_eq!(value["retryAttempted"], false);
+        }
     }
 }
