@@ -11,6 +11,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Count surviving Windows harness processes through their retained ownership
+  Job during conformance diagnostics, excluding unrelated system processes.
 - Bring the retained Codex Retry button into view before click verification
   during Desktop qualification, preserving ownership and single-action checks.
 - Verify Codex's preloaded Spotlight palette stays closed and unfocused while

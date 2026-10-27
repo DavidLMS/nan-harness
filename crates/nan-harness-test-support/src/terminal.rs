@@ -10,6 +10,8 @@ use tokio::process::Child;
 use tokio::process::Command;
 
 mod diagnostic;
+#[cfg(windows)]
+mod windows;
 #[cfg(all(test, windows))]
 mod windows_tests;
 pub use diagnostic::{
@@ -17,7 +19,7 @@ pub use diagnostic::{
 };
 
 #[cfg(windows)]
-type OwnedChild = Box<dyn process_wrap::tokio::ChildWrapper>;
+type OwnedChild = windows::OwnedChild;
 #[cfg(not(windows))]
 type OwnedChild = Child;
 
@@ -57,11 +59,11 @@ impl TerminalCommand {
         }
     }
 
-    /// Reports the live descendants of the launched process while the case runs.
+    /// Reports live members of the launched process tree while the case runs.
     ///
-    /// The inventory spawns the platform's process listing, which is slow on Windows, so only
-    /// diagnostics that publish attribution facts enable it. Disabled, the evidence reports
-    /// `not_needed` instead of an empty result.
+    /// Windows queries the retained ownership Job; Unix inventories parent chains and process
+    /// groups. Only diagnostics that publish attribution facts enable it. Disabled, the evidence
+    /// reports `not_needed` instead of an empty result.
     #[must_use]
     pub const fn observe_processes(mut self, observe: bool) -> Self {
         self.observe_processes = observe;
@@ -329,11 +331,7 @@ fn spawn_owned(mut command: Command) -> std::io::Result<OwnedChild> {
 
 #[cfg(windows)]
 fn spawn_owned(command: Command) -> std::io::Result<OwnedChild> {
-    use process_wrap::tokio::{CommandWrap, JobObject, KillOnDrop};
-    CommandWrap::from(command)
-        .wrap(KillOnDrop)
-        .wrap(JobObject)
-        .spawn()
+    OwnedChild::spawn(command)
 }
 
 fn child_id(child: &OwnedChild) -> Option<u32> {
@@ -347,7 +345,7 @@ fn child_stdout(child: &mut OwnedChild) -> Option<tokio::process::ChildStdout> {
     }
     #[cfg(windows)]
     {
-        process_wrap::tokio::ChildWrapper::stdout(&mut **child).take()
+        child.stdout()
     }
 }
 
@@ -358,7 +356,7 @@ fn child_stderr(child: &mut OwnedChild) -> Option<tokio::process::ChildStderr> {
     }
     #[cfg(windows)]
     {
-        process_wrap::tokio::ChildWrapper::stderr(&mut **child).take()
+        child.stderr()
     }
 }
 
@@ -369,7 +367,7 @@ fn child_start_kill(child: &mut OwnedChild) -> std::io::Result<()> {
     }
     #[cfg(windows)]
     {
-        process_wrap::tokio::ChildWrapper::start_kill(&mut **child)
+        child.start_kill()
     }
 }
 
@@ -383,7 +381,7 @@ async fn child_wait(child: &mut OwnedChild) -> std::io::Result<ExitStatus> {
         // The job wrapper's wait can use an uncancellable blocking waiter while descendants
         // drain; polling keeps the terminal timeout and cleanup futures cancellable.
         loop {
-            if let Some(status) = process_wrap::tokio::ChildWrapper::try_wait(&mut **child)? {
+            if let Some(status) = child.try_wait()? {
                 return Ok(status);
             }
             tokio::time::sleep(Duration::from_millis(5)).await;

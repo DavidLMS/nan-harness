@@ -52,9 +52,9 @@ pub struct DiagnosticOutput {
     /// surviving writer was owned, and `None` leaves the writer unidentified.
     pub stdout_eof_after_cleanup: Option<Duration>,
     pub stderr_eof_after_cleanup: Option<Duration>,
-    /// Live descendants of the launched root while the capture still had not reached end of file.
+    /// Live members of the owned process tree while capture had not reached end of file.
     pub survivors_at_failure: SurvivorScan,
-    /// Live descendants of the launched root after the case finished terminating its owned tree.
+    /// Remaining live owned members after the case's observation and any attempted cleanup.
     pub survivors_residual: SurvivorScan,
     /// None means no termination was attempted; Some(false) means cleanup is unconfirmed.
     pub cleanup: Option<bool>,
@@ -291,9 +291,13 @@ impl Observation<'_> {
         }
     }
 
-    /// Reads the live descendants of the case's root without exceeding the case budget.
+    /// Reads owned survivors without exceeding the case budget.
     async fn survivors_now(&self) -> SurvivorScan {
-        let (Some(pid), true) = (self.pid, self.observe_processes) else {
+        if !self.observe_processes {
+            return SurvivorScan::unavailable();
+        }
+        #[cfg(not(windows))]
+        let Some(pid) = self.pid else {
             return SurvivorScan::unavailable();
         };
         let remaining = self
@@ -303,27 +307,41 @@ impl Observation<'_> {
         if remaining.is_zero() {
             return SurvivorScan::unavailable();
         }
-        tokio::time::timeout(remaining, survivors::scan(pid))
-            .await
-            .unwrap_or_else(|_| SurvivorScan::unavailable())
+        #[cfg(not(windows))]
+        {
+            tokio::time::timeout(remaining, survivors::scan(pid))
+                .await
+                .unwrap_or_else(|_| SurvivorScan::unavailable())
+        }
+        #[cfg(windows)]
+        {
+            survivors::scan_job(self.child)
+        }
     }
 
-    /// Proves whether any descendant outlived the owned tree, which the file control cannot show
+    /// Proves whether any owned member remains, which the file control cannot show
     /// on its own. The observation stays inside the case budget.
     async fn observe_residual(&mut self) {
+        if !self.observe_processes {
+            return;
+        }
         let remaining = self
             .deadline
             .saturating_duration_since(tokio::time::Instant::now());
-        let (Some(pid), true) = (self.pid, self.observe_processes) else {
+        #[cfg(not(windows))]
+        let Some(pid) = self.pid else {
             return;
         };
         if remaining.is_zero() {
             return;
         }
-        self.result.survivors_residual =
-            tokio::time::timeout(remaining, survivors::scan_after_cleanup(pid))
-                .await
-                .unwrap_or_else(|_| SurvivorScan::unavailable());
+        #[cfg(not(windows))]
+        let scan = survivors::scan_after_cleanup(pid);
+        #[cfg(windows)]
+        let scan = survivors::scan_job_after_cleanup(self.child);
+        self.result.survivors_residual = tokio::time::timeout(remaining, scan)
+            .await
+            .unwrap_or_else(|_| SurvivorScan::unavailable());
     }
 }
 

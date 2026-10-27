@@ -128,6 +128,24 @@ class CodexDiagnosticTests(unittest.TestCase):
         self.assertIn("survivors.atFailure=available:1(codex.exe)", text)
         self.assertIn("survivors.residual=available:0(-)", text)
 
+    def test_job_membership_count_survives_without_executable_names(self):
+        value = report()
+        case = value["cases"][3]
+        case.update(status="failed", reason="cleanup_failed")
+        case["evidence"] = {**case["evidence"], "survivors": {
+            "atFailure": {"scan": "available", "names": [], "count": 2},
+            "residual": {"scan": "available", "names": [], "count": 1},
+        }}
+        value["overall"].update(passed=10, failed=1)
+        view = diagnostic.safe_view(value)
+        self.assertEqual(view["cases"][3]["status"], "failed")
+        scans = view["cases"][3]["evidence"]["survivors"]
+        self.assertEqual(scans["atFailure"]["count"], 2)
+        self.assertEqual(scans["residual"]["count"], 1)
+        text = diagnostic.render(view)
+        self.assertIn("survivors.atFailure=available:2(-)", text)
+        self.assertIn("survivors.residual=available:1(-)", text)
+
     def test_attribution_evidence_rejects_paths_unknown_states_and_bad_counts(self):
         for change in ({"readers": {"stdout": "waiting", "stderr": "eof"}},
                        {"readers": {"stdout": "eof"}},
