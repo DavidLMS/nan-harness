@@ -164,6 +164,10 @@ envelope and public release provenance; it cannot qualify a release. The
 separate `mimo-inventory-observation` mode observes inventory output and does
 not diagnose either functional tool check.
 
+Use `mode=mimo-marker-proof` with `harnesses=mimo-code` and no release asset
+inputs to run only the bounded native PowerShell marker regression. It builds
+the source test and does not install a harness or produce qualification evidence.
+
 ### OMP usage incident comparison
 
 The manual Native Windows CLI diagnostic workflow accepts

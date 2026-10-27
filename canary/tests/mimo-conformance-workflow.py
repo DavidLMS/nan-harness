@@ -43,7 +43,7 @@ class CanonicalObservationWorkflowTests(unittest.TestCase):
         ])
 
     def test_dispatch_forwards_only_the_attested_selection(self):
-        job = DISPATCH.split('\n  mimo-conformance-observation:\n', 1)[1].split('\n  diagnostic:\n', 1)[0]
+        job = DISPATCH.split('\n  mimo-conformance-observation:\n', 1)[1].split('\n  mimo-marker-proof:\n', 1)[0]
         self.assertIn('needs: validate-inputs', job)
         self.assertIn("needs.validate-inputs.result == 'success'", job)
         self.assertIn("inputs.mode == 'mimo-conformance-observation'", job)

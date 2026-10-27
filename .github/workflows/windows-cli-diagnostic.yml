@@ -21,7 +21,7 @@ on:
         required: true
         default: deterministic
         type: choice
-        options: [native-diagnostic, deterministic, live, codex-diagnostic, mimo-inventory-observation, mimo-conformance-observation]
+        options: [native-diagnostic, deterministic, live, codex-diagnostic, mimo-inventory-observation, mimo-conformance-observation, mimo-marker-proof]
       model:
         description: Bounded model identifier
         required: true
@@ -54,7 +54,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: windows-cli-diagnostic-${{ github.repository }}${{ inputs.omp_usage_comparison && '-omp-usage' || '' }}
+  group: windows-cli-diagnostic-${{ github.repository }}${{ inputs.mode == 'mimo-marker-proof' && '-marker-proof' || inputs.omp_usage_comparison && '-omp-usage' || '' }}
   cancel-in-progress: true
 
 jobs:
@@ -79,6 +79,12 @@ jobs:
           import os, re
           names = ('RELEASE_TAG', 'RELEASE_COMMIT', 'ASSET_RUN_ID', 'MANIFEST_SHA256')
           values = [os.environ.get(name, '') for name in names]
+          if os.environ.get('SELECTED_MODE') == 'mimo-marker-proof':
+              if (any(values) or os.environ.get('SOURCE_OVERRIDE')
+                      or os.environ.get('SELECTED_HARNESSES') != 'mimo-code'
+                      or os.environ.get('OMP_COMPARISON') == 'true'
+                      or os.environ.get('OMP_CANDIDATE') == 'true'):
+                  raise SystemExit('Invalid marker proof selection; no diagnostic or approval was started.')
           if any(values) or os.environ.get('SELECTED_MODE') in ('mimo-inventory-observation', 'mimo-conformance-observation'):
               tag, commit, run, manifest = values
               valid = (all(values) and not os.environ.get('SOURCE_OVERRIDE')
@@ -97,7 +103,7 @@ jobs:
   approve-live:
     name: Approve the live Windows diagnostic
     needs: validate-inputs
-    if: needs.validate-inputs.result == 'success' && inputs.mode != 'mimo-inventory-observation' && inputs.mode != 'mimo-conformance-observation' && (inputs.mode == 'live' || inputs.omp_usage_comparison) && github.ref == 'refs/heads/main'
+    if: needs.validate-inputs.result == 'success' && inputs.mode != 'mimo-inventory-observation' && inputs.mode != 'mimo-conformance-observation' && inputs.mode != 'mimo-marker-proof' && (inputs.mode == 'live' || inputs.omp_usage_comparison) && github.ref == 'refs/heads/main'
     uses: ./.github/workflows/live-check-approval.yml
     with:
       subject: Run the selected live Windows diagnostic from ${{ github.sha }} against ${{ inputs.source_sha || github.sha }}; OMP usage comparisons also use the live provider.
@@ -122,9 +128,40 @@ jobs:
       asset_run_id: ${{ inputs.asset_run_id }}
       manifest_sha256: ${{ inputs.manifest_sha256 }}
 
+  mimo-marker-proof:
+    needs: validate-inputs
+    if: ${{ !cancelled() && needs.validate-inputs.result == 'success' && inputs.mode == 'mimo-marker-proof' }}
+    name: Verify only the bounded Windows marker counterfactual
+    runs-on: windows-2025
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: '3.12'
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Run only the source-bound marker proof
+        run: |
+          if ((git rev-parse HEAD) -cne $env:GITHUB_SHA) { throw 'marker proof checkout differs' }
+          $env:NAN_MIMO_MARKER_POWERSHELL = (Get-Command pwsh -ErrorAction Stop).Source
+          $env:NAN_MIMO_MARKER_PYTHON = (Get-Command python -ErrorAction Stop).Source
+          $gitUtilities = Join-Path $env:ProgramFiles 'Git\usr\bin'
+          if (-not (Test-Path (Join-Path $gitUtilities 'printf.exe'))) { throw 'hosted Git comparison utility is unavailable' }
+          $env:NAN_MIMO_MARKER_GIT_USR_BIN = $gitUtilities
+          cargo test --locked -p nan-harness-test-support --lib conformance::mimo::marker_command_tests::native_windows_marker_command_preserves_contract_without_git -- --ignored --exact
+          if ($LASTEXITCODE -ne 0) { throw 'MiMo marker portability proof failed' }
+
   diagnostic:
     needs: [validate-inputs, approve-live]
-    if: ${{ always() && !cancelled() && needs.validate-inputs.result == 'success' && inputs.mode != 'mimo-inventory-observation' && inputs.mode != 'mimo-conformance-observation' && !inputs.omp_usage_comparison && (inputs.mode != 'live' || (github.ref == 'refs/heads/main' && needs.approve-live.result == 'success')) }}
+    if: ${{ always() && !cancelled() && needs.validate-inputs.result == 'success' && inputs.mode != 'mimo-inventory-observation' && inputs.mode != 'mimo-conformance-observation' && inputs.mode != 'mimo-marker-proof' && !inputs.omp_usage_comparison && (inputs.mode != 'live' || (github.ref == 'refs/heads/main' && needs.approve-live.result == 'success')) }}
     name: Windows 2025 x64 batch diagnostic
     runs-on: windows-2025
     timeout-minutes: 120
@@ -619,7 +656,7 @@ jobs:
 
   omp-usage-comparison:
     needs: [validate-inputs, approve-live]
-    if: ${{ always() && !cancelled() && needs.validate-inputs.result == 'success' && inputs.mode != 'mimo-inventory-observation' && inputs.mode != 'mimo-conformance-observation' && inputs.omp_usage_comparison && github.ref == 'refs/heads/main' && needs.approve-live.result == 'success' }}
+    if: ${{ always() && !cancelled() && needs.validate-inputs.result == 'success' && inputs.mode != 'mimo-inventory-observation' && inputs.mode != 'mimo-conformance-observation' && inputs.mode != 'mimo-marker-proof' && inputs.omp_usage_comparison && github.ref == 'refs/heads/main' && needs.approve-live.result == 'success' }}
     name: OMP usage (${{ matrix.kind }}, ${{ matrix.omp }})
     runs-on: windows-2025
     timeout-minutes: 90

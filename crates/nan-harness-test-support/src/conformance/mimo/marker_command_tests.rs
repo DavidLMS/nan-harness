@@ -74,7 +74,21 @@ fn installed_executable(name: &str) -> std::path::PathBuf {
 }
 
 #[cfg(windows)]
+fn failure_category(error: &crate::terminal::TerminalError) -> &'static str {
+    use crate::terminal::TerminalError;
+    match error {
+        TerminalError::Timeout { .. } => "timeout",
+        TerminalError::Execute { .. } => "execute",
+        TerminalError::MissingOutput { .. } => "missing-output",
+        TerminalError::CaptureJoin { .. } => "capture-join",
+        TerminalError::Capture { .. } => "capture-read",
+        TerminalError::DescendantCleanup { .. } => "descendant-cleanup",
+    }
+}
+
+#[cfg(windows)]
 async fn powershell(
+    case: &'static str,
     executable: &Path,
     directory: &Path,
     path: &std::ffi::OsStr,
@@ -95,10 +109,15 @@ async fn powershell(
         ])
         .timeout(std::time::Duration::from_secs(5));
     crate::conformance::environment::apply(command, directory)
-        .unwrap_or_else(|_| panic!("native marker environment preparation failed"))
+        .unwrap_or_else(|_| panic!("native marker proof case={case} error=environment"))
         .run()
         .await
-        .unwrap_or_else(|_| panic!("native marker proof did not complete within its bound"))
+        .unwrap_or_else(|error| {
+            panic!(
+                "native marker proof case={case} error={}",
+                failure_category(&error)
+            )
+        })
 }
 
 #[cfg(windows)]
@@ -118,8 +137,14 @@ async fn native_windows_marker_command_preserves_contract_without_git() {
     ];
     let path = std::env::join_paths(&paths).expect("controlled native PATH must serialize");
     let workspace = tempfile::tempdir().unwrap();
-    let original = powershell(&shell, workspace.path(), &path,
-        "if (Get-Command printf -ErrorAction SilentlyContinue) { exit 0 }; printf NAN_HARNESS_TOOL_OK > tool-output.txt").await;
+    let original = powershell(
+        "first-original",
+        &shell,
+        workspace.path(),
+        &path,
+        "printf NAN_HARNESS_TOOL_OK > tool-output.txt",
+    )
+    .await;
     assert!(
         !original.status.success(),
         "original printf fixture must fail without an external printf command"
@@ -129,11 +154,12 @@ async fn native_windows_marker_command_preserves_contract_without_git() {
             .is_ok_and(|bytes| bytes == b"NAN_HARNESS_TOOL_OK"),
         "original fixture must not satisfy the file contract"
     );
-    for (file, marker) in [
-        ("tool-output.txt", "NAN_HARNESS_TOOL_OK"),
-        ("bash-output.txt", "MIMO_BASH_OK"),
+    for (case, file, marker) in [
+        ("managed", "tool-output.txt", "NAN_HARNESS_TOOL_OK"),
+        ("native", "bash-output.txt", "MIMO_BASH_OK"),
     ] {
         let output = powershell(
+            case,
             &shell,
             workspace.path(),
             &path,
@@ -170,6 +196,7 @@ async fn native_windows_marker_command_preserves_contract_without_git() {
         let path = std::env::join_paths(paths.into_iter().chain([directory]))
             .expect("positive control PATH must serialize");
         let output = powershell(
+            "git-positive",
             &shell,
             workspace.path(),
             &path,

@@ -52,9 +52,16 @@ class WindowsDiagnosticWorkflowTests(unittest.TestCase):
                 if key != "SELECTED_MODE":
                     self.assertNotEqual(status({**observation, key: value}), 0)
                     self.assertNotEqual(status({**canonical, key: value}), 0)
+        proof = dict(SELECTED_MODE="mimo-marker-proof", SELECTED_HARNESSES="mimo-code", OMP_COMPARISON="false", OMP_CANDIDATE="false")
+        self.assertEqual(status(proof), 0)
+        for key, value in [("RELEASE_TAG", "v0.1.26"), ("RELEASE_COMMIT", "a"*40),
+                           ("ASSET_RUN_ID", "1"), ("MANIFEST_SHA256", "a"*64),
+                           ("SOURCE_OVERRIDE", "a"*40), ("SELECTED_HARNESSES", "all"),
+                           ("OMP_COMPARISON", "true"), ("OMP_CANDIDATE", "true")]:
+            self.assertNotEqual(status({**proof, key: value}), 0)
         for mode, comparison in [("live", "false"), ("deterministic", "true"), ("native-diagnostic", "false")]:
             self.assertEqual(status(dict(SELECTED_MODE=mode, OMP_COMPARISON=comparison)), 0)
-        for name in ("approve-live", "diagnostic", "omp-usage-comparison", "mimo-inventory-observation", "mimo-conformance-observation"):
+        for name in ("approve-live", "diagnostic", "omp-usage-comparison", "mimo-inventory-observation", "mimo-conformance-observation", "mimo-marker-proof"):
             job = re.split(r"\n  [a-z][a-z0-9-]*:\n", WORKFLOW.split(f"\n  {name}:\n", 1)[1], maxsplit=1)[0]
             # Only the job's first unindented sibling can end this block.
             self.assertIn("needs:", job)
@@ -102,7 +109,7 @@ class WindowsDiagnosticWorkflowTests(unittest.TestCase):
 
     def test_bounded_inputs_and_single_batch_entrypoint(self):
         for token in ("harnesses:", "mode:", "model:", "source_sha:",
-                      "options: [native-diagnostic, deterministic, live, codex-diagnostic, mimo-inventory-observation, mimo-conformance-observation]", "--harnesses",
+                      "options: [native-diagnostic, deterministic, live, codex-diagnostic, mimo-inventory-observation, mimo-conformance-observation, mimo-marker-proof]", "--harnesses",
                       "--mode", "--model", "--source-sha", "--binary",
                       "--canary", "--output"):
             self.assertIn(token, WORKFLOW)
@@ -120,6 +127,17 @@ class WindowsDiagnosticWorkflowTests(unittest.TestCase):
         for forbidden in ("environment:", "secrets:", "secrets.", "source_sha:", "model:", "harnesses:", "runs-on:"):
             self.assertNotIn(forbidden, job)
         self.assertEqual(len(re.findall(r"^      [a-z0-9_]+:", job, re.M)), 4)
+
+    def test_marker_proof_never_runs_harnesses_or_receives_live_authority(self):
+        job = WORKFLOW.split('\n  mimo-marker-proof:\n', 1)[1].split('\n  diagnostic:\n', 1)[0]
+        self.assertIn('needs: validate-inputs', job)
+        self.assertIn("inputs.mode == 'mimo-marker-proof'", job)
+        self.assertIn('ref: ${{ github.sha }}', job)
+        self.assertIn('native_windows_marker_command_preserves_contract_without_git -- --ignored --exact', job)
+        for forbidden in ('environment:', 'secrets.', 'NAN_API_KEY', 'windows-diagnostic.cmd', 'cli-suite.py', '--live', 'continue-on-error:'):
+            self.assertNotIn(forbidden, job)
+        self.assertNotRegex(job, r'\b(?:contents|actions|id-token): write\b')
+        self.assertEqual(job.count('cargo test --locked'), 1)
 
     def test_codex_mode_uses_one_canary_invocation_and_strict_reader(self):
         self.assertIn("    env:\n      DIAGNOSTIC_MODE: ${{ inputs.mode }}", WORKFLOW)
