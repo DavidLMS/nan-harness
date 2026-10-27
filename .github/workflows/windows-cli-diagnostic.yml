@@ -21,7 +21,7 @@ on:
         required: true
         default: deterministic
         type: choice
-        options: [native-diagnostic, deterministic, live, codex-diagnostic]
+        options: [native-diagnostic, deterministic, live, codex-diagnostic, mimo-inventory-observation]
       model:
         description: Bounded model identifier
         required: true
@@ -79,10 +79,10 @@ jobs:
           import os, re
           names = ('RELEASE_TAG', 'RELEASE_COMMIT', 'ASSET_RUN_ID', 'MANIFEST_SHA256')
           values = [os.environ.get(name, '') for name in names]
-          if any(values):
+          if any(values) or os.environ.get('SELECTED_MODE') == 'mimo-inventory-observation':
               tag, commit, run, manifest = values
               valid = (all(values) and not os.environ.get('SOURCE_OVERRIDE')
-                  and os.environ.get('SELECTED_MODE') == 'deterministic'
+                  and os.environ.get('SELECTED_MODE') in ('deterministic', 'mimo-inventory-observation')
                   and os.environ.get('SELECTED_HARNESSES') == 'mimo-code'
                   and os.environ.get('OMP_COMPARISON') != 'true'
                   and os.environ.get('OMP_CANDIDATE') != 'true'
@@ -97,14 +97,24 @@ jobs:
   approve-live:
     name: Approve the live Windows diagnostic
     needs: validate-inputs
-    if: needs.validate-inputs.result == 'success' && (inputs.mode == 'live' || inputs.omp_usage_comparison) && github.ref == 'refs/heads/main'
+    if: needs.validate-inputs.result == 'success' && inputs.mode != 'mimo-inventory-observation' && (inputs.mode == 'live' || inputs.omp_usage_comparison) && github.ref == 'refs/heads/main'
     uses: ./.github/workflows/live-check-approval.yml
     with:
       subject: Run the selected live Windows diagnostic from ${{ github.sha }} against ${{ inputs.source_sha || github.sha }}; OMP usage comparisons also use the live provider.
 
+  mimo-inventory-observation:
+    needs: validate-inputs
+    if: ${{ !cancelled() && needs.validate-inputs.result == 'success' && inputs.mode == 'mimo-inventory-observation' }}
+    uses: ./.github/workflows/mimo-inventory-diagnostic.yml
+    with:
+      release_tag: ${{ inputs.release_tag }}
+      release_commit: ${{ inputs.release_commit }}
+      asset_run_id: ${{ inputs.asset_run_id }}
+      manifest_sha256: ${{ inputs.manifest_sha256 }}
+
   diagnostic:
     needs: [validate-inputs, approve-live]
-    if: ${{ always() && !cancelled() && needs.validate-inputs.result == 'success' && !inputs.omp_usage_comparison && (inputs.mode != 'live' || (github.ref == 'refs/heads/main' && needs.approve-live.result == 'success')) }}
+    if: ${{ always() && !cancelled() && needs.validate-inputs.result == 'success' && inputs.mode != 'mimo-inventory-observation' && !inputs.omp_usage_comparison && (inputs.mode != 'live' || (github.ref == 'refs/heads/main' && needs.approve-live.result == 'success')) }}
     name: Windows 2025 x64 batch diagnostic
     runs-on: windows-2025
     timeout-minutes: 120
@@ -587,7 +597,7 @@ jobs:
 
   omp-usage-comparison:
     needs: [validate-inputs, approve-live]
-    if: ${{ always() && !cancelled() && needs.validate-inputs.result == 'success' && inputs.omp_usage_comparison && github.ref == 'refs/heads/main' && needs.approve-live.result == 'success' }}
+    if: ${{ always() && !cancelled() && needs.validate-inputs.result == 'success' && inputs.mode != 'mimo-inventory-observation' && inputs.omp_usage_comparison && github.ref == 'refs/heads/main' && needs.approve-live.result == 'success' }}
     name: OMP usage (${{ matrix.kind }}, ${{ matrix.omp }})
     runs-on: windows-2025
     timeout-minutes: 90
