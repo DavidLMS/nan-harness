@@ -61,7 +61,7 @@ pub(crate) fn round_trip_probe(
         ),
         HarnessKind::MimoCode => (
             "bash",
-            json!({"command": "printf NAN_HARNESS_TOOL_OK > tool-output.txt", "description": "Write a deterministic conformance marker file"}),
+            json!({"command": super::mimo::marker_write_command("tool-output.txt", "NAN_HARNESS_TOOL_OK"), "description": "Write a deterministic conformance marker file"}),
             filesystem_contract(
                 workspace.join("tool-output.txt"),
                 "NAN_HARNESS_TOOL_OK",

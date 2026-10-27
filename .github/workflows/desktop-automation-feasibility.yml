@@ -350,6 +350,13 @@ jobs:
           cargo clippy --locked -p nan-harness-desktop-check --all-features --all-targets -- -D warnings
           cargo test --locked -p nan-harness-desktop-check --lib probe::codex_windows_profile
           cargo test --locked -p nan-harness-desktop-check --lib windows_codex_actual_prepared_command_admits_only_original_private_roots
+      - name: Verify Windows Claude Send diagnostics before installation
+        if: runner.os == 'Windows' && matrix.app == 'claude-desktop'
+        shell: bash
+        run: |
+          cargo clippy --locked -p nan-harness-desktop-check --all-features --all-targets -- -D warnings
+          cargo test --locked -p nan-harness-desktop-check --lib gui::claude_windows_chat
+          cargo test --locked -p nan-harness-desktop-check --lib native::windows_chat_turn
       - name: Verify retained macOS Codex profile custody without an application
         if: runner.os == 'macOS' && matrix.app == 'chatgpt-desktop'
         run: |

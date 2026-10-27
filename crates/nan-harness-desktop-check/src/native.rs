@@ -20,7 +20,8 @@ mod windows_chat_turn;
 mod windows_uia;
 #[cfg(windows)]
 pub(crate) use windows_chat_turn::{
-    FailureScopeCounts, MAX_MILLIS as WINDOWS_CHAT_MAX_MILLIS, WindowsChatReceipt, WindowsChatStage,
+    FailureScopeCounts, MAX_MILLIS as WINDOWS_CHAT_MAX_MILLIS, SendObservation, WindowsChatReceipt,
+    WindowsChatStage,
 };
 
 #[cfg(target_os = "macos")]

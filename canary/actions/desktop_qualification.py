@@ -37,6 +37,18 @@ VERSION = re.compile(r'[0-9]+(?:\.[0-9]+){2}(?:[-+][A-Za-z0-9.-]+)?\Z')
 CLAUDE_MAC_PROGRESS = frozenset('window tree composer initial-value focus replace-select prompt-clipboard paste pasted-value readback readback-select readback-copy collapse send-tree press finish'.split())
 
 
+def claude_windows_send_observation(value):
+    phases = {'paste-check', 'paste-checked', 'tree-scan', 'tree-scanned',
+              'candidate-check', 'target-check', 'release', 'released'}
+    if (type(value) is not dict or set(value) != {'phase', 'completedScans', 'pendingScans'}
+            or type(value['phase']) is not str or value['phase'] not in phases
+            or any(type(value[key]) is not int or not 0 <= value[key] <= 1024
+                   for key in ('completedScans', 'pendingScans'))
+            or value['pendingScans'] > value['completedScans']):
+        raise ValueError('invalid Claude Windows Send observation')
+    return dict(value)
+
+
 def claude_input_value_rejection(value):
     focus_causes = set('deadline query-failed application focused-element target-pid target-bounds-unavailable target-geometry target-role focused-pid focused-bounds-unavailable focused-geometry focused-role focused-identity window-unmeasured window-foreground window-application window-focus window-geometry window-inventory window-identity window-layer window-display window-stack'.split())
     value_causes = {'query-failed', 'value-unavailable', 'value-type', 'value-size', 'value-encoding'}
@@ -1741,7 +1753,7 @@ def semantic_observations(directory, app, platform=None):
             stages.update('tree-depth tree-nodes tree-name-limit tree-text-limit tree-window-limit tree-process-limit'.split())
             stages.update('clipboard-owner clipboard-allocation clipboard-lock clipboard-empty clipboard-set clipboard-close clipboard-guard-before clipboard-guard-after clipboard-deadline-before clipboard-deadline-after clipboard-open-deadline'.split())
             phase_fields = {'actionPhase', 'transportFailure'}
-            if (app != 'claude-desktop' or set(value) - {'providerObservation', 'guardRejection', 'rowShape', 'scopeShape', 'failureAuthority', 'failureScopeCounts', 'operationTiming', 'nativeAction', 'nativeStage', 'nativeProgress', 'nativeWorkProgress', 'composerShape', 'nativeWindowGuard', 'transportStarted', 'transportBudgetMs', 'inputValueRejection', 'nativeCompletion'} not in (fields, fields | phase_fields) or value['diagnosticsOnly'] is not True
+            if (app != 'claude-desktop' or set(value) - {'providerObservation', 'guardRejection', 'rowShape', 'scopeShape', 'failureAuthority', 'failureScopeCounts', 'operationTiming', 'nativeAction', 'nativeStage', 'nativeProgress', 'nativeWorkProgress', 'nativeSendObservation', 'composerShape', 'nativeWindowGuard', 'transportStarted', 'transportBudgetMs', 'inputValueRejection', 'nativeCompletion'} not in (fields, fields | phase_fields) or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in stages
                     or any(type(value[key]) is not bool for key in flags)
                     or any(type(value[key]) is not int or not 0 <= value[key] <= 3 for key in counts)
@@ -1812,6 +1824,15 @@ def semantic_observations(directory, app, platform=None):
                         or mechanism == 'claude-native-chat' and value.get('transportStarted') is not True):
                     raise ValueError('invalid Claude native work progress diagnostic')
                 record['nativeWorkProgress'] = progress
+            if 'nativeSendObservation' in value:
+                if (mechanism != 'claude-windows-native-chat' or platform != 'windows'
+                        or value.get('nativeAction') != 'input-replace-owned'
+                        or value.get('actionPhase') != 'transport' or 'nativeStage' in value
+                        or value.get('transportFailure') not in {'timeout', 'nonzero-exit', 'output', 'pipe'}
+                        or value['stage'] != 'action-uncertain' or value['retryAttempted']
+                        or len({value[key] for key in counts}) != 1 or value['submittedTurns'] > 2):
+                    raise ValueError('unbound Claude Windows Send observation')
+                record['nativeSendObservation'] = claude_windows_send_observation(value['nativeSendObservation'])
             if 'inputValueRejection' in value:
                 if (mechanism != 'claude-native-chat' or value.get('transportStarted') is not True
                         or value.get('nativeStage') != 'input-value-mismatch'

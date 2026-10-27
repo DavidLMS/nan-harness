@@ -34,7 +34,7 @@ done
 # build it explicitly instead of depending on a binary left by an earlier run.
 cargo build --locked --package nan-harness-canary --bin nan-harness-canary
 for test_script in \
-  desktop-qualification.py \
+  desktop-qualification.py claude-windows-send-diagnostic.py \
   desktop-maintenance.py desktop-release-binding.py \
   hosted-cli-selection.py \
   hosted-cli-workflow.py live-approval.py \
@@ -55,6 +55,7 @@ for test_script in \
   windows-summary.py \
   windows-release-assets.py \
   mimo-inventory-diagnostic.py mimo-inventory-workflow.py \
+  mimo-conformance-diagnostic.py mimo-conformance-workflow.py \
   probe-harness.py \
   probe-harness-windows.py \
   codex-diagnostic.py \
