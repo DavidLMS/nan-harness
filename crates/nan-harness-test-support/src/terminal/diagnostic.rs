@@ -241,9 +241,13 @@ impl Observation<'_> {
             stderr.abort();
             return;
         }
-        // Name the surviving writers while the pipe is still open, before any cleanup could
+        // Observe the surviving writers while the pipe is still open, before any cleanup could
         // terminate them.
-        self.result.survivors_at_failure = self.survivors_now().await;
+        #[cfg(not(windows))]
+        let survivors = self.survivors_now().await;
+        #[cfg(windows)]
+        let survivors = self.survivors_now();
+        self.result.survivors_at_failure = survivors;
         if !cleaned {
             self.clean().await;
         }
@@ -292,11 +296,11 @@ impl Observation<'_> {
     }
 
     /// Reads owned survivors without exceeding the case budget.
+    #[cfg(not(windows))]
     async fn survivors_now(&self) -> SurvivorScan {
         if !self.observe_processes {
             return SurvivorScan::unavailable();
         }
-        #[cfg(not(windows))]
         let Some(pid) = self.pid else {
             return SurvivorScan::unavailable();
         };
@@ -307,16 +311,25 @@ impl Observation<'_> {
         if remaining.is_zero() {
             return SurvivorScan::unavailable();
         }
-        #[cfg(not(windows))]
-        {
-            tokio::time::timeout(remaining, survivors::scan(pid))
-                .await
-                .unwrap_or_else(|_| SurvivorScan::unavailable())
+        tokio::time::timeout(remaining, survivors::scan(pid))
+            .await
+            .unwrap_or_else(|_| SurvivorScan::unavailable())
+    }
+
+    /// Reads retained Job membership synchronously inside the original case budget.
+    #[cfg(windows)]
+    fn survivors_now(&self) -> SurvivorScan {
+        if !self.observe_processes {
+            return SurvivorScan::unavailable();
         }
-        #[cfg(windows)]
-        {
-            survivors::scan_job(self.child)
+        let remaining = self
+            .deadline
+            .saturating_duration_since(tokio::time::Instant::now())
+            .min(Duration::from_secs(2));
+        if remaining.is_zero() {
+            return SurvivorScan::unavailable();
         }
+        survivors::scan_job(self.child)
     }
 
     /// Proves whether any owned member remains, which the file control cannot show
