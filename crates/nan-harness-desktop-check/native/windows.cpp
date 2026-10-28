@@ -604,7 +604,7 @@ bool claude_owned_mac_window(std::uint64_t id, pid_t pid, CGRect bounds) {
 // keep their original proof. Pending never authorizes an action.
 static thread_local MacWindowObservation mac_window_observation;
 MacWindowObservation claude_mac_window_observation() { return mac_window_observation; }
-MacOwnedWindowState claude_mac_window_state(std::uint64_t id, pid_t pid, CGRect expected) {
+static MacOwnedWindowState mac_window_state(std::uint64_t id, pid_t pid, CGRect expected, MacFocusPolicy policy) {
     mac_window_observation = {};
     const auto rejected = [](const char* failure) {
         mac_window_observation.failure = failure;
@@ -620,11 +620,8 @@ MacOwnedWindowState claude_mac_window_state(std::uint64_t id, pid_t pid, CGRect 
     mac_window_observation.focus_status = focus.status;
     mac_window_observation.query_stage = focus.query_stage ? focus.query_stage : "unqueried";
     mac_window_observation.query_error = focus.query_error ? focus.query_error : "unqueried";
-    MacFocusRead read = MacFocusRead::Rejected;
-    if (std::string(focus.status) == "ready" && CGRectEqualToRect(expected, focus.bounds))
-        read = MacFocusRead::ReadyHeld;
-    else if (std::string(focus.status) == "query-error" && focus.query_error
-        && std::string(focus.query_error) == "cannot-complete") read = MacFocusRead::CannotComplete;
+    const bool ready_held = std::string(focus.status) == "ready" && CGRectEqualToRect(expected, focus.bounds);
+    const auto read = classify_mac_focus_read(mac_window_observation,ready_held,policy);
     if (read == MacFocusRead::Rejected)
         return rejected(std::string(focus.status) == "ready" ? "geometry" : "focus");
     auto windows = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID);
@@ -673,6 +670,12 @@ MacOwnedWindowState claude_mac_window_state(std::uint64_t id, pid_t pid, CGRect 
     if (state == MacOwnedWindowState::Rejected && std::string(mac_window_observation.failure) != "inventory")
         mac_window_observation.failure = mac_window_rejection(safety);
     return state;
+}
+MacOwnedWindowState claude_mac_window_state(std::uint64_t id, pid_t pid, CGRect expected) {
+    return mac_window_state(id,pid,expected,MacFocusPolicy::Strict);
+}
+MacOwnedWindowState claude_mac_copy_entry_window_state(std::uint64_t id, pid_t pid, CGRect expected) {
+    return mac_window_state(id,pid,expected,MacFocusPolicy::CopyEntry);
 }
 static int chat_result(const char* stage) {
     std::cout << "chat " << stage << '\n';

@@ -15,6 +15,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Keep Claude macOS qualification on the retained composer during precisely
   identified transient Accessibility reads, preserving the original deadline
   and single input action while retaining closed query-failure diagnostics.
+- Discard a stale, temporary focus snapshot at Claude macOS Copy entry while
+  preserving the held window, retained controls and original action deadline.
 - Forward the fixed MiMo session-evidence advisory from validated reports to
   Actions while keeping private cell output suppressed.
 
