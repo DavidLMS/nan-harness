@@ -50,7 +50,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     env:
-      PYTHON: ${{ runner.os == 'Windows' && 'python' || 'python3' }}
+      PYTHON: ${{ matrix.runner == 'windows-2025' && 'python' || 'python3' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: rustup show
