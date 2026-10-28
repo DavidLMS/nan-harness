@@ -47,7 +47,14 @@ fn codex_catalog_reports_exact_reasoning_picker_contracts_in_stable_order() {
             ]
         )
     );
-    assert_eq!(values(1), (json!("deepseek-v4-flash"), Value::Null, vec![]));
+    assert_eq!(
+        values(1),
+        (
+            json!("deepseek-v4-flash"),
+            json!("high"),
+            vec![json!("high")]
+        )
+    );
     assert_eq!(
         values(2),
         (

@@ -32,6 +32,48 @@ class WindowsProbeContracts(unittest.TestCase):
         self.assertIn(f'Is-BoundedInteger $value.schemaVersion {CURRENT_DOCTOR_SCHEMA}', source)
         self.assertIn('$value.schemaVersion -notin @(8,9)', source)
 
+    def test_codex_conformance_requires_both_reasoning_checks(self):
+        source = PROBE.read_text(encoding="utf-8")
+        self.assertIn("@('reasoning-qwen38','reasoning-deepseek-v4')", source)
+        self.assertIn("$matching.Count -ne 1 -or $matching[0].status -cne 'passed'", source)
+
+    def test_real_pwsh_codex_reasoning_evidence_fails_closed(self):
+        pwsh = shutil.which("pwsh")
+        if not pwsh:
+            self.skipTest("pwsh unavailable; actual producer is verified on Windows")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            marker = root / "probe-result.json"
+            producer = root / "synthetic-canary.ps1"
+            checks = [{"name": name, "status": "passed", "durationMilliseconds": 1}
+                      for name in ("contract", "reasoning-qwen38", "reasoning-deepseek-v4")]
+            scenarios = [{"name": name, "status": "passed", "durationMilliseconds": 1,
+                          "checks": checks if name == "tool-round-trip" else checks[:1]}
+                         for name in ("inventory", "tool-round-trip", "sentinel", "external-prerequisite")]
+            report = {"schemaVersion": 2, "harness": "codex", "outcome": "passed",
+                      "scenarios": scenarios, "durationMilliseconds": 4}
+            for mode in ("passed", "missing", "failed", "duplicate"):
+                candidate = json.loads(json.dumps(report))
+                selected = candidate["scenarios"][1]["checks"]
+                if mode == "missing":
+                    selected.pop()
+                elif mode == "failed":
+                    selected[-1]["status"] = "failed"
+                elif mode == "duplicate":
+                    selected.append(dict(selected[-1]))
+                producer.write_text("Write-Output '" + json.dumps(candidate) + "'; exit 0\n")
+                env = dict(os.environ, NAN_CANARY_PROBE_RESULT=str(marker))
+                result = subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-File", str(PROBE),
+                    "-Harness", "codex", "-Stage", "deterministic-contract", "-NanBinary", str(producer),
+                    "-Canary", str(producer), "-Version", "0.153.4"],
+                    env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+                observed = json.loads(marker.read_text(encoding="utf-8-sig"))
+                with self.subTest(mode=mode):
+                    self.assertEqual(result.returncode == 0, mode == "passed")
+                    self.assertEqual(observed["status"], "passed" if mode == "passed" else "failed")
+                    if mode != "passed":
+                        self.assertIn("conformance-check-invalid", observed["diagnostics"])
+
     def test_real_pwsh_mimo_checks_project_actual_report_and_preserve_exit_verdict(self):
         pwsh = shutil.which("pwsh")
         if not pwsh:
@@ -84,6 +126,7 @@ class WindowsProbeContracts(unittest.TestCase):
 
     def _run_live_fixture(self, harness="fx", *, exit_code=0, missing_child=False,
                           shell="pwsh", native_warning=False, failure_text="",
+                          failure_model=None,
                           usage_payload='{"schemaVersion":1,"status":"observed"}'):
         usage_command = ""
         if usage_payload == "unreadable":
@@ -99,6 +142,7 @@ class WindowsProbeContracts(unittest.TestCase):
             marker = root / "probe-result.json"
             child = root / "synthetic-live-child.ps1"
             child.write_text(
+                ("if ($args -contains '" + failure_model + "') { exit 7 }\n" if failure_model else "") +
                 ("Write-Output '" + failure_text.replace("'", "''") + "'\n" if failure_text else "") +
                 ("[Console]::Error.WriteLine('synthetic native warning')\n" if native_warning else "") +
                 "$prompt = [string]$args[-1]\n"
@@ -134,7 +178,7 @@ class WindowsProbeContracts(unittest.TestCase):
                 value = json.loads(marker.read_text(encoding="utf-8-sig"))
             except (OSError, json.JSONDecodeError) as error:
                 self.fail(f"probe result unavailable: {type(error).__name__}")
-            expected_success = (not exit_code and not missing_child
+            expected_success = (not exit_code and not missing_child and not failure_model
                                 and usage_payload == '{"schemaVersion":1,"status":"observed"}')
             if expected_success:
                 self.assertEqual(run.returncode, 0, f"probe_result={value}")
@@ -211,6 +255,16 @@ class WindowsProbeContracts(unittest.TestCase):
         value = self._run_live_fixture(harness="codex")
         self.assertEqual(value["status"], "passed")
         self.assertEqual(value["exitCode"], 0)
+        self.assertEqual(value["evidence"], CELL.CODEX_REASONING_EVIDENCE)
+
+    def test_real_pwsh_codex_live_models_are_individually_required(self):
+        for model, stage in (("qwen3.8-flash", "codex-qwen38"), ("deepseek-v4-flash", "codex-deepseek-v4")):
+            with self.subTest(model=model):
+                value = self._run_live_fixture(harness="codex", failure_model=model)
+                self.assertEqual(value["stage"], stage)
+                self.assertEqual(value["status"], "failed")
+                self.assertEqual(value["exitCode"], 7)
+                self.assertNotIn("evidence", value)
 
     def test_real_pwsh_doctor_json_integer_types(self):
         """Run the actual probe against producer-shaped JSON when pwsh exists."""

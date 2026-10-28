@@ -33,6 +33,18 @@ Windows MiMo marker commands use the required Python runtime, preserving exact
 file contents under its native PowerShell frontend without depending on Git's
 optional `printf.exe`. This fixture change also requires updated canary assets.
 
+Codex deterministic conformance also runs the native client against a local
+scripted provider with both `qwen3.8-flash` and `deepseek-v4-flash`. Each check
+starts with a disabled-reasoning preference, resumes the session, switches to
+`qwen3.6`, and switches back. It verifies the provider receives compatible
+controls and the original configuration survives. A missing or failed model
+check cannot qualify a Codex cell. These checks require a canary asset that
+contains them; older assets cannot supply this evidence. The live Codex cell
+also runs a tool round-trip with each of those models, using a 32,000-token
+session limit per additional model. Its failure stage identifies the affected
+model without publishing the prompt, provider output or credentials. The
+selected model is not run twice when it is one of the two.
+
 Hermes resolution binds the official release tag to an immutable commit. Older
 date-tagged releases use their `pyproject.toml` product version; current releases
 use a stable SemVer tag because their packaging version is the `0.0.0` placeholder.

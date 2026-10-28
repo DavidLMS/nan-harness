@@ -907,6 +907,7 @@
   "harness_warning": "aviso: {warning}",
   "harness_warning_could_not_save_the_last_model": "aviso: no se ha podido guardar el último modelo de {kind}: {error}",
   "harness_warning_model_is_no_longer_available_for_this_credential_using": "aviso: el modelo '{value_1}' ya no está disponible con esta credencial; se usará '{fallback}'.",
+  "harness_warning_reasoning_required": "aviso: el modelo '{model}' requiere razonamiento; se ha ajustado la preferencia desactivada para esta sesión.",
   "help_allow_an_unreadable_harness_version_newer_versions_already_warn_and_continue": "Permite continuar si no se puede leer la versión del asistente; las versiones más recientes ya muestran un aviso y continúan",
   "help_bypass_the_local_chat_completions_gateway_for_this_launch": "Omite la pasarela local de Chat Completions en esta ejecución",
   "help_bypass_the_local_gateway_in_a_diagnostic_profile": "Omite la pasarela local en un perfil de diagnóstico",

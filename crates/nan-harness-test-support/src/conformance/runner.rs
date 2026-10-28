@@ -136,6 +136,21 @@ impl PublishedConformanceRunner {
             scenario.duration_milliseconds += check.duration_milliseconds;
             scenario.checks.push(check);
         }
+        if registration.kind == HarnessKind::Codex {
+            for (model, name) in [
+                ("qwen3.8-flash", "reasoning-qwen38"),
+                ("deepseek-v4-flash", "reasoning-deepseek-v4"),
+            ] {
+                let check =
+                    super::codex_reasoning::codex_reasoning_check(&self.nan_harness, model, name)
+                        .await;
+                if check.status != ConformanceStatus::Passed {
+                    scenario.status = ConformanceStatus::Failed;
+                }
+                scenario.duration_milliseconds += check.duration_milliseconds;
+                scenario.checks.push(check);
+            }
+        }
         scenario
     }
 

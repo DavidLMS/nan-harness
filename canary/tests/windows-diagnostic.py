@@ -397,9 +397,10 @@ class WindowsDiagnosticTests(unittest.TestCase):
 
     def write_probe_success(self, argv, env):
         if "-Stage" in argv:
-            Path(env["NAN_CANARY_PROBE_RESULT"]).write_text(
-                '{"schemaVersion":2,"stage":"complete","status":"passed",'
-                '"diagnostics":[],"exitCode":0}')
+            value = {"schemaVersion": 2, "stage": "complete", "status": "passed", "diagnostics": [], "exitCode": 0}
+            if argv[argv.index("-Stage") + 1] == "live-tool" and argv[argv.index("-Harness") + 1] == "codex":
+                value["evidence"] = diagnostic.CODEX_REASONING_EVIDENCE
+            Path(env["NAN_CANARY_PROBE_RESULT"]).write_text(json.dumps(value))
 
     def test_all_seventeen_have_every_phase_exclusive_totals(self):
         args = self.args()
@@ -1306,6 +1307,16 @@ class WindowsDiagnosticTests(unittest.TestCase):
         live = report["harnesses"][0]["phases"]["live-tool"]
         self.assertEqual(live["status"], "FAIL")
         self.assertEqual(live["diagnostic"]["stage"], "completion-marker")
+
+    def test_codex_live_marker_requires_both_model_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = Path(tmp) / "probe-result.json"
+            base = {"schemaVersion": 2, "stage": "complete", "status": "passed",
+                    "diagnostics": [], "exitCode": 0}
+            marker.write_text(json.dumps(base))
+            self.assertRejectedMarker(diagnostic.probe_diagnostic(Path(tmp), "live-tool", "codex"))
+            marker.write_text(json.dumps({**base, "evidence": diagnostic.CODEX_REASONING_EVIDENCE}))
+            self.assertEqual(diagnostic.probe_diagnostic(Path(tmp), "live-tool", "codex")["status"], "passed")
 
 
 if __name__ == "__main__": unittest.main()

@@ -26,7 +26,6 @@ fn run_script(executable: &str, arguments: &[&str], source: &str) {
         .spawn()
     {
         Ok(child) => child,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
         Err(error) => panic!("reasoning contract should start: {error}"),
     };
     child

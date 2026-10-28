@@ -128,7 +128,14 @@ async fn responses(
             ))
         })?;
         let provider_model = model.id.clone();
+        let adjusted = request::reasoning_adjusted(&request, model);
         let translated = request::translate(request, model)?;
+        if adjusted {
+            let _ = diagnostics.send(BridgeDiagnostic::reasoning_adjusted(
+                provider_model.clone(),
+                BridgeEndpoint::Responses,
+            ));
+        }
         let priority = request_priority(&headers);
         let usage_guard = RequestUsageGuard::new(&state.usage, provider_model);
         let (events, capture) = stream::translate_request(

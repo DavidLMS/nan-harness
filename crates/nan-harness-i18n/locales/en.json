@@ -907,6 +907,7 @@
   "harness_warning": "warning: {warning}",
   "harness_warning_could_not_save_the_last_model": "warning: could not save the last {kind} model: {error}",
   "harness_warning_model_is_no_longer_available_for_this_credential_using": "warning: model '{value_1}' is no longer available for this credential; using '{fallback}'.",
+  "harness_warning_reasoning_required": "warning: model '{model}' requires reasoning; the disabled setting was adjusted for this session.",
   "help_allow_an_unreadable_harness_version_newer_versions_already_warn_and_continue": "Allow an unreadable harness version; newer versions already warn and continue",
   "help_bypass_the_local_chat_completions_gateway_for_this_launch": "Bypass the local Chat Completions gateway for this launch",
   "help_bypass_the_local_gateway_in_a_diagnostic_profile": "Bypass the local gateway in a diagnostic profile",

@@ -68,6 +68,9 @@ class CheckResult(NamedTuple):
     attempts: int
     detail: str
 
+CODEX_REASONING_DETAIL = "Codex live tool checks passed for qwen3.8-flash and deepseek-v4-flash."
+CODEX_REASONING_EVIDENCE = "codex-always-on-models-v1"
+
 HARNESSES = CLI_HARNESSES
 SEMVER = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?\Z")
 SHA256 = re.compile(r"[0-9a-f]{40}\Z")
@@ -397,6 +400,7 @@ CONFORMANCE_ATTEMPTS = 2
 # nan-harness output contract failure rather than a provider result.
 LIVE_MISMATCH_STAGES = frozenset({"usage-summary"})
 PROBE_STAGES = frozenset({"setup", "harness-run", "tool-evidence", "read-marker", "completion-marker",
+                          "codex-qwen38", "codex-deepseek-v4",
                           "bridge-sentinel", "usage-evidence", "usage-summary", "media-capabilities", "media-plan", "media-tts", "media-stt", "media-image",
                           "cleanup", "complete"})
 PROBE_DIAGNOSTICS = frozenset({
@@ -411,6 +415,7 @@ PROBE_DIAGNOSTIC_CODES = {
 # The PowerShell probe publishes its own closed marker (schema 2) with the stage the
 # native run reached and a bounded diagnostic list.
 WINDOWS_PROBE_STAGES = frozenset({"live-tool", "harness-run", "read-marker", "completion-marker",
+                                  "codex-qwen38", "codex-deepseek-v4",
                                   "bridge-sentinel", "usage-evidence", "usage-summary",
                                   "media-capabilities", "media-plan", "media-tts", "media-stt", "media-image", "complete"})
 WINDOWS_LIVE_DIAGNOSTICS = frozenset({
@@ -1031,6 +1036,12 @@ def conformance_result(value, harness):
                 or not isinstance(scenario.get("checks"), list) or not scenario["checks"]
                 or type(duration) is not int or duration < 0):
             raise ValueError("conformance scenario is not a closed contract result")
+        if harness == "codex" and scenario["name"] == "tool-round-trip" and scenario["status"] == "passed":
+            for required in ("reasoning-qwen38", "reasoning-deepseek-v4"):
+                matching = [check for check in scenario["checks"]
+                            if isinstance(check, dict) and check.get("name") == required]
+                if len(matching) != 1 or matching[0].get("status") != "passed":
+                    raise ValueError("Codex reasoning compatibility evidence is missing or unsuccessful")
         # A failed inventory remains the historical drift observation, not a mismatch.
         if scenario["status"] == "failed" and scenario["name"] != "inventory":
             failed[scenario["name"]] = duration
@@ -1239,7 +1250,7 @@ def probe_result(path):
                 (not isinstance(value["diagnostic"], str) or
                  value["status"] != "failed" or value["stage"] != "completion-marker" or
                  value["diagnostic"] not in PROBE_DIAGNOSTICS))
-            or ("evidence" in value and (value['status'] != 'passed' or value['evidence'] != MIMO_SESSION_EVIDENCE))):
+            or ("evidence" in value and (value['status'] != 'passed' or value['evidence'] not in (MIMO_SESSION_EVIDENCE, CODEX_REASONING_EVIDENCE)))):
         return None
     return value
 
@@ -1256,6 +1267,8 @@ def windows_probe_result(path):
             or (value["status"] == "passed") != (value["stage"] == "complete")):
         return None
     diagnostics = value.get("diagnostics")
+    if "evidence" in value and (value["status"] != "passed" or value["evidence"] != CODEX_REASONING_EVIDENCE):
+        return None
     if diagnostics is not None and (not isinstance(diagnostics, list) or len(diagnostics) > 1
                                     or any(not isinstance(item, str) or item not in WINDOWS_LIVE_DIAGNOSTICS
                                            for item in diagnostics)):
@@ -1315,6 +1328,10 @@ def live(args, _state, observe=None):
         if observe is not None:
             observation.unlink(missing_ok=True)
     if status == 0 and result is not None and result["status"] == "passed":
+        if args.harness == "codex":
+            if result.get("evidence") != CODEX_REASONING_EVIDENCE:
+                raise ProbeFailure("marker-missing", status)
+            return CheckResult(1, CODEX_REASONING_DETAIL)
         if result.get('evidence') is not None:
             if not native_mimo:
                 raise ProbeFailure('marker-missing', status)

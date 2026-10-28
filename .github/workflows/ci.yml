@@ -41,6 +41,40 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  codex-reasoning:
+    name: Codex reasoning compatibility (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, macos-15, windows-2025]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      PYTHON: ${{ runner.os == 'Windows' && 'python' || 'python3' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: rustup show
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: codex-reasoning-${{ matrix.runner }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Install last compatible Codex
+        shell: bash
+        run: |
+          version="$("$PYTHON" -c 'import json; x=json.load(open("crates/nan-harness-runtime/resources/compatibility.json")); print(next(h["lastCompatibleVersion"] for h in x["harnesses"] if h["id"] == "codex"))')"
+          npm install --global "@openai/codex@$version"
+      - name: Exercise native Codex reasoning and session transitions
+        shell: bash
+        run: |
+          cargo build --locked -p nan-harness-cli --bin nan-harness
+          suffix=''
+          if [ "$RUNNER_OS" = Windows ]; then suffix='.exe'; fi
+          cargo run --locked -p nan-harness-canary --bin nan-harness-canary -- conformance \
+            --nan-harness "$GITHUB_WORKSPACE/target/debug/nan-harness$suffix" --harness codex --json > "$RUNNER_TEMP/codex-conformance.json"
+          "$PYTHON" -c 'import json,sys; x=json.load(open(sys.argv[1])); s=next(s for s in x["scenarios"] if s["name"] == "tool-round-trip"); checks={c["name"]:c["status"] for c in s["checks"]}; assert x["outcome"] == "passed" and all(checks.get(n) == "passed" for n in ("reasoning-qwen38","reasoning-deepseek-v4"))' "$RUNNER_TEMP/codex-conformance.json"
+
   opencode-v2:
     name: OpenCode V2 qualification
     uses: ./.github/workflows/opencode-v2-conformance.yml

@@ -160,7 +160,9 @@ fn translates_and_validates_native_reasoning_effort() {
         }
     }
     let deepseek = nan_harness_core::coding_model_profile("deepseek-v4-flash").unwrap();
-    assert!(translate(request("deepseek-v4-flash", "none"), &deepseek).is_err());
+    let disabled = translate(request("deepseek-v4-flash", "none"), &deepseek).unwrap();
+    assert!(disabled.body.get("reasoning_effort").is_none());
+    assert!(disabled.body.get("chat_template_kwargs").is_none());
     for hint in ["low", "xhigh"] {
         let translated = translate(request("deepseek-v4-flash", hint), &deepseek).unwrap();
         assert!(translated.body.get("reasoning_effort").is_none());
@@ -185,7 +187,13 @@ fn translates_and_validates_native_reasoning_effort() {
     }
 
     let qwen38 = nan_harness_core::coding_model_profile("qwen3.8-flash").expect("model");
-    assert!(translate(request("qwen3.8-flash", "none"), &qwen38).is_err());
+    let adjusted = translate(request("qwen3.8-flash", "none"), &qwen38).unwrap();
+    assert!(adjusted.body.get("reasoning_effort").is_none());
+    assert!(adjusted.body.get("chat_template_kwargs").is_none());
+    let deepseek = nan_harness_core::coding_model_profile("deepseek-v4-flash").expect("model");
+    let adjusted = translate(request("deepseek-v4-flash", "none"), &deepseek).unwrap();
+    assert!(adjusted.body.get("reasoning_effort").is_none());
+    assert!(adjusted.body.get("chat_template_kwargs").is_none());
     let translated = translate(request("qwen3.8-flash", "high"), &qwen38)
         .expect("always-on reasoning should be accepted");
     assert!(translated.body.get("chat_template_kwargs").is_none());

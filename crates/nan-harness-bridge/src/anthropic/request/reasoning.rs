@@ -9,6 +9,7 @@ use serde_json::{Map, Value};
 pub(super) fn translate_thinking(
     thinking: Option<ThinkingConfig>,
     effort: Option<ReasoningEffort>,
+    model: &str,
     policy: ReasoningPolicy,
     body: &mut Map<String, Value>,
 ) -> Result<(), ApiError> {
@@ -17,7 +18,9 @@ pub(super) fn translate_thinking(
         (None | Some(ThinkingConfig::Adaptive), effort) => {
             adaptive_reasoning_selection(policy, effort)
         }
-        (Some(ThinkingConfig::Disabled), None) => ReasoningSelection::Toggle(false),
+        (Some(ThinkingConfig::Disabled), None) => {
+            ReasoningSelection::Toggle(crate::reasoning::adjusted(policy, true))
+        }
         (Some(ThinkingConfig::Enabled { budget_tokens }), None) => {
             if budget_tokens < 1_024 {
                 return Err(ApiError::InvalidRequest(
@@ -39,9 +42,10 @@ pub(super) fn translate_thinking(
         return Ok(());
     }
     if !policy.accepts(selection) {
-        return Err(ApiError::InvalidRequest(
-            "requested thinking configuration is not supported by this model's reasoning policy"
-                .to_owned(),
+        return Err(crate::reasoning::mismatch(
+            model,
+            policy,
+            crate::reasoning::diagnostic_selection(selection),
         ));
     }
     crate::reasoning::apply(body, policy, selection);

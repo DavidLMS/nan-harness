@@ -22,6 +22,7 @@ for harness in "$@"; do
     codex)
       cargo run --locked --quiet -- doctor codex
       cargo test --locked -p nan-harness-cli --test conformance_codex codex_native_inventory_crosses_the_responses_bridge -- --ignored --exact
+      cargo test --locked -p nan-harness-cli --test conformance_codex codex_always_on_models_accept_inherited_disabled_reasoning -- --ignored --exact
       ;;
     mimo-code|opencode|pi|omp|openclaw|cline|qwen-code|deepseek-harness|hermes|kimi-code|aider|prime-agent|goose)
       case "$harness" in

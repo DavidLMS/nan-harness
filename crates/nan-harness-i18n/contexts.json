@@ -5990,6 +5990,11 @@
       "crates/nan-harness-cli/src/runner/harness.rs"
     ]
   },
+  "harness_warning_reasoning_required": {
+    "description": "Warn when a model requires reasoning that the harness requested disabled.",
+    "section": "launch",
+    "sources": ["crates/nan-harness-cli/src/lib.rs"]
+  },
   "help_allow_an_unreadable_harness_version_newer_versions_already_warn_and_continue": {
     "description": "Command help and argument validation. Preserve command names, paths, provider identifiers and diagnostic codes.",
     "section": "help",

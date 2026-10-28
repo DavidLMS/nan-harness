@@ -327,6 +327,34 @@ if ! grep -E '^(🔥 Tokens burned — this session|NaN usage \()' "$stderr_outp
   exit 1
 fi
 
+# These models have mandatory reasoning and must be checked with real provider
+# traffic, independently of the representative model used by the main cell.
+if [ "$harness" = codex ]; then
+  for reasoning_model in qwen3.8-flash deepseek-v4-flash; do
+    [ "$reasoning_model" != "$model" ] || continue
+    case "$reasoning_model" in
+      qwen3.8-flash) probe_stage='codex-qwen38' ;;
+      deepseek-v4-flash) probe_stage='codex-deepseek-v4' ;;
+    esac
+    target="$workspace/codex-$reasoning_model.txt"
+    output="$workspace/codex-$reasoning_model.stdout"
+    stderr_output="$workspace/codex-$reasoning_model.stderr"
+    usage_evidence="$workspace/codex-$reasoning_model.usage.json"
+    export NAN_HARNESS_INTERNAL_CANARY_USAGE_FILE="$usage_evidence"
+    codex_prompt="Use exec_command to run printf NAN_CODEX_TOOL_OK > '$target'. After the command succeeds, reply exactly NAN_CANARY_OK."
+    "$nan_command" codex --model "$reasoning_model" --session-max-tokens 32000 -- \
+      exec --skip-git-repo-check --ephemeral --json \
+      --dangerously-bypass-approvals-and-sandbox "$codex_prompt" \
+      >"$output" 2>"$stderr_output"
+    grep -Fx 'NAN_CODEX_TOOL_OK' "$target" >/dev/null
+    grep -F 'NAN_CANARY_OK' "$output" >/dev/null
+    if grep -F 'NH-BRIDGE-' "$output" "$stderr_output" >/dev/null; then exit 1; fi
+    jq -e '.schemaVersion == 1 and .status == "observed"' "$usage_evidence" >/dev/null
+    grep -E '^(🔥 Tokens burned — this session|NaN usage \()' "$stderr_output" >/dev/null
+  done
+  probe_evidence='codex-always-on-models-v1'
+fi
+
 if [ "$harness" = hermes ] || [ "$harness" = openclaw ]; then
   probe_stage='media-plan'
   media_plan="$workspace/media-plan.json"

@@ -291,11 +291,17 @@ fn apply_reasoning(
             )));
         }
     };
-    let selection = model.reasoning.resolve_hint(hint).ok_or_else(|| {
-        ApiError::InvalidRequest(format!(
-            "reasoning effort '{effort}' is incompatible with model policy"
-        ))
-    })?;
+    let selection = if crate::reasoning::adjusted(model.reasoning, effort == "none") {
+        nan_harness_core::model::ReasoningSelection::Toggle(true)
+    } else {
+        model.reasoning.resolve_hint(hint).ok_or_else(|| {
+            crate::reasoning::mismatch(
+                &model.id,
+                model.reasoning,
+                crate::reasoning::diagnostic_effort(effort),
+            )
+        })?
+    };
     crate::reasoning::apply(
         body.as_object_mut()
             .expect("translated request is an object"),
@@ -328,7 +334,9 @@ mod tests {
         apply_reasoning(&mut qwen38_body, &qwen38, "high")
             .expect("always-on reasoning should be accepted");
         assert_eq!(qwen38_body, json!({}));
-        assert!(apply_reasoning(&mut qwen38_body, &qwen38, "none").is_err());
+        apply_reasoning(&mut qwen38_body, &qwen38, "none").unwrap();
+        assert!(qwen38_body.get("reasoning_effort").is_none());
+        assert!(qwen38_body.get("chat_template_kwargs").is_none());
 
         let glm53 = nan_harness_core::coding_model_profile("glm5.3-flash").expect("known model");
         let mut glm53_body = json!({});

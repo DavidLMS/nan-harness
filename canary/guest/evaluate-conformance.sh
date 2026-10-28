@@ -11,6 +11,10 @@ jq --exit-status --arg harness "$harness" '
   .harness == $harness and
   (.scenarios | type == "array" and length == 4) and
   ([.scenarios[].name] | sort == ["external-prerequisite", "inventory", "sentinel", "tool-round-trip"]) and
+  (if $harness == "codex" then
+     [.scenarios[] | select(.name == "tool-round-trip") | .checks[] |
+       select(.status == "passed" and (.name == "reasoning-qwen38" or .name == "reasoning-deepseek-v4")) | .name] | sort == ["reasoning-deepseek-v4", "reasoning-qwen38"]
+   else true end) and
   all(.scenarios[];
     (.checks | type == "array" and length > 0) and
     if .name == "inventory" then

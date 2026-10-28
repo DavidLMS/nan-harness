@@ -7,7 +7,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'; $stageNow = $Stage; $workspace = $null; $stdout = $null; $stderr = $null; $completed = $false; $markerPath = $env:NAN_CANARY_PROBE_RESULT; $diagnostics = New-Object System.Collections.Generic.List[string]; $exitCode = $null; $doctorVersion = $null; $doctorExpectedVersion = $null; $doctorReason = $null; $doctorSchemaReason = $null; $discoveryCode = $null; $inventoryFailureReasons = $null; $inventoryProcess = $null; $failedScenarios = $null
 $knownDiagnostics = @('doctor-child-launch','doctor-exit-nonzero','doctor-output-invalid','doctor-schema-invalid','doctor-version-missing','doctor-version-invalid','doctor-version-mismatch','doctor-exit-missing','conformance-child-launch','conformance-exit-nonzero','conformance-output-invalid','conformance-schema-invalid','conformance-scenario-missing','conformance-scenario-failed','conformance-inventory-failed','conformance-inventory-operational-failed','conformance-check-invalid','conformance-exit-missing','live-child-launch','live-exit-nonzero','live-exit-missing','live-credential-missing','live-tool-evidence-missing','live-read-marker-missing','live-completion-marker-missing','live-bridge-sentinel','live-usage-invalid', 'live-usage-missing', 'live-usage-unreadable', 'live-usage-malformed', 'live-usage-schema-invalid', 'live-usage-not-observed', 'live-usage-unsupported','live-usage-summary-missing','probe-unexpected-failure')
-$conformanceChecks = $null
+$conformanceChecks = $null; $reasoningEvidence = $null
 $knownDiagnostics += @('live-error-auth','live-error-network','live-error-arguments','live-error-permission','live-error-provider','live-error-config')
 $hermesMachineFrontend = $false
 if ($Harness -eq 'hermes') {
@@ -41,6 +41,7 @@ function Write-Result([string]$resultStage, [string]$status) {
   if ($null -ne $inventoryProcess) { $value.inventoryProcess = $inventoryProcess }
   if ($null -ne $failedScenarios) { $value.failedScenarios = @($failedScenarios) }
   if ($null -ne $conformanceChecks) { $value.conformanceChecks = @($conformanceChecks) }
+  if ($status -eq 'passed' -and $null -ne $reasoningEvidence) { $value.evidence = $reasoningEvidence }
   $tmp = Join-Path $parent ('.probe-result.' + [guid]::NewGuid().ToString('N'))
   # Windows PowerShell 5.1 supports UTF-8 (with BOM); JSON parsing is encoding-aware.
   try { $value | ConvertTo-Json -Depth 6 -Compress | Set-Content -LiteralPath $tmp -Encoding UTF8; Move-Item -LiteralPath $tmp -Destination $markerPath -Force }
@@ -173,6 +174,12 @@ function Validate-Conformance([object]$Value, [string]$ExpectedHarness) {
     if ($allowed -notcontains [string]$scenario.status -or $null -eq $scenario.checks -or @($scenario.checks).Count -lt 1 -or @($scenario.checks).Count -gt 8 -or -not (Is-BoundedInteger $scenario.durationMilliseconds 86400000)) { Add-Diagnostic 'conformance-schema-invalid'; $valid = $false }
     if ([string]$scenario.status -eq 'failed') { Add-Diagnostic 'conformance-scenario-failed'; if ($name -eq 'inventory') { Add-Diagnostic 'conformance-inventory-failed' } }
     foreach ($check in @($scenario.checks)) { if (-not (Has-OnlyProperties $check @('name','status','durationMilliseconds')) -or [string]::IsNullOrEmpty([string]$check.name) -or ([string]$check.name).Length -gt 64 -or [string]$check.status -notin @('passed','failed','skipped') -or -not (Is-BoundedInteger $check.durationMilliseconds 86400000)) { Add-Diagnostic 'conformance-check-invalid'; $valid = $false } }
+    if ($ExpectedHarness -ceq 'codex' -and $name -ceq 'tool-round-trip' -and $scenario.status -ceq 'passed') {
+      foreach ($required in @('reasoning-qwen38','reasoning-deepseek-v4')) {
+        $matching = @($scenario.checks | Where-Object { $_.name -ceq $required })
+        if ($matching.Count -ne 1 -or $matching[0].status -cne 'passed') { Add-Diagnostic 'conformance-check-invalid'; $valid = $false }
+      }
+    }
   }
   if ($Value.outcome -eq 'passed' -and $diagnostics.Contains('conformance-scenario-failed')) { Add-Diagnostic 'conformance-schema-invalid'; $valid = $false }
   if ($Value.outcome -eq 'failed' -and -not $diagnostics.Contains('conformance-scenario-failed')) { Add-Diagnostic 'conformance-schema-invalid'; $valid = $false }
@@ -277,6 +284,25 @@ try {
   $stageNow = 'usage-evidence'; Assert-UsageEvidence $usage
   # Keep the pattern ASCII: Windows PowerShell 5.1 reads BOM-less scripts as ANSI.
   $stageNow = 'usage-summary'; if (-not (Has-Regex '^(\uD83D\uDD25 Tokens burned \u2014 this session|NaN usage \()')) { Fail 'usage summary missing' }; if ($null -eq $exitCode) { Add-Diagnostic 'live-exit-missing'; throw 'live child exit evidence missing' }
+  if ($Harness -eq 'codex') {
+    foreach ($reasoningModel in @('qwen3.8-flash','deepseek-v4-flash')) {
+      if ($reasoningModel -ceq $Model) { continue }
+      $stageNow = if ($reasoningModel -ceq 'qwen3.8-flash') { 'codex-qwen38' } else { 'codex-deepseek-v4' }
+      $target = Join-Path $workspace "codex-$reasoningModel.txt"
+      $stdout = Join-Path $workspace "codex-$reasoningModel.stdout"
+      $stderr = Join-Path $workspace "codex-$reasoningModel.stderr"
+      $usage = Join-Path $workspace "codex-$reasoningModel.usage.json"
+      $env:NAN_HARNESS_INTERNAL_CANARY_USAGE_FILE = $usage
+      $quotedTarget = $target.Replace("'", "''")
+      $p = "Use exec_command to run powershell -NoProfile -Command `"Set-Content -NoNewline -LiteralPath '$quotedTarget' -Value 'NAN_CODEX_TOOL_OK'`". After the command succeeds, reply exactly NAN_CANARY_OK."
+      Run-Native @('codex','--model',$reasoningModel,'--session-max-tokens','32000','--','exec','--skip-git-repo-check','--ephemeral','--json','--dangerously-bypass-approvals-and-sandbox',$p)
+      Read-Exact $target 'NAN_CODEX_TOOL_OK'
+      if (-not (Has-Text 'NAN_CANARY_OK') -or (Has-Text 'NH-BRIDGE-')) { Fail 'reasoning model response invalid' }
+      Assert-UsageEvidence $usage
+      if (-not (Has-Regex '^(\uD83D\uDD25 Tokens burned \u2014 this session|NaN usage \()')) { Fail 'usage summary missing' }
+    }
+    $reasoningEvidence = 'codex-always-on-models-v1'
+  }
   if ($Harness -in @('hermes','openclaw')) {
     $stageNow = 'media-plan'
     $media = Join-Path $workspace 'media'; New-Item -ItemType Directory -Path $media | Out-Null

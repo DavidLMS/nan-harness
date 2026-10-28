@@ -140,7 +140,7 @@ async fn responses_bridge_accepts_codex_plan_reasoning_for_mimo() {
 }
 
 #[tokio::test]
-async fn responses_bridge_rejects_disabling_always_on_reasoning_before_upstream() {
+async fn responses_bridge_adjusts_disabling_always_on_reasoning() {
     let mut servers = start_servers().await;
     let mut diagnostics = servers.bridge.take_diagnostics();
     let client = reqwest::Client::new();
@@ -154,30 +154,24 @@ async fn responses_bridge_rejects_disabling_always_on_reasoning_before_upstream(
         .send()
         .await
         .expect("request should complete");
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let body = response.text().await.expect("error body");
-    assert!(body.contains("incompatible with model policy"));
+    assert_eq!(response.status(), StatusCode::OK);
+    let _body = response.text().await.expect("response body");
     let diagnostic = diagnostics
         .recv()
         .await
         .expect("diagnostic should be emitted");
-    assert_eq!(
-        diagnostic.reason,
-        BridgeDiagnosticReason::ReasoningPolicyMismatch
-    );
+    assert_eq!(diagnostic.reason, BridgeDiagnosticReason::ReasoningAdjusted);
     assert_eq!(diagnostic.model_id.as_deref(), Some("qwen3.8-flash"));
     assert_eq!(
         diagnostic.requested_reasoning,
         Some(BridgeReasoningRequest::None)
     );
     assert_eq!(diagnostic.model_policy, Some(BridgeModelPolicy::AlwaysOn));
-    assert!(
-        servers
-            .state
-            .chat_requests
-            .lock()
-            .expect("request lock")
-            .is_empty()
-    );
+    {
+        let requests = servers.state.chat_requests.lock().expect("request lock");
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].get("reasoning_effort").is_none());
+        assert!(requests[0].get("chat_template_kwargs").is_none());
+    }
     servers.shutdown().await;
 }

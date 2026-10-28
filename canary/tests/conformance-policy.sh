@@ -64,3 +64,12 @@ write_report failed passed passed skipped
 jq '.schemaVersion = 2' "$report" >"$temporary_directory/schema-v2.json"
 mv "$temporary_directory/schema-v2.json" "$report"
 "$evaluator" "$report" hermes >/dev/null 2>&1
+
+# Codex cannot qualify from a report that omitted either always-on model.
+jq '.harness = "codex" | .scenarios[1].checks += [{"name":"reasoning-qwen38","status":"passed"},{"name":"reasoning-deepseek-v4","status":"passed"}]' "$report" >"$temporary_directory/codex.json"
+"$evaluator" "$temporary_directory/codex.json" codex >/dev/null 2>&1
+jq 'del(.scenarios[1].checks[-1])' "$temporary_directory/codex.json" >"$temporary_directory/missing.json"
+if "$evaluator" "$temporary_directory/missing.json" codex >/dev/null 2>&1; then
+  printf 'conformance policy accepted missing Codex reasoning evidence\n' >&2
+  exit 1
+fi

@@ -13,6 +13,13 @@ use serde_json::{Map, Value, json};
 pub(crate) use tools::WebSearchInvocation;
 pub(crate) use wire::MessagesRequest;
 
+pub(crate) fn reasoning_adjusted(request: &MessagesRequest, policy: ReasoningPolicy) -> bool {
+    crate::reasoning::adjusted(
+        policy,
+        matches!(request.thinking, Some(wire::ThinkingConfig::Disabled)),
+    )
+}
+
 #[derive(Debug)]
 pub(crate) struct TranslatedRequest {
     pub(crate) body: Value,
@@ -77,6 +84,7 @@ pub(crate) fn translate(
     reasoning::translate_thinking(
         thinking,
         output_config.and_then(|config| config.effort),
+        model,
         reasoning_policy,
         &mut body,
     )?;

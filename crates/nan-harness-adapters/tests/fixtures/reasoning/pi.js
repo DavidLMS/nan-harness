@@ -48,6 +48,8 @@ handlers.get("thinking_level_select")({level: "max"}, ctx);
 assert.equal(payload().reasoning_effort, "max");
 ctx.model = {provider: "nan", id: "deepseek-v4-flash"};
 assert.equal(payload().reasoning_effort, undefined, "nonadjustable models omit effort");
+ctx.model = {provider: "nan", id: "qwen3.8-flash"};
+assert.equal(payload({reasoning_effort: "none"}).reasoning_effort, undefined, "always-on models strip an inherited off control");
 ctx.model = {provider: "nan", id: "mimo-v2.6-flash"};
 await commands.get("nan-reasoning").handler("off", ctx);
 assert.deepEqual(payload({chat_template_kwargs: {preserve_thinking: true}}).chat_template_kwargs, {preserve_thinking: true, enable_thinking: false});

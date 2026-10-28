@@ -95,6 +95,22 @@ mod tests {
         );
     }
     #[test]
+    fn always_on_models_do_not_expose_reasoning_controls() {
+        for id in ["qwen3.8-flash", "deepseek-v4-flash"] {
+            let model = coding_model_profile(id).unwrap();
+            let value = model_definition(&model);
+            assert_eq!(value["reasoning"], false);
+            assert!(
+                value["thinkingLevelMap"]
+                    .as_object()
+                    .unwrap()
+                    .values()
+                    .all(Value::is_null)
+            );
+        }
+    }
+
+    #[test]
     fn prime_routes_toggle_models_through_provider_level_compatibility() {
         let models = ["qwen3.6", "mimo-v2.6-flash", "deepseek-v4-flash"]
             .map(|id| coding_model_profile(id).unwrap());

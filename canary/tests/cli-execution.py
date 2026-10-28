@@ -133,13 +133,13 @@ class CliExecutionTests(unittest.TestCase):
                 self.assertIn("-NonInteractive", command)
                 (root / "probe-result.json").write_text(json.dumps({
                     "schemaVersion": 2, "stage": "complete", "status": "passed",
-                    "diagnostics": [], "exitCode": 0}))
+                    "diagnostics": [], "exitCode": 0, "evidence": cell.CODEX_REASONING_EVIDENCE}))
                 return 0
             with patch.object(cell, "os", proxy), \
                     patch.object(cell, "cell_environment", return_value={}), \
                     patch.object(cell, "private_command", side_effect=run):
                 self.assertEqual(cell.installer_command("codex", "0.155.1")[0], "pwsh")
-                self.assertEqual(cell.live(args, {}), 1)
+                self.assertEqual(cell.live(args, {}), cell.CheckResult(1, cell.CODEX_REASONING_DETAIL))
 
     def test_windows_cell_discovers_every_native_installer_destination(self):
         with tempfile.TemporaryDirectory() as temporary:

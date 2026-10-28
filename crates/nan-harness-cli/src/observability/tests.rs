@@ -161,6 +161,27 @@ fn content_filter_rejections_are_non_retryable_provider_diagnostics() {
 }
 
 #[test]
+fn reasoning_adjustments_are_not_reported_as_failures_and_warn_once_per_model() {
+    let cli = Cli::try_parse_from(["nan-harness", "codex"]).expect("Codex command should parse");
+    let mut adjusted = diagnostic(
+        "NH-BRIDGE-REASONING-ADJUSTED",
+        BridgeDiagnosticReason::ReasoningAdjusted,
+        None,
+    );
+    adjusted.model_id = Some("qwen3.8-flash".to_owned());
+    let mut second = adjusted.clone();
+    second.endpoint = RuntimeBridgeEndpoint::Messages;
+    let mut other = adjusted.clone();
+    other.model_id = Some("deepseek-v4-flash".to_owned());
+    let events = [adjusted, second, other];
+    assert!(bridge_diagnostic_contexts(&events, &cli, true).is_empty());
+    assert_eq!(
+        crate::reasoning_adjusted_models(&events),
+        BTreeSet::from(["deepseek-v4-flash", "qwen3.8-flash"])
+    );
+}
+
+#[test]
 fn reasoning_policy_failures_keep_only_actionable_typed_context() {
     let cli = Cli::try_parse_from(["nan-harness", "codex"]).expect("Codex command should parse");
     let diagnostic = BridgeDiagnostic {
