@@ -317,7 +317,17 @@ async fn report_run_result(
     interactive: bool,
 ) -> ExitCode {
     let mut bridge_diagnostics = Vec::new();
-    match runner::run(cli, interactive, &mut bridge_diagnostics).await {
+    let result = runner::run(cli, interactive, &mut bridge_diagnostics).await;
+    for model in reasoning_adjusted_models(&bridge_diagnostics) {
+        eprintln!(
+            "{}",
+            nan_harness_i18n::messages::harness_warning_reasoning_required(
+                nan_harness_i18n::locale(),
+                model
+            )
+        );
+    }
+    match result {
         Ok(exit_code) => {
             report_contexts(
                 telemetry,
@@ -347,6 +357,18 @@ async fn report_run_result(
             ExitCode::FAILURE
         }
     }
+}
+
+fn reasoning_adjusted_models(
+    diagnostics: &[nan_harness_runtime::BridgeDiagnostic],
+) -> std::collections::BTreeSet<&str> {
+    diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic.reason == nan_harness_runtime::BridgeDiagnosticReason::ReasoningAdjusted
+        })
+        .filter_map(|diagnostic| diagnostic.model_id.as_deref())
+        .collect()
 }
 
 fn native_failure(error: &error::CliError) -> native_diagnostic::Failure {

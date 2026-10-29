@@ -69,6 +69,28 @@ mod tests {
     use nan_harness_core::coding_model_profile;
 
     #[test]
+    fn always_on_models_offer_only_automatic_reasoning() {
+        let models =
+            ["qwen3.8-flash", "deepseek-v4-flash"].map(|id| coding_model_profile(id).unwrap());
+        let config = zcode_provider_config(
+            &models,
+            "http://127.0.0.1:1234/v1",
+            "test-key",
+            "qwen3.8-flash",
+        );
+        let rules = config["config"]["modelConfigRules"]["providerModelRules"]
+            .as_array()
+            .unwrap();
+        for rule in rules {
+            assert_eq!(
+                rule["config"]["optionSpecs"]["reasoningLevel"]["values"],
+                json!(["auto"])
+            );
+            assert_eq!(rule["config"]["optionSpecs"]["reasoningLevel"]["map"], "{}");
+        }
+    }
+
+    #[test]
     fn zcode_catalog_uses_live_models_capabilities_and_omitted_reasoning_defaults() {
         let models = [
             coding_model_profile("qwen3.6").unwrap(),

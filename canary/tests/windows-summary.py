@@ -20,6 +20,15 @@ def report(**updates):
     value.update(updates); return value
 
 class WindowsSummaryTests(unittest.TestCase):
+    def test_codex_reasoning_failure_stage_is_safe_to_publish(self):
+        for stage in ("codex-qwen38", "codex-deepseek-v4"):
+            with self.subTest(stage=stage):
+                value = report()
+                value["harnesses"][0]["harness"] = "codex"
+                value["harnesses"][0]["phases"]["live-tool"]["diagnostic"] = {"stage": stage}
+                view = summary.safe_view(value)
+                self.assertEqual(view["harnesses"][0]["phases"]["live-tool"]["diagnostic"]["stage"], stage)
+
     def test_mimo_checks_and_existing_progress_survive_closed_summary_without_promoting_failure(self):
         value = report()
         value["harnesses"][0]["harness"] = "mimo-code"

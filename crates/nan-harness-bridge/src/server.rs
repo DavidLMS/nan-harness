@@ -169,8 +169,12 @@ async fn messages(
                 web_search::execute(state.search_client.as_ref(), invocation, &client_model).await,
             );
         }
+        let adjusted = request::reasoning_adjusted(&request, reasoning);
         let translated =
             request::translate(request, &provider_model, max_output_tokens, reasoning)?;
+        if adjusted {
+            let _ = diagnostics.send(BridgeDiagnostic::reasoning_adjusted(provider_model.clone(), BridgeEndpoint::Messages));
+        }
         let auto_mode_trace = begin_auto_mode_trace(
             &state,
             translated.auto_mode_stage,

@@ -9,6 +9,27 @@ use std::process::Output;
 
 const INVENTORY_MARKER: &str = "NAN_HARNESS_CODEX_INVENTORY_OK";
 
+#[tokio::test]
+#[ignore = "requires the pinned Codex executable"]
+async fn codex_always_on_models_accept_inherited_disabled_reasoning() {
+    for (model, name) in [
+        ("qwen3.8-flash", "reasoning-qwen38"),
+        ("deepseek-v4-flash", "reasoning-deepseek-v4"),
+    ] {
+        let check = nan_harness_test_support::conformance::codex_reasoning_check(
+            Path::new(env!("CARGO_BIN_EXE_nan-harness")),
+            model,
+            name,
+        )
+        .await;
+        assert_eq!(
+            check.status,
+            nan_harness_test_support::conformance::ConformanceStatus::Passed,
+            "{model}"
+        );
+    }
+}
+
 struct ModelRecoveryFixture {
     _root: tempfile::TempDir,
     workspace: PathBuf,

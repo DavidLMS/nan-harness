@@ -190,9 +190,11 @@ fn reasoning_levels(policy: ReasoningPolicy) -> (Option<&'static str>, Value) {
                 ),
             )
         }
-        ReasoningPolicy::AlwaysOn | ReasoningPolicy::Unsupported | ReasoningPolicy::Unknown => {
-            (None, json!([]))
-        }
+        ReasoningPolicy::AlwaysOn => (
+            Some("high"),
+            json!([level("high", "Reasoning always enabled")]),
+        ),
+        ReasoningPolicy::Unsupported | ReasoningPolicy::Unknown => (None, json!([])),
     }
 }
 
@@ -287,7 +289,7 @@ mod tests {
                 ]
             )
         );
-        assert_eq!(contract(1), (serde_json::Value::Null, vec![]));
+        assert_eq!(contract(1), (json!("high"), vec![json!("high")]));
         assert_eq!(
             contract(2),
             (json!("high"), vec![json!("none"), json!("high")])
@@ -329,12 +331,12 @@ mod tests {
         assert_eq!(models[0]["slug"], "qwen3.8-flash");
         assert_eq!(models[0]["context_window"], 1_000_000);
         assert_eq!(models[0]["input_modalities"], json!(["text", "image"]));
-        assert!(models[0]["default_reasoning_level"].is_null());
+        assert_eq!(models[0]["default_reasoning_level"], "high");
         assert_eq!(
             models[0]["supported_reasoning_levels"]
                 .as_array()
                 .expect("reasoning levels"),
-            &Vec::<serde_json::Value>::new()
+            &vec![json!({"effort":"high", "description":"Reasoning always enabled"})]
         );
 
         assert_eq!(models[1]["slug"], "glm5.3-flash");

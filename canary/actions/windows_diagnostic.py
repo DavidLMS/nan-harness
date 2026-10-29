@@ -6,7 +6,7 @@ import time
 import uuid
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from cell import HERMES_INSTALL_STAGES, WindowsJob, finish_stage, protect_private
+from cell import CODEX_REASONING_EVIDENCE, CODEX_REASONING_DETAILS, HERMES_INSTALL_STAGES, WindowsJob, finish_stage, protect_private
 from selection import WINDOWS_UNAVAILABLE, WINDOWS_SKIP_REASON
 
 HARNESSES = ("claude-code", "codex", "mimo-code", "zcode", "opencode", "hermes", "pi", "omp", "prime-agent",
@@ -557,12 +557,13 @@ _PROBE_DIAGNOSTICS = frozenset({
 # ever copying a value out of the marker.
 _PROBE_MARKER_FIELDS_STAGES = frozenset(PHASES) | {
     "complete", "harness-run", "read-marker", "completion-marker", "bridge-sentinel",
+    "codex-qwen38", "codex-deepseek-v4",
     "usage-evidence", "usage-summary", "media-capabilities", "media-plan", "media-tts", "media-stt", "media-image",
 }
 _PROBE_MARKER_FIELDS = frozenset({
     "schemaVersion", "stage", "status", "diagnostics", "exitCode", "doctorVersion",
     "doctorExpectedVersion", "doctorReason", "doctorSchemaReason", "discoveryCode",
-    "inventoryFailureReasons", "inventoryProcess", "failedScenarios", "conformanceChecks",
+    "inventoryFailureReasons", "inventoryProcess", "failedScenarios", "conformanceChecks", "evidence",
 })
 _SEMVER = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$")
 _DOCTOR_REASONS = frozenset({"missing", "invalid", "mismatch", "discovery-error"})
@@ -580,6 +581,7 @@ _INVENTORY_CLEANUP_STAGES = frozenset({"terminate", "wait", "wait-timeout", "cap
 _INVENTORY_CLEANUP_STREAMS = frozenset({"stdout", "stderr"})
 _LIVE_FAILURE_STAGES = frozenset({
     "live-tool", "harness-run", "read-marker", "completion-marker", "bridge-sentinel",
+    "codex-qwen38", "codex-deepseek-v4",
     "usage-evidence", "usage-summary", "media-capabilities", "media-plan", "media-tts", "media-stt", "media-image",
 })
 
@@ -756,14 +758,19 @@ def probe_diagnostic(cell, expected_stage=None, expected_harness=None):
             return _invalid_marker(value)
         result = {"status": value["status"], "markerState": "valid", "stage": value["stage"]}
         if value["schemaVersion"] == 1:
+            if expected_stage == "live-tool" and expected_harness == "codex" and value["status"] == "passed":
+                return _invalid_marker(value)
             if set(value) - {"schemaVersion", "stage", "status", "diagnostic"}:
                 return _invalid_marker(value)
             return result
         allowed = {"schemaVersion", "stage", "status", "diagnostics", "exitCode",
                    "doctorVersion", "doctorExpectedVersion", "doctorReason", "discoveryCode",
                    "doctorSchemaReason", "inventoryFailureReasons", "inventoryProcess",
-                   "failedScenarios", "conformanceChecks"}
+                   "failedScenarios", "conformanceChecks", "evidence"}
         if set(value) - allowed:
+            return _invalid_marker(value)
+        if "evidence" in value and (expected_stage != "live-tool" or expected_harness != "codex"
+                                    or value["status"] != "passed" or not isinstance(value["evidence"], str) or value["evidence"] not in CODEX_REASONING_DETAILS):
             return _invalid_marker(value)
         for key in ("doctorVersion", "doctorExpectedVersion"):
             if key in value and (not isinstance(value[key], str) or len(value[key]) > 64 or not _SEMVER.fullmatch(value[key])):
@@ -810,6 +817,8 @@ def probe_diagnostic(cell, expected_stage=None, expected_harness=None):
             return _invalid_marker(value)
         if value["status"] == "passed":
             if value.get("stage") != "complete" or value.get("exitCode") != 0 or diagnostics:
+                return _invalid_marker(value)
+            if expected_stage == "live-tool" and expected_harness == "codex" and value.get("evidence") not in CODEX_REASONING_DETAILS:
                 return _invalid_marker(value)
         elif not diagnostics:
             return _invalid_marker(value)
@@ -1108,7 +1117,7 @@ def collect(args, harnesses, output):
                     phases["live-tool"] = phase("BLOCKED", "deadline-exhausted")
                     any_failure = True; reports.append({"harness": harness, "phases": phases}); checkpoint(); active["harness"] = None; active["phases"] = {}; active["phase"] = None; continue
                 code, reason = run_bounded(common + ["-Stage", "live-tool", "-Model", args.model], cell, live_env, child_timeout)
-                diagnostic = probe_diagnostic(cell, "live-tool")
+                diagnostic = probe_diagnostic(cell, "live-tool", harness)
                 marker_failed = diagnostic.get("status") == "failed"
                 if code == 0 and not marker_failed:
                     phases["live-tool"] = phase("PASS", "verified")

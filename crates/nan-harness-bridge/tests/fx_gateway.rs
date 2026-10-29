@@ -24,6 +24,72 @@ struct TestServers {
 }
 
 #[tokio::test]
+async fn fx_adjusts_disabled_always_on_reasoning() {
+    let mut servers = start_servers().await.expect("test servers should start");
+    let mut diagnostics = servers.bridge.take_diagnostics();
+    let response = reqwest::Client::new()
+        .post(format!(
+            "{}/v3/ai/language-model",
+            servers.bridge.base_url()
+        ))
+        .bearer_auth("local-session-token")
+        .header("ai-language-model-id", "qwen3.8-flash")
+        .json(&json!({"prompt":[{"role":"user","content":"hello"}], "reasoning":"none"}))
+        .send()
+        .await
+        .expect("chat request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let _ = response.text().await.expect("response stream");
+    let diagnostic = diagnostics.recv().await.expect("adjustment diagnostic");
+    assert_eq!(
+        diagnostic.reason,
+        nan_harness_bridge::BridgeDiagnosticReason::ReasoningAdjusted
+    );
+    assert_eq!(diagnostic.model_id.as_deref(), Some("qwen3.8-flash"));
+    {
+        let requests = servers.state.requests.lock().expect("request lock");
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].get("reasoning_effort").is_none());
+        assert!(requests[0].get("chat_template_kwargs").is_none());
+    }
+    servers.shutdown().await;
+}
+
+#[tokio::test]
+async fn fx_reports_incompatible_reasoning_with_typed_policy() {
+    let mut servers = start_servers().await.expect("test servers");
+    let mut diagnostics = servers.bridge.take_diagnostics();
+    let response = reqwest::Client::new()
+        .post(format!(
+            "{}/v3/ai/language-model",
+            servers.bridge.base_url()
+        ))
+        .bearer_auth("local-session-token")
+        .header("ai-language-model-id", "glm5.3-flash")
+        .json(&json!({"prompt":[{"role":"user","content":"hello"}], "reasoning":"none"}))
+        .send()
+        .await
+        .expect("chat request");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let diagnostic = diagnostics.recv().await.expect("mismatch diagnostic");
+    assert_eq!(
+        diagnostic.reason,
+        nan_harness_bridge::BridgeDiagnosticReason::ReasoningPolicyMismatch
+    );
+    assert_eq!(diagnostic.model_id.as_deref(), Some("glm5.3-flash"));
+    assert_eq!(
+        diagnostic.requested_reasoning,
+        Some(nan_harness_bridge::BridgeReasoningRequest::None)
+    );
+    assert_eq!(
+        diagnostic.model_policy,
+        Some(nan_harness_bridge::BridgeModelPolicy::Effort)
+    );
+    assert!(servers.state.requests.lock().unwrap().is_empty());
+    servers.shutdown().await;
+}
+
+#[tokio::test]
 async fn fx_gateway_translates_catalog_reasoning_tools_and_streaming() {
     let servers = start_servers().await.expect("test servers should start");
     let client = reqwest::Client::new();
@@ -239,8 +305,12 @@ async fn start_servers() -> Result<TestServers, String> {
         FxGatewayConfig {
             launch_id: "fx_test".to_owned(),
             provider_base_url: format!("http://{upstream_address}/v1"),
-            models: FxModelCatalog::from_provider_ids(["qwen3.6".to_owned()])
-                .expect("model catalog should build"),
+            models: FxModelCatalog::from_provider_ids([
+                "qwen3.6".to_owned(),
+                "qwen3.8-flash".to_owned(),
+                "glm5.3-flash".to_owned(),
+            ])
+            .expect("model catalog should build"),
             selected_model_id: "qwen3.6".to_owned(),
             provider_api_key: Arc::new(SecretValue::new("provider-key").expect("valid key")),
             session_token: Arc::new(SecretValue::new("local-session-token").expect("valid token")),

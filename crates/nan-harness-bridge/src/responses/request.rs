@@ -14,6 +14,17 @@ use serde_json::{Map, Value, json};
 pub(crate) use tools::{ToolCatalog, ToolTarget};
 pub(crate) use wire::ResponsesRequest;
 
+pub(crate) fn reasoning_adjusted(request: &ResponsesRequest, model: &CodingModelProfile) -> bool {
+    crate::reasoning::adjusted(
+        model.reasoning,
+        request
+            .reasoning
+            .as_ref()
+            .and_then(|value| value.effort.as_deref())
+            == Some("none"),
+    )
+}
+
 #[derive(Debug)]
 pub(crate) struct TranslatedRequest {
     pub(crate) body: Value,

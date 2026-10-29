@@ -1,4 +1,5 @@
 mod arguments;
+mod codex_reasoning;
 mod constants;
 mod environment;
 mod helpers;
@@ -10,6 +11,7 @@ mod registry;
 mod report;
 mod runner;
 
+pub use codex_reasoning::codex_reasoning_check;
 pub use constants::{
     CONFORMANCE_SCHEMA_VERSION, EXTERNAL_MARKER, INVENTORY_MARKER, ROUND_TRIP_MARKER,
     SENTINEL_MARKER, TEST_CREDENTIAL,

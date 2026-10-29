@@ -42,7 +42,8 @@ pub(crate) fn bridge_diagnostic_contexts(
 fn bridge_diagnostic(diagnostic: &BridgeDiagnostic) -> Option<Diagnostic> {
     let reason = match diagnostic.reason {
         BridgeDiagnosticReason::AuthenticationRejected => DiagnosticReason::AuthenticationRejected,
-        BridgeDiagnosticReason::SessionBudgetReached { .. } => return None,
+        BridgeDiagnosticReason::SessionBudgetReached { .. }
+        | BridgeDiagnosticReason::ReasoningAdjusted => return None,
         BridgeDiagnosticReason::InvalidRequest => DiagnosticReason::InvalidRequest,
         BridgeDiagnosticReason::ReasoningPolicyMismatch => {
             DiagnosticReason::ReasoningPolicyMismatch
@@ -145,7 +146,8 @@ fn bridge_diagnostic_classification(
         .http_status
         .is_some_and(|status| matches!(status, 408 | 425 | 429 | 500 | 502..=504));
     Some(match diagnostic.reason {
-        BridgeDiagnosticReason::SessionBudgetReached { .. } => return None,
+        BridgeDiagnosticReason::SessionBudgetReached { .. }
+        | BridgeDiagnosticReason::ReasoningAdjusted => return None,
         BridgeDiagnosticReason::UpstreamTransport => (
             FailureCategory::Provider,
             FailureStage::HarnessExecution,

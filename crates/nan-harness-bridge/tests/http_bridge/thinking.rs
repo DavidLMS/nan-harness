@@ -1,5 +1,7 @@
 use axum::http::StatusCode;
-use nan_harness_bridge::ModelUsageSnapshot;
+use nan_harness_bridge::{
+    BridgeDiagnosticReason, BridgeModelPolicy, BridgeReasoningRequest, ModelUsageSnapshot,
+};
 use serde_json::{Value, json};
 
 use crate::support::{post_messages, start_servers, usage_for};
@@ -101,8 +103,9 @@ async fn bridge_translates_anthropic_thinking_controls_without_changing_defaults
 }
 
 #[tokio::test]
-async fn bridge_rejects_impossible_thinking_controls() {
-    let servers = start_servers().await;
+async fn bridge_adjusts_disabled_always_on_thinking() {
+    let mut servers = start_servers().await;
+    let mut diagnostics = servers.bridge.take_diagnostics();
     let response = post_messages(
         &servers,
         "/v1/messages",
@@ -113,7 +116,51 @@ async fn bridge_rejects_impossible_thinking_controls() {
         }),
     )
     .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let diagnostic = diagnostics.recv().await.expect("adjustment diagnostic");
+    assert_eq!(diagnostic.reason, BridgeDiagnosticReason::ReasoningAdjusted);
+    assert_eq!(diagnostic.model_id.as_deref(), Some("deepseek-v4-flash"));
+    assert_eq!(
+        diagnostic.requested_reasoning,
+        Some(BridgeReasoningRequest::None)
+    );
+    assert_eq!(diagnostic.model_policy, Some(BridgeModelPolicy::AlwaysOn));
+    {
+        let requests = servers.state.requests.lock().expect("request lock");
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].get("reasoning_effort").is_none());
+        assert!(requests[0].get("chat_template_kwargs").is_none());
+    }
+    servers.shutdown().await;
+}
+
+#[tokio::test]
+async fn bridge_reports_incompatible_thinking_with_typed_policy() {
+    let mut servers = start_servers().await;
+    let mut diagnostics = servers.bridge.take_diagnostics();
+    let response = post_messages(
+        &servers,
+        "/v1/messages",
+        &json!({
+            "model":"anthropic/nan/glm5.3-flash", "max_tokens":128,
+            "thinking":{"type":"disabled"},
+            "messages":[{"role":"user","content":"hello"}]
+        }),
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let diagnostic = diagnostics.recv().await.expect("mismatch diagnostic");
+    assert_eq!(
+        diagnostic.reason,
+        BridgeDiagnosticReason::ReasoningPolicyMismatch
+    );
+    assert_eq!(diagnostic.model_id.as_deref(), Some("glm5.3-flash"));
+    assert_eq!(
+        diagnostic.requested_reasoning,
+        Some(BridgeReasoningRequest::None)
+    );
+    assert_eq!(diagnostic.model_policy, Some(BridgeModelPolicy::Effort));
+    assert!(servers.state.requests.lock().unwrap().is_empty());
     servers.shutdown().await;
 }
 

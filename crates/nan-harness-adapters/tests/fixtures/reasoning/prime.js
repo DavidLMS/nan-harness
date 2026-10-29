@@ -27,3 +27,5 @@ handlers.get("session_start")({}, ctx);
 assert.equal(request(undefined).reasoning_effort, "none");
 ctx.model = {provider: "nan", id: "deepseek-v4-flash"};
 assert.equal(request("high").reasoning_effort, undefined, "Prime also omits unsupported controls");
+ctx.model = {provider: "nan", id: "qwen3.8-flash"};
+assert.equal(request("none").reasoning_effort, undefined, "Prime strips an inherited off control for always-on models");

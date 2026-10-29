@@ -101,6 +101,15 @@ async fn chat(
             })?;
         let provider_model = model.id.clone();
         let translated = translate(&request, model)?;
+        if crate::reasoning::adjusted(
+            model.reasoning,
+            request.get("reasoning").and_then(Value::as_str) == Some("none"),
+        ) {
+            let _ = diagnostics.send(BridgeDiagnostic::reasoning_adjusted(
+                provider_model.clone(),
+                BridgeEndpoint::FxGateway,
+            ));
+        }
         let upstream = match state.upstream.send(&translated, &body).await {
             Ok(response) => ensure_success(response, &provider_model).await?,
             Err(ApiError::BudgetExhausted(stop)) => {

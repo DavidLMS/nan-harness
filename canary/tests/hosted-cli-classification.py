@@ -40,6 +40,10 @@ def conformance_report(harness="codex", failed=(), duration=1_000, **statuses):
         scenarios.append({"name": name, "status": status, "durationMilliseconds": duration,
                           "checks": [{"name": "contract", "status": status,
                                       "durationMilliseconds": duration}]})
+        if harness == "codex" and name == "tool-round-trip":
+            scenarios[-1]["checks"].extend(
+                {"name": check, "status": status, "durationMilliseconds": duration}
+                for check in ("reasoning-qwen38", "reasoning-deepseek-v4"))
     return {"schemaVersion": 2, "harness": harness, "scenarios": scenarios,
             "outcome": "failed" if failed else "passed", "durationMilliseconds": duration}
 
@@ -97,6 +101,22 @@ def scripted_conformance(reports):
 
 
 class ConformanceClassificationTests(unittest.TestCase):
+    def test_codex_reasoning_checks_must_be_present_and_successful(self):
+        report = conformance_report()
+        self.assertEqual(cell.conformance_result(report, "codex"), {})
+        checks = report["scenarios"][1]["checks"]
+        for change in ("missing", "failed", "duplicate"):
+            candidate = json.loads(json.dumps(report))
+            checks = candidate["scenarios"][1]["checks"]
+            if change == "missing":
+                checks.pop()
+            elif change == "failed":
+                checks[-1]["status"] = "failed"
+            else:
+                checks.append(dict(checks[-1]))
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                cell.conformance_result(candidate, "codex")
+
     def test_observer_sees_each_valid_attempt_before_private_report_removal(self):
         reports = [conformance_report(failed=("tool-round-trip",)),
                    conformance_report()]
@@ -271,7 +291,10 @@ class LiveClassificationTests(unittest.TestCase):
         with self.assertRaises(cell.CompatibilityMismatch) as mismatch:
             self.run_live(1, {"schemaVersion": 1, "stage": "usage-summary", "status": "failed"})
         self.assertEqual(mismatch.exception.code, "live:usage-summary")
-        self.assertEqual(self.run_live(0, {"schemaVersion": 1, "stage": "complete", "status": "passed"}), 1)
+        marker = {"schemaVersion": 1, "stage": "complete", "status": "passed", "evidence": cell.CODEX_REASONING_EVIDENCE}
+        self.assertEqual(self.run_live(0, marker), cell.CheckResult(1, cell.CODEX_REASONING_DETAIL))
+        with self.assertRaises(cell.ProbeFailure):
+            self.run_live(0, {"schemaVersion": 1, "stage": "complete", "status": "passed"})
 
     def test_provider_auth_tool_and_marker_gaps_remain_retryable(self):
         failed = lambda stage: {"schemaVersion": 1, "stage": stage, "status": "failed"}

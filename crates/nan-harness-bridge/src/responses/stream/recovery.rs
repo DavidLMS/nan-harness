@@ -102,10 +102,15 @@ impl RecoverySession {
     }
 
     pub(super) fn record_failure(&self, error: &ApiError) {
-        let _ = self.diagnostics.send(BridgeDiagnostic::from_api_error(
-            error,
-            BridgeEndpoint::Responses,
-        ));
+        let mut diagnostic = BridgeDiagnostic::from_api_error(error, BridgeEndpoint::Responses);
+        if diagnostic.model_id.is_none() {
+            diagnostic.model_id = self
+                .body
+                .get("model")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+        }
+        let _ = self.diagnostics.send(diagnostic);
     }
 
     pub(super) fn record_delegated(&self, attempt: usize, error: &ApiError) {
@@ -163,9 +168,16 @@ impl RecoverySession {
             RequestPriority::Foreground => BridgeRequestPriority::Foreground,
             RequestPriority::Background => BridgeRequestPriority::Background,
         };
-        let diagnostic = BridgeDiagnostic::from_api_error(error, BridgeEndpoint::Responses)
+        let mut diagnostic = BridgeDiagnostic::from_api_error(error, BridgeEndpoint::Responses)
             .with_recovery(outcome, recovery_attempt_bucket(attempt), priority)
             .with_cache_recovery(cache_replay_detected, self.attempt_bypassed_cache);
+        if diagnostic.model_id.is_none() {
+            diagnostic.model_id = self
+                .body
+                .get("model")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+        }
         let _ = self.diagnostics.send(diagnostic);
     }
 }

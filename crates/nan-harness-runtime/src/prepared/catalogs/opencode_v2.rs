@@ -38,6 +38,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn always_on_models_have_no_adjustable_variants_in_either_catalog() {
+        let models = ["qwen3.8-flash", "deepseek-v4-flash"]
+            .map(|id| nan_harness_core::coding_model_profile(id).unwrap());
+        let v1 = super::super::opencode_model_catalog(&models);
+        let v2 = opencode_v2_model_catalog(&models);
+        for model in &models {
+            assert!(v1[&model.id].get("variants").is_none());
+            assert!(v2[&model.id].get("variants").is_none());
+        }
+    }
+
+    #[test]
     fn v2_catalog_preserves_capabilities_and_native_variant_shapes() {
         let mut models = ["qwen3.6", "deepseek-v4-flash"]
             .map(|id| nan_harness_core::coding_model_profile(id).unwrap());

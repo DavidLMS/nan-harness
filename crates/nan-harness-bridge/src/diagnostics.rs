@@ -33,6 +33,7 @@ pub enum BridgeDiagnosticReason {
     AuthenticationRejected,
     InvalidRequest,
     ReasoningPolicyMismatch,
+    ReasoningAdjusted,
     UpstreamTransport,
     UpstreamTimeout,
     UpstreamStatus,
@@ -90,6 +91,23 @@ pub struct BridgeDiagnostic {
 }
 
 impl BridgeDiagnostic {
+    pub(crate) fn reasoning_adjusted(model_id: String, endpoint: BridgeEndpoint) -> Self {
+        Self {
+            code: "NH-BRIDGE-REASONING-ADJUSTED",
+            reason: BridgeDiagnosticReason::ReasoningAdjusted,
+            http_status: None,
+            endpoint,
+            model_id: Some(model_id),
+            requested_reasoning: Some(BridgeReasoningRequest::None),
+            model_policy: Some(BridgeModelPolicy::AlwaysOn),
+            timeout_phase: None,
+            recovery_outcome: None,
+            attempt: None,
+            priority: None,
+            cache_replay_detected: None,
+            cache_bypass_attempted: None,
+        }
+    }
     pub(crate) fn from_api_error(error: &ApiError, endpoint: BridgeEndpoint) -> Self {
         let (reason, model_id, requested_reasoning, model_policy) = diagnostic_fields(error);
         let http_status = match error {
