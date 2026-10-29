@@ -126,7 +126,7 @@ class WindowsProbeContracts(unittest.TestCase):
 
     def _run_live_fixture(self, harness="fx", *, exit_code=0, missing_child=False,
                           shell="pwsh", native_warning=False, failure_text="",
-                          failure_model=None,
+                          failure_model=None, quota_model=None,
                           usage_payload='{"schemaVersion":1,"status":"observed"}'):
         usage_command = ""
         if usage_payload == "unreadable":
@@ -142,6 +142,8 @@ class WindowsProbeContracts(unittest.TestCase):
             marker = root / "probe-result.json"
             child = root / "synthetic-live-child.ps1"
             child.write_text(
+                ("if ($args -contains '" + quota_model + "') { Set-Content -NoNewline -LiteralPath $env:NAN_HARNESS_INTERNAL_CANARY_USAGE_FILE -Value '{\"schemaVersion\":1,\"status\":\"" +
+                 ("quota-qwen38" if quota_model == "qwen3.8-flash" else "quota-deepseek-v4") + "\"}'; exit 7 }\n" if quota_model else "") +
                 ("if ($args -contains '" + failure_model + "') { exit 7 }\n" if failure_model else "") +
                 ("Write-Output '" + failure_text.replace("'", "''") + "'\n" if failure_text else "") +
                 ("[Console]::Error.WriteLine('synthetic native warning')\n" if native_warning else "") +
@@ -265,6 +267,14 @@ class WindowsProbeContracts(unittest.TestCase):
                 self.assertEqual(value["status"], "failed")
                 self.assertEqual(value["exitCode"], 7)
                 self.assertNotIn("evidence", value)
+
+    def test_real_pwsh_codex_quota_is_recorded_separately(self):
+        for model, evidence in (("qwen3.8-flash", "codex-always-on-models-v2-quota-ok"),
+                                ("deepseek-v4-flash", "codex-always-on-models-v2-ok-quota")):
+            with self.subTest(model=model):
+                value = self._run_live_fixture(harness="codex", quota_model=model)
+                self.assertEqual(value["evidence"], evidence)
+                self.assertIn("402", CELL.CODEX_REASONING_DETAILS[evidence])
 
     def test_real_pwsh_doctor_json_integer_types(self):
         """Run the actual probe against producer-shaped JSON when pwsh exists."""

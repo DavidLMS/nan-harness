@@ -53,8 +53,12 @@ if os.environ.get("NAN_CANARY_FAKE_MODE") == "providerfailure":
     print("synthetic secret should be redacted", file=sys.stderr)
     raise SystemExit(17)
 if os.environ.get("NAN_CANARY_FAKE_MODE") == "fail-" + model:
-    print("synthetic secret should be redacted", file=sys.stderr)
+    print("HTTP 402 synthetic secret should be redacted", file=sys.stderr)
     raise SystemExit(17)
+if os.environ.get("NAN_CANARY_FAKE_MODE") == "quota-" + model:
+    status = {"qwen3.8-flash": "quota-qwen38", "deepseek-v4-flash": "quota-deepseek-v4"}[model]
+    Path(os.environ["NAN_HARNESS_INTERNAL_CANARY_USAGE_FILE"]).write_text(json.dumps({"schemaVersion": 1, "status": status}))
+    raise SystemExit(1)
 subcommand = args[0]
 if subcommand == "prime" and any(flag in args for flag in ("--extension", "--no-extensions", "--tools")):
     raise SystemExit("Prime Rust rejects legacy extension and tool flags")
@@ -138,7 +142,8 @@ if "openclaw-output" in path:
 elif "media-plan" in path:
     assert value["media"] == ["nan-whisper", "nan-kokoro", "image_gen/nan_harness"]
 else:
-    assert value == {"schemaVersion": 1, "status": "observed"}
+    status = sys.argv[sys.argv.index("--arg") + 2] if "--arg" in sys.argv else "observed"
+    assert value == {"schemaVersion": 1, "status": status}
 '''
 
 
@@ -204,6 +209,15 @@ class ProbeHarnessTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(CELL.probe_result(marker)["stage"], stage)
                 self.assertNotIn("synthetic secret", result.stderr)
+
+    def test_codex_quota_is_reported_without_claiming_a_completed_tool_check(self):
+        for model, evidence in (("qwen3.8-flash", "codex-always-on-models-v2-quota-ok"),
+                                ("deepseek-v4-flash", "codex-always-on-models-v2-ok-quota")):
+            with self.subTest(model=model):
+                result, marker = self.run_probe("codex", model="qwen3.6", mode="quota-" + model)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(CELL.probe_result(marker)["evidence"], evidence)
+                self.assertIn("402", CELL.CODEX_REASONING_DETAILS[evidence])
 
     def test_codex_does_not_repeat_the_selected_reasoning_model(self):
         for model, other in (("qwen3.8-flash", "deepseek-v4-flash"), ("deepseek-v4-flash", "qwen3.8-flash")):

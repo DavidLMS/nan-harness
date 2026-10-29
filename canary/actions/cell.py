@@ -70,6 +70,12 @@ class CheckResult(NamedTuple):
 
 CODEX_REASONING_DETAIL = "Codex live tool checks passed for qwen3.8-flash and deepseek-v4-flash."
 CODEX_REASONING_EVIDENCE = "codex-always-on-models-v1"
+CODEX_REASONING_DETAILS = {
+    CODEX_REASONING_EVIDENCE: CODEX_REASONING_DETAIL,
+    "codex-always-on-models-v2-quota-ok": "Codex live tool check passed for deepseek-v4-flash; qwen3.8-flash returned provider HTTP 402 (quota unavailable).",
+    "codex-always-on-models-v2-ok-quota": "Codex live tool check passed for qwen3.8-flash; deepseek-v4-flash returned provider HTTP 402 (quota unavailable).",
+    "codex-always-on-models-v2-quota-quota": "qwen3.8-flash and deepseek-v4-flash returned provider HTTP 402 (quota unavailable); their live tool checks were not completed.",
+}
 
 HARNESSES = CLI_HARNESSES
 SEMVER = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?\Z")
@@ -1250,7 +1256,7 @@ def probe_result(path):
                 (not isinstance(value["diagnostic"], str) or
                  value["status"] != "failed" or value["stage"] != "completion-marker" or
                  value["diagnostic"] not in PROBE_DIAGNOSTICS))
-            or ("evidence" in value and (value['status'] != 'passed' or value['evidence'] not in (MIMO_SESSION_EVIDENCE, CODEX_REASONING_EVIDENCE)))):
+            or ("evidence" in value and (value['status'] != 'passed' or not isinstance(value['evidence'], str) or value['evidence'] not in (MIMO_SESSION_EVIDENCE, *CODEX_REASONING_DETAILS)))):
         return None
     return value
 
@@ -1267,7 +1273,7 @@ def windows_probe_result(path):
             or (value["status"] == "passed") != (value["stage"] == "complete")):
         return None
     diagnostics = value.get("diagnostics")
-    if "evidence" in value and (value["status"] != "passed" or value["evidence"] != CODEX_REASONING_EVIDENCE):
+    if "evidence" in value and (value["status"] != "passed" or not isinstance(value["evidence"], str) or value["evidence"] not in CODEX_REASONING_DETAILS):
         return None
     if diagnostics is not None and (not isinstance(diagnostics, list) or len(diagnostics) > 1
                                     or any(not isinstance(item, str) or item not in WINDOWS_LIVE_DIAGNOSTICS
@@ -1329,9 +1335,9 @@ def live(args, _state, observe=None):
             observation.unlink(missing_ok=True)
     if status == 0 and result is not None and result["status"] == "passed":
         if args.harness == "codex":
-            if result.get("evidence") != CODEX_REASONING_EVIDENCE:
+            if result.get("evidence") not in CODEX_REASONING_DETAILS:
                 raise ProbeFailure("marker-missing", status)
-            return CheckResult(1, CODEX_REASONING_DETAIL)
+            return CheckResult(1, CODEX_REASONING_DETAILS[result["evidence"]])
         if result.get('evidence') is not None:
             if not native_mimo:
                 raise ProbeFailure('marker-missing', status)

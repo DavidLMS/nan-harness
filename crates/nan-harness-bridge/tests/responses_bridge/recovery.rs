@@ -91,6 +91,7 @@ async fn responses_bridge_fails_after_three_consecutive_transient_upstream_sends
         nan_harness_bridge::BridgeDiagnosticReason::UpstreamStatus
     );
     assert_eq!(diagnostic.http_status, Some(503));
+    assert_eq!(diagnostic.model_id.as_deref(), Some("qwen3.6"));
     assert_eq!(
         diagnostic.endpoint,
         nan_harness_bridge::BridgeEndpoint::Responses

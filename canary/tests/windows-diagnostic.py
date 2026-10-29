@@ -1320,6 +1320,11 @@ class WindowsDiagnosticTests(unittest.TestCase):
             self.assertRejectedMarker(diagnostic.probe_diagnostic(Path(tmp), "live-tool", "codex"))
             marker.write_text(json.dumps({**base, "evidence": diagnostic.CODEX_REASONING_EVIDENCE}))
             self.assertEqual(diagnostic.probe_diagnostic(Path(tmp), "live-tool", "codex")["status"], "passed")
+            for evidence in diagnostic.CODEX_REASONING_DETAILS:
+                marker.write_text(json.dumps({**base, "evidence": evidence}))
+                self.assertEqual(diagnostic.probe_diagnostic(Path(tmp), "live-tool", "codex")["status"], "passed")
+            marker.write_text(json.dumps({**base, "evidence": "codex-always-on-models-v2-invented"}))
+            self.assertRejectedMarker(diagnostic.probe_diagnostic(Path(tmp), "live-tool", "codex"))
 
 
 if __name__ == "__main__": unittest.main()

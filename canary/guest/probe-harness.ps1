@@ -60,7 +60,7 @@ function Fail([string]$message) {
   }
   if ($code) { Add-Diagnostic $code }; throw $message
 }
-function Run-Native([string[]]$Arguments) {
+function Run-Native([string[]]$Arguments, [switch]$AllowFailure) {
   $previousErrorAction = $ErrorActionPreference
   $previousOutputEncoding = [Console]::OutputEncoding
   try {
@@ -79,7 +79,7 @@ function Run-Native([string[]]$Arguments) {
     [Console]::OutputEncoding = $previousOutputEncoding
   }
   if ($null -eq $script:exitCode) { Add-Diagnostic 'live-exit-missing'; throw 'harness exit code unavailable' }
-  if ($script:exitCode -ne 0) { Add-Diagnostic (Native-FailureCode); throw 'harness command failed' }
+  if ($script:exitCode -ne 0 -and -not $AllowFailure) { Add-Diagnostic (Native-FailureCode); throw 'harness command failed' }
 }
 function Has-Text([string]$Pattern) { return [bool](Select-String -LiteralPath @($stdout, $stderr) -Pattern $Pattern -SimpleMatch -Quiet -ErrorAction SilentlyContinue) }
 function Has-Regex([string]$Pattern) { return [bool](Select-String -LiteralPath @($stdout, $stderr) -Pattern $Pattern -Quiet -ErrorAction SilentlyContinue) }
@@ -285,6 +285,8 @@ try {
   # Keep the pattern ASCII: Windows PowerShell 5.1 reads BOM-less scripts as ANSI.
   $stageNow = 'usage-summary'; if (-not (Has-Regex '^(\uD83D\uDD25 Tokens burned \u2014 this session|NaN usage \()')) { Fail 'usage summary missing' }; if ($null -eq $exitCode) { Add-Diagnostic 'live-exit-missing'; throw 'live child exit evidence missing' }
   if ($Harness -eq 'codex') {
+    $primaryExitCode = $exitCode
+    $qwenStatus = 'ok'; $deepseekStatus = 'ok'
     foreach ($reasoningModel in @('qwen3.8-flash','deepseek-v4-flash')) {
       if ($reasoningModel -ceq $Model) { continue }
       $stageNow = if ($reasoningModel -ceq 'qwen3.8-flash') { 'codex-qwen38' } else { 'codex-deepseek-v4' }
@@ -295,13 +297,25 @@ try {
       $env:NAN_HARNESS_INTERNAL_CANARY_USAGE_FILE = $usage
       $quotedTarget = $target.Replace("'", "''")
       $p = "Use exec_command to run powershell -NoProfile -Command `"Set-Content -NoNewline -LiteralPath '$quotedTarget' -Value 'NAN_CODEX_TOOL_OK'`". After the command succeeds, reply exactly NAN_CANARY_OK."
-      Run-Native @('codex','--model',$reasoningModel,'--session-max-tokens','32000','--','exec','--skip-git-repo-check','--ephemeral','--json','--dangerously-bypass-approvals-and-sandbox',$p)
+      Run-Native -Arguments @('codex','--model',$reasoningModel,'--session-max-tokens','32000','--','exec','--skip-git-repo-check','--ephemeral','--json','--dangerously-bypass-approvals-and-sandbox',$p) -AllowFailure
+      if ($exitCode -ne 0) {
+        $expected = if ($reasoningModel -ceq 'qwen3.8-flash') { 'quota-qwen38' } else { 'quota-deepseek-v4' }
+        try { $quota = Get-Content -Raw -LiteralPath $usage | ConvertFrom-Json -ErrorAction Stop }
+        catch { Add-Diagnostic (Native-FailureCode); throw 'reasoning model failed without quota evidence' }
+        if ($quota -isnot [pscustomobject] -or @($quota.PSObject.Properties).Count -ne 2 -or
+            -not (Is-Integer $quota.schemaVersion) -or $quota.schemaVersion -ne 1 -or $quota.status -cne $expected) {
+          Add-Diagnostic (Native-FailureCode); throw 'reasoning model quota evidence invalid'
+        }
+        if ($reasoningModel -ceq 'qwen3.8-flash') { $qwenStatus = 'quota' } else { $deepseekStatus = 'quota' }
+        $script:exitCode = $primaryExitCode
+        continue
+      }
       Read-Exact $target 'NAN_CODEX_TOOL_OK'
       if (-not (Has-Text 'NAN_CANARY_OK') -or (Has-Text 'NH-BRIDGE-')) { Fail 'reasoning model response invalid' }
       Assert-UsageEvidence $usage
       if (-not (Has-Regex '^(\uD83D\uDD25 Tokens burned \u2014 this session|NaN usage \()')) { Fail 'usage summary missing' }
     }
-    $reasoningEvidence = 'codex-always-on-models-v1'
+    $reasoningEvidence = if ($qwenStatus -ceq 'ok' -and $deepseekStatus -ceq 'ok') { 'codex-always-on-models-v1' } else { "codex-always-on-models-v2-$qwenStatus-$deepseekStatus" }
   }
   if ($Harness -in @('hermes','openclaw')) {
     $stageNow = 'media-plan'

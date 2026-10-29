@@ -6,7 +6,7 @@ import time
 import uuid
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from cell import CODEX_REASONING_EVIDENCE, HERMES_INSTALL_STAGES, WindowsJob, finish_stage, protect_private
+from cell import CODEX_REASONING_EVIDENCE, CODEX_REASONING_DETAILS, HERMES_INSTALL_STAGES, WindowsJob, finish_stage, protect_private
 from selection import WINDOWS_UNAVAILABLE, WINDOWS_SKIP_REASON
 
 HARNESSES = ("claude-code", "codex", "mimo-code", "zcode", "opencode", "hermes", "pi", "omp", "prime-agent",
@@ -770,7 +770,7 @@ def probe_diagnostic(cell, expected_stage=None, expected_harness=None):
         if set(value) - allowed:
             return _invalid_marker(value)
         if "evidence" in value and (expected_stage != "live-tool" or expected_harness != "codex"
-                                    or value["status"] != "passed" or value["evidence"] != CODEX_REASONING_EVIDENCE):
+                                    or value["status"] != "passed" or not isinstance(value["evidence"], str) or value["evidence"] not in CODEX_REASONING_DETAILS):
             return _invalid_marker(value)
         for key in ("doctorVersion", "doctorExpectedVersion"):
             if key in value and (not isinstance(value[key], str) or len(value[key]) > 64 or not _SEMVER.fullmatch(value[key])):
@@ -818,7 +818,7 @@ def probe_diagnostic(cell, expected_stage=None, expected_harness=None):
         if value["status"] == "passed":
             if value.get("stage") != "complete" or value.get("exitCode") != 0 or diagnostics:
                 return _invalid_marker(value)
-            if expected_stage == "live-tool" and expected_harness == "codex" and value.get("evidence") != CODEX_REASONING_EVIDENCE:
+            if expected_stage == "live-tool" and expected_harness == "codex" and value.get("evidence") not in CODEX_REASONING_DETAILS:
                 return _invalid_marker(value)
         elif not diagnostics:
             return _invalid_marker(value)

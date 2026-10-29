@@ -330,6 +330,8 @@ fi
 # These models have mandatory reasoning and must be checked with real provider
 # traffic, independently of the representative model used by the main cell.
 if [ "$harness" = codex ]; then
+  qwen_status=ok
+  deepseek_status=ok
   for reasoning_model in qwen3.8-flash deepseek-v4-flash; do
     [ "$reasoning_model" != "$model" ] || continue
     case "$reasoning_model" in
@@ -342,17 +344,34 @@ if [ "$harness" = codex ]; then
     usage_evidence="$workspace/codex-$reasoning_model.usage.json"
     export NAN_HARNESS_INTERNAL_CANARY_USAGE_FILE="$usage_evidence"
     codex_prompt="Use exec_command to run printf NAN_CODEX_TOOL_OK > '$target'. After the command succeeds, reply exactly NAN_CANARY_OK."
-    "$nan_command" codex --model "$reasoning_model" --session-max-tokens 32000 -- \
+    if "$nan_command" codex --model "$reasoning_model" --session-max-tokens 32000 -- \
       exec --skip-git-repo-check --ephemeral --json \
       --dangerously-bypass-approvals-and-sandbox "$codex_prompt" \
-      >"$output" 2>"$stderr_output"
+      >"$output" 2>"$stderr_output"; then
+      :
+    else
+      case "$reasoning_model" in
+        qwen3.8-flash) quota_status=quota-qwen38 ;;
+        deepseek-v4-flash) quota_status=quota-deepseek-v4 ;;
+      esac
+      jq -e --arg status "$quota_status" 'keys == ["schemaVersion", "status"] and .schemaVersion == 1 and .status == $status' "$usage_evidence" >/dev/null || exit 1
+      case "$reasoning_model" in
+        qwen3.8-flash) qwen_status=quota ;;
+        deepseek-v4-flash) deepseek_status=quota ;;
+      esac
+      continue
+    fi
     grep -Fx 'NAN_CODEX_TOOL_OK' "$target" >/dev/null
     grep -F 'NAN_CANARY_OK' "$output" >/dev/null
     if grep -F 'NH-BRIDGE-' "$output" "$stderr_output" >/dev/null; then exit 1; fi
     jq -e '.schemaVersion == 1 and .status == "observed"' "$usage_evidence" >/dev/null
     grep -E '^(🔥 Tokens burned — this session|NaN usage \()' "$stderr_output" >/dev/null
   done
-  probe_evidence='codex-always-on-models-v1'
+  if [ "$qwen_status" = ok ] && [ "$deepseek_status" = ok ]; then
+    probe_evidence='codex-always-on-models-v1'
+  else
+    probe_evidence="codex-always-on-models-v2-$qwen_status-$deepseek_status"
+  fi
 fi
 
 if [ "$harness" = hermes ] || [ "$harness" = openclaw ]; then

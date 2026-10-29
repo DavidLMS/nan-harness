@@ -41,8 +41,12 @@ controls and the original configuration survives. A missing or failed model
 check cannot qualify a Codex cell. These checks require a canary asset that
 contains them; older assets cannot supply this evidence. The live Codex cell
 also runs a tool round-trip with each of those models, using a 32,000-token
-session limit per additional model. Its failure stage identifies the affected
-model without publishing the prompt, provider output or credentials. The
+session limit per additional model. A provider HTTP 402 is accepted for an
+additional model as quota unavailable and recorded separately; it does not
+claim that model completed its live tool check. Other failures still fail the
+cell. The primary model must complete its tool check and report usage. Its
+failure stage identifies the affected model without publishing the prompt,
+provider output or credentials. The
 selected model is not run twice when it is one of the two.
 
 Hermes resolution binds the official release tag to an immutable commit. Older
