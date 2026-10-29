@@ -7,8 +7,14 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.28] - 2026-10-29
+
 ### Fixed
 
+- Preserve mandatory reasoning when coding harnesses request disabled reasoning,
+  including Codex sessions using Qwen 3.8 Flash and DeepSeek V4 Flash.
+- Report provider quota exhaustion separately in additional Codex live checks,
+  while retaining the required primary tool and usage verification.
 - Verify completed MiMo 0.1.16 live tasks from the exact isolated native session
   when stdout is empty, retaining its console-output limitation in canary reports
   without changing the installed harness or accepting incomplete task evidence.
@@ -1096,7 +1102,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.27...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.28...HEAD
+[0.1.28]: https://github.com/DavidLMS/nan-harness/compare/v0.1.27...v0.1.28
 [0.1.27]: https://github.com/DavidLMS/nan-harness/compare/v0.1.26...v0.1.27
 [0.1.26]: https://github.com/DavidLMS/nan-harness/compare/v0.1.25...v0.1.26
 [0.1.25]: https://github.com/DavidLMS/nan-harness/compare/v0.1.24...v0.1.25

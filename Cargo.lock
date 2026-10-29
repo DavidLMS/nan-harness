@@ -1713,7 +1713,7 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-adapters"
-version = "0.1.27"
+version = "0.1.28"
 dependencies = [
  "nan-harness-core",
  "nan-harness-i18n",
@@ -1723,7 +1723,7 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-bridge"
-version = "0.1.27"
+version = "0.1.28"
 dependencies = [
  "async-stream",
  "axum",
@@ -1749,7 +1749,7 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-canary"
-version = "0.1.27"
+version = "0.1.28"
 dependencies = [
  "clap",
  "jsonschema",
@@ -1774,7 +1774,7 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-cli"
-version = "0.1.27"
+version = "0.1.28"
 dependencies = [
  "axum",
  "base64",
@@ -1812,7 +1812,7 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-coordinator"
-version = "0.1.27"
+version = "0.1.28"
 dependencies = [
  "base64",
  "getrandom 0.4.3",
@@ -1833,7 +1833,7 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-core"
-version = "0.1.27"
+version = "0.1.28"
 dependencies = [
  "nan-harness-i18n",
  "semver",
@@ -1877,21 +1877,21 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-detach"
-version = "0.1.27"
+version = "0.1.28"
 dependencies = [
  "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "nan-harness-diagnostics"
-version = "0.1.27"
+version = "0.1.28"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "nan-harness-i18n"
-version = "0.1.27"
+version = "0.1.28"
 dependencies = [
  "serde",
  "serde_json",
@@ -1899,7 +1899,7 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-private-fs"
-version = "0.1.27"
+version = "0.1.28"
 dependencies = [
  "nan-harness-test-support",
  "tempfile",
@@ -1909,7 +1909,7 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-runtime"
-version = "0.1.27"
+version = "0.1.28"
 dependencies = [
  "axum",
  "futures-util",
@@ -1943,7 +1943,7 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-search"
-version = "0.1.27"
+version = "0.1.28"
 dependencies = [
  "axum",
  "nan-harness-i18n",
@@ -1959,7 +1959,7 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-telemetry"
-version = "0.1.27"
+version = "0.1.28"
 dependencies = [
  "axum",
  "getrandom 0.4.3",
@@ -1979,7 +1979,7 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-test-support"
-version = "0.1.27"
+version = "0.1.28"
 dependencies = [
  "axum",
  "nan-harness-core",
@@ -4137,7 +4137,7 @@ checksum = "b9cc00251562a284751c9973bace760d86c0276c471b4be569fe6b068ee97a56"
 
 [[package]]
 name = "xtask"
-version = "0.1.27"
+version = "0.1.28"
 dependencies = [
  "nan-harness-core",
  "semver",
