@@ -930,7 +930,10 @@ class WindowsDiagnosticTests(unittest.TestCase):
                 {"name": "external-prerequisite", "status": "skipped", "checks": [{"name": "auth", "status": "skipped", "durationMilliseconds": 0}], "durationMilliseconds": 0},
                 {"name": "inventory", "status": "failed", "checks": [{"name": "registry", "status": "failed", "durationMilliseconds": 1}], "durationMilliseconds": 1},
                 {"name": "sentinel", "status": "passed", "checks": [{"name": "sentinel", "status": "passed", "durationMilliseconds": 1}], "durationMilliseconds": 1},
-                {"name": "tool-round-trip", "status": "passed", "checks": [{"name": "tool", "status": "passed", "durationMilliseconds": 1}], "durationMilliseconds": 1},
+                {"name": "tool-round-trip", "status": "passed", "checks": [
+                    {"name": "tool", "status": "passed", "durationMilliseconds": 1},
+                    {"name": "reasoning-qwen38", "status": "passed", "durationMilliseconds": 1},
+                    {"name": "reasoning-deepseek-v4", "status": "passed", "durationMilliseconds": 1}], "durationMilliseconds": 3},
             ],
             "inventoryFailureReasons": ["provider-failed"],
             "inventoryProcess": {"status": "nonzero-exit", "exitCode": 1},
