@@ -108,6 +108,33 @@ setup in [.github/web-check/README.md](.github/web-check/README.md). The Web
 checks workflow runs these contracts on relevant pull requests and main
 pushes with read-only permissions, separately from Pages deployment.
 
+### Local build-cache budget
+
+Development and tests use line-table debug information, retaining source locations
+in backtraces without full debugger variable/type data. Incremental compilation
+remains enabled locally. For a debugger session, use `CARGO_PROFILE_DEV_DEBUG=2`
+(or `CARGO_PROFILE_TEST_DEBUG=2` for tests); this creates another artifact variant.
+CI disables incremental compilation. Use `CARGO_INCREMENTAL=0` for disposable
+validation checkouts too, and remove those worktrees after retaining evidence.
+
+Preview this checkout's Cargo cache policy with:
+
+```sh
+python3 scripts/maintain-build-cache.py
+python3 scripts/maintain-build-cache.py --apply
+```
+
+The policy cleans the whole disposable `target/` through `cargo clean --locked`
+when allocated storage exceeds 20 GiB or its newest file write is older than
+14 days. This is a maintenance threshold, not a hard quota during a build.
+It defers when a Rust compiler/Cargo process is visible or files were written
+within the last hour; process-inspection failures prevent cleanup. It refuses
+symlinked, unmarked or tracked target directories. It never cleans shared Cargo
+registry caches, plans, evidence, or another checkout. Run it daily while idle;
+`--max-gib` and `--idle-days` adjust the limits, and `--retire --apply` requests
+cleanup of an idle checkout before retirement. Orca workspace removal already
+removes its checkout and local build outputs.
+
 ### Metric interpretation
 
 Metrics identify code that deserves review; improving a number is not an end
