@@ -38,4 +38,10 @@ jobs:
           subprocess.run([sys.executable, str(root / 'canary/research/zcode/native_probe.py'),
                           '--source', receipt['source'], '--node', receipt['node']],
                          env=env, check=True)
+          env['PYTHONPATH'] = str(Path(receipt['source']) / '.python-tools')
+          env['PATH'] = str(Path(receipt['node']).parent) + os.pathsep + env['PATH']
+          for case in ('sessions', 'tui'):
+              subprocess.run([sys.executable, str(root / 'canary/research/zcode/runtime_probe.py'),
+                              '--source', receipt['source'], '--node', receipt['node'], '--case', case],
+                             env=env, check=True)
           PY
