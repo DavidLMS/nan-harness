@@ -2,6 +2,7 @@
 import json
 import re
 import secrets
+from gentle_diagnostics import ProbeError, require
 
 
 def reader_fixture(home, model):
@@ -33,7 +34,7 @@ def verify_child(agent, output, marker, model):
                  and event.get("toolName") == "subagent_run" and event.get("isError") is False
                  and event.get("result", {}).get("details", {}).get("gentleAgents", {}).get("agent") == "qualification-reader"
                  and event.get("result", {}).get("details", {}).get("gentleAgents", {}).get("status") == "completed"]
-    assert any(marker in json.dumps(event.get("result")) for event in completed), "child-result"
+    require(any(marker in json.dumps(event.get("result")) for event in completed), "child-result")
     # Inspect the owned child's actual transcript, rather than accepting a parent's claim.
     for path in (agent / "gentle-agents" / "sessions").glob("*.jsonl"):
         if path.stat().st_size > 8_000_000:
@@ -47,7 +48,7 @@ def verify_child(agent, output, marker, model):
                           for message in messages)
         if correct_model and read_result:
             return
-    raise AssertionError("child-read-evidence")
+    raise ProbeError("child-read-evidence")
 
 
 def child_prompt():
