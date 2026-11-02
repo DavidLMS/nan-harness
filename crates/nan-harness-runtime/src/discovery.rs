@@ -164,18 +164,18 @@ fn detect_capabilities(
     parsed_version: Option<&Version>,
 ) -> (BTreeSet<HarnessCapability>, Vec<DiscoveryWarning>) {
     if kind == HarnessKind::ZCode {
-        let supported =
-            executable::run_command(executable, &["--nanh-source-info"]).is_ok_and(|output| {
-                output.status.success() && output.stdout.trim_ascii() == b"nanh-zcode-config-v1"
+        let capabilities = executable::run_command(executable, &["--nanh-source-info"])
+            .ok()
+            .filter(|output| output.status.success())
+            .map_or_else(BTreeSet::new, |output| match output.stdout.trim_ascii() {
+                b"nanh-zcode-config-v1" => BTreeSet::from([HarnessCapability::ZCodeConfigOverride]),
+                b"nanh-zcode-config-v2" => BTreeSet::from([
+                    HarnessCapability::ZCodeConfigOverride,
+                    HarnessCapability::ZCodeUserConfigOverride,
+                ]),
+                _ => BTreeSet::new(),
             });
-        return (
-            if supported {
-                BTreeSet::from([HarnessCapability::ZCodeConfigOverride])
-            } else {
-                BTreeSet::new()
-            },
-            Vec::new(),
-        );
+        return (capabilities, Vec::new());
     }
     if kind == HarnessKind::ClaudeCode {
         let minimum = Version::new(

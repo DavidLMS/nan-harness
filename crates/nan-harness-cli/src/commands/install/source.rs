@@ -14,7 +14,7 @@ const REPOSITORY: &str = "https://github.com/zai-org/ZCode";
 const REVISION: &str = "29628c9acdb81b703bbd4080c207a0e7ce5e276e";
 const CLI: &str = "apps/zcode-cli/packages/cli/dist/zcode.cjs";
 const RECEIPT: &str = ".nanh-source-revision";
-const BINDING: &str = "nanh-zcode-config-v1";
+const BINDING: &str = "nanh-zcode-config-v2";
 
 pub(super) fn build_description() -> String {
     format!(
@@ -77,12 +77,20 @@ fn prepare_source(root: &Path) -> Result<(), InstallError> {
     reject_symlink(&installed).map_err(prepare)?;
     if installed.exists() {
         let revision = fs::read_to_string(installed.join(RECEIPT)).map_err(prepare)?;
-        if revision != format!("{REVISION}\n{BINDING}") {
+        let legacy = revision == format!("{REVISION}\nnanh-zcode-config-v1");
+        if revision != format!("{REVISION}\n{BINDING}") && !legacy {
             return Err(prepare(io::Error::other(
                 "source installation ownership changed",
             )));
         }
-        return verify(&installed);
+        return verify_binding(
+            &installed,
+            if legacy {
+                "nanh-zcode-config-v1"
+            } else {
+                BINDING
+            },
+        );
     }
     let temporary = tempfile::tempdir_in(root).map_err(prepare)?;
     let source = temporary.path().join("source");
@@ -107,14 +115,18 @@ fn prepare_source(root: &Path) -> Result<(), InstallError> {
     )?;
     let entries = [
         (
-            "main.ts",
+            "cli/src/main.ts",
             binding::entrypoint as fn(&str) -> io::Result<String>,
         ),
-        ("prompt-command.ts", binding::headless_entrypoint),
+        ("cli/src/prompt-command.ts", binding::headless_entrypoint),
+        (
+            "adapters/src/config/config-factory.ts",
+            binding::user_configuration,
+        ),
     ]
     .into_iter()
     .map(|(name, bind)| {
-        let path = source.join("apps/zcode-cli/packages/cli/src").join(name);
+        let path = source.join("apps/zcode-cli/packages").join(name);
         let original = fs::read_to_string(&path).map_err(prepare)?;
         let bound = bind(&original).map_err(prepare)?;
         Ok((path, original, bound))
@@ -172,7 +184,11 @@ fn execute(
 }
 
 fn verify(source: &Path) -> Result<(), InstallError> {
-    for (argument, expected) in [("version", "0.16.9"), ("--nanh-source-info", BINDING)] {
+    verify_binding(source, BINDING)
+}
+
+fn verify_binding(source: &Path, binding: &str) -> Result<(), InstallError> {
+    for (argument, expected) in [("version", "0.16.9"), ("--nanh-source-info", binding)] {
         let output = Command::new("node")
             .arg(source.join(CLI))
             .arg(argument)

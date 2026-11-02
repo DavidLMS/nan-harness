@@ -301,3 +301,16 @@ commit `a1d3f133b965671f36b30b914607a438e337b414`. Each cell passed source
 installation, the complete source probes, published conformance and the
 real-account tool/streaming/usage probe. The final cell completed at
 `2026-10-02T21:38:43Z`.
+
+## Workspace MCP trust compatibility
+
+ZCode 0.17.1 adds approval checks for project MCP declarations. The v2 source
+binding accepts a private user configuration input for managed launches. NaN
+merges only its search server into a launch-local copy of the existing user
+configuration; project declarations and the upstream trust store retain their
+native provenance and approval requirements. The v1 binding remains supported
+for existing installations. Both installers reject an unexpected loader shape.
+
+The integration probe also checks that an unrelated project MCP server cannot
+start when the upstream source exposes workspace MCP trust. Managed search must
+still execute, and both original user and project settings must remain unchanged.

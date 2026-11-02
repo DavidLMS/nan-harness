@@ -15,7 +15,7 @@ pub(super) fn entrypoint(source: &str) -> io::Result<String> {
         .replace(
             START,
             r#"if (process.argv[2] === "--nanh-source-info") {
-  console.log("nanh-zcode-config-v1");
+  console.log("nanh-zcode-config-v2");
 } else {
   void main();
 }"#,
@@ -25,6 +25,21 @@ pub(super) fn entrypoint(source: &str) -> io::Result<String> {
             r"const exitCode = await run(context, {
       projectConfigPath: process.env.NAN_HARNESS_ZCODE_PROJECT_CONFIG_FILE,",
         ))
+}
+
+pub(super) fn user_configuration(source: &str) -> io::Result<String> {
+    const LOAD: &str = "loadFileConfig(options.userConfigPath)";
+    if source.matches(LOAD).count() != 1 {
+        return Err(io::Error::other(
+            "the pinned ZCode user configuration contract changed",
+        ));
+    }
+    // Only the user-config input changes. Workspace declarations retain their
+    // original provenance and the upstream workspace trust gate stays intact.
+    Ok(source.replace(
+        LOAD,
+        "loadFileConfig(options.env?.NAN_HARNESS_ZCODE_USER_CONFIG_FILE ?? process.env.NAN_HARNESS_ZCODE_USER_CONFIG_FILE ?? options.userConfigPath)",
+    ))
 }
 
 pub(super) fn headless_entrypoint(source: &str) -> io::Result<String> {

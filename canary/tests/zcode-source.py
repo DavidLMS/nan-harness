@@ -23,6 +23,9 @@ class SourceContracts(unittest.TestCase):
             headless = entries / "prompt-command.ts"
             main.write_text('const exitCode = await run(context, {\n});\nvoid main();\n')
             headless.write_text('      env: appEnv,\n')
+            factory = root / "apps/zcode-cli/packages/adapters/src/config/config-factory.ts"
+            factory.parent.mkdir(parents=True)
+            factory.write_text("loadFileConfig(options.userConfigPath)")
             source.bind(root)
             self.assertIn('else {\n  void main();', main.read_text())
             self.assertIn('NAN_HARNESS_ZCODE_PROJECT_CONFIG_FILE', main.read_text())
@@ -44,6 +47,9 @@ class SourceContracts(unittest.TestCase):
             original = "// synthetic UTF-8 ⚁\n"
             (entries / "main.ts").write_text(original + "const exitCode = await run(context, {\n});\nvoid main();\n", encoding="utf-8")
             (entries / "prompt-command.ts").write_text(original + "      env: appEnv,\n", encoding="utf-8")
+            factory = root / "apps/zcode-cli/packages/adapters/src/config/config-factory.ts"
+            factory.parent.mkdir(parents=True)
+            factory.write_text(original + "loadFileConfig(options.userConfigPath)", encoding="utf-8")
             with patch.object(Path, "read_text", windows_read), patch.object(Path, "write_text", windows_write):
                 source.bind(root)
             for name in ("main.ts", "prompt-command.ts"):
@@ -140,7 +146,7 @@ class SourceContracts(unittest.TestCase):
                 if stage == "build":
                     self.assertNotIn("PNPM_MAX_WORKERS", environment)
                 if stage == "command-verify":
-                    return "0.16.9" if args[-1] == "version" else "nanh-zcode-config-v1"
+                    return "0.16.9" if args[-1] == "version" else "nanh-zcode-config-v2"
                 return ""
             with patch.object(source, "run", side_effect=command), patch.object(source, "bind"), \
                     patch.dict(source.os.environ, {"HOME": str(root / "home")}):

@@ -7,6 +7,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Restore managed search with ZCode 0.17.1 workspace MCP trust checks while
+  preserving user settings and leaving unrelated workspace servers untrusted.
+
 ## [0.1.28] - 2026-10-29
 
 ### Fixed

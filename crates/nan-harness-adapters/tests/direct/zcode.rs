@@ -70,3 +70,38 @@ fn zcode_rejects_routing_override_and_requires_private_binding_for_search() {
         assert!(ZCodeAdapter.plan(&context).is_err(), "{flag}");
     }
 }
+
+#[test]
+fn zcode_v2_preserves_user_configuration_without_promoting_workspace_servers() {
+    let mut context = context(HarnessKind::ZCode, vec![]);
+    context.harness.capabilities.extend([
+        HarnessCapability::ZCodeConfigOverride,
+        HarnessCapability::ZCodeUserConfigOverride,
+    ]);
+    let plan = plan(&ZCodeAdapter, &context);
+    assert_eq!(plan.temporary_artifacts.len(), 2);
+    assert!(
+        !plan
+            .environment
+            .public
+            .contains_key("NAN_HARNESS_ZCODE_PROJECT_CONFIG_FILE")
+    );
+    assert!(
+        plan.environment
+            .remove
+            .contains("NAN_HARNESS_ZCODE_PROJECT_CONFIG_FILE")
+    );
+    assert_eq!(
+        plan.environment.public["NAN_HARNESS_ZCODE_USER_CONFIG_FILE"],
+        "{artifact:zcode-user}/config.json"
+    );
+    let overlay = &plan.configuration_overlays[0];
+    assert_eq!(overlay.source_path, "{runtime:user_home}/.zcode/cli");
+    assert_eq!(overlay.files.len(), 1);
+    assert_eq!(overlay.files[0].path, "config.json");
+    assert_eq!(
+        overlay.files[0].policy,
+        nan_harness_core::launch_plan::OverlayFilePolicy::MergeJson
+    );
+    assert!(overlay.files[0].content_template.contains("nan-search"));
+}
