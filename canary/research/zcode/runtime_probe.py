@@ -67,7 +67,7 @@ class Runtime:
         )
         self.personal.write_text(json.dumps(config))
         self.personal.chmod(0o600)
-        builtin = json.loads((source / "config/provider/zcode-builtin.json").read_text())
+        builtin = json.loads((source / "config/provider/zcode-builtin.json").read_text(encoding="utf-8"))
         builtin["config"]["providerConfigRules"] = {"templateRules": [], "providerRules": []}
         (self.home / "builtin.json").write_text(json.dumps(builtin))
         self.env = {
