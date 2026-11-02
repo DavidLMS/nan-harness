@@ -64,10 +64,14 @@ jobs:
             --system windows --architecture x86_64 --model qwen3.6 \
             --output "$RUNNER_TEMP/cli-versions.json"
       - name: Observe the canonical install and conformance without qualification authority
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_COMMIT: ${{ inputs.release_commit }}
         run: |
           python -B canary/actions/mimo_conformance_diagnostic.py \
             --binary "$NAN_DIAGNOSTIC_RELEASE_BINARY" --canary "$NAN_DIAGNOSTIC_RELEASE_CANARY" \
             --provenance "$RUNNER_TEMP/mimo-conformance-release-provenance.json" \
+            --release-tag "$RELEASE_TAG" --release-commit "$RELEASE_COMMIT" \
             --source-sha "$GITHUB_SHA" --manifest "$RUNNER_TEMP/cli-versions.json" \
             --directory "$RUNNER_TEMP/cli-cell" --output "$RUNNER_TEMP/mimo-canonical-observation.json"
       - name: Upload only the validated observation and public provenance

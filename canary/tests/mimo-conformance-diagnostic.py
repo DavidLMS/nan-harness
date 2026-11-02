@@ -42,7 +42,22 @@ class CanonicalConformanceObserverTests(unittest.TestCase):
             "system": "windows", "architecture": "x86_64", "source": "github:XiaomiMiMo/MiMo-Code",
             "package": "", "model": "qwen3.6", "ref": ""}]}))
         return SimpleNamespace(binary=binary, canary=canary, provenance=receipt, manifest=manifest,
+                               release_tag="v0.1.26", release_commit=observer.inventory.RELEASE_COMMIT,
                                source_sha="a"*40, directory=root / "cli-cell", output=root / "public.json")
+
+    def test_selected_release_is_bound_to_verified_receipt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = self.inputs(Path(tmp))
+            args.release_tag, args.release_commit = "v0.1.29", "e" * 40
+            with self.assertRaises(ValueError):
+                observer.binding(args)
+            receipt = json.loads(args.provenance.read_text())
+            receipt.update(releaseTag=args.release_tag, releaseCommit=args.release_commit)
+            args.provenance.write_text(json.dumps(receipt))
+            self.assertEqual(observer.binding(args), receipt)
+            args.release_commit = "f" * 40
+            with self.assertRaises(ValueError):
+                observer.binding(args)
 
     def collect(self, args, results=None, fail=False, mutate=None):
         calls = []
@@ -226,7 +241,8 @@ class CanonicalConformanceObserverTests(unittest.TestCase):
     def test_output_is_protected_before_writing_and_removed_if_protection_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = self.inputs(Path(tmp))
-            argv = ["observer", "--source-sha", args.source_sha]
+            argv = ["observer", "--source-sha", args.source_sha,
+                    "--release-tag", args.release_tag, "--release-commit", args.release_commit]
             for name in ("binary", "canary", "provenance", "manifest", "directory", "output"):
                 argv.extend(["--" + name, str(getattr(args, name))])
             def fail_before_write(path):

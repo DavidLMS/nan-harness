@@ -4,6 +4,7 @@ import argparse
 from contextlib import contextmanager
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import sys
@@ -19,7 +20,10 @@ MAX_DURATION = 86400000
 
 
 def binding(args):
-    receipt = inventory.binding(args)
+    if (not re.fullmatch(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", args.release_tag)
+            or not inventory.SOURCE.fullmatch(args.release_commit)):
+        raise ValueError("invalid selected release")
+    receipt = inventory.binding(args, args.release_tag, args.release_commit)
     if inventory.digest(args.canary) != receipt["canarySha256"]:
         raise ValueError("canary binding differs")
     return receipt
@@ -217,6 +221,8 @@ def main():
     for name in ("binary", "canary", "provenance", "manifest", "directory", "output"):
         parser.add_argument("--" + name, required=True, type=Path)
     parser.add_argument("--source-sha", required=True)
+    parser.add_argument("--release-tag", required=True)
+    parser.add_argument("--release-commit", required=True)
     args = parser.parse_args()
     created = False
     try:

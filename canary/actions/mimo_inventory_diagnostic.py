@@ -54,12 +54,12 @@ def digest(path):
     return result.hexdigest()
 
 
-def binding(args):
+def binding(args, release_tag="v0.1.26", release_commit=RELEASE_COMMIT):
     value = read_json(args.provenance)
     if (type(value) is not dict or set(value) != PROVENANCE_KEYS
             or type(value["schemaVersion"]) is not int or value["schemaVersion"] != 1
             or value["controllerSha"] != args.source_sha
-            or value["releaseTag"] != "v0.1.26" or value["releaseCommit"] != RELEASE_COMMIT
+            or value["releaseTag"] != release_tag or value["releaseCommit"] != release_commit
             or any(type(value[key]) is not str or not SOURCE.fullmatch(value[key])
                    for key in ("controllerSha", "releaseCommit", "assetWorkflowSha"))
             or any(type(value[key]) is not str or not DIGEST.fullmatch(value[key])
