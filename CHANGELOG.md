@@ -7,6 +7,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.29] - 2026-11-02
+
 ### Fixed
 
 - Restore managed search with ZCode 0.17.1 workspace MCP trust checks while
@@ -1107,7 +1109,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.28...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.29...HEAD
+[0.1.29]: https://github.com/DavidLMS/nan-harness/compare/v0.1.28...v0.1.29
 [0.1.28]: https://github.com/DavidLMS/nan-harness/compare/v0.1.27...v0.1.28
 [0.1.27]: https://github.com/DavidLMS/nan-harness/compare/v0.1.26...v0.1.27
 [0.1.26]: https://github.com/DavidLMS/nan-harness/compare/v0.1.25...v0.1.26
