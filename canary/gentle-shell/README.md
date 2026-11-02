@@ -57,7 +57,8 @@ other harnesses and desktop assets independently.
 
 ## Hosted contract
 
-`check.py --output <path>` emits only closed check names and a passed status.
+`check.py --output <path>` emits closed check names on success or an allowlisted
+failure code on failure. It never includes raw exception or provider text.
 `--live --model qwen3.6` additionally requires `NAN_API_KEY` and observes a real
 parent tool call, the child's actual NaN model/read transcript, and gateway usage.
 The marker is generated fresh and is never supplied to the model in the prompt.
@@ -68,3 +69,9 @@ release commit; old canary binaries without the independent report identity
 remain unavailable for this cell. New publication requires all 52 CLI cells
 plus the existing twelve Desktop cells. Historical 49-cell receipts remain
 valid for recommending their already-published version, not for new publication.
+
+Live observation stops at the SSE completion marker and waits for active
+forwarders to record their evidence before evaluating the child contract. A
+truncated stream still fails. Provider authorization, quota, throttling and
+transport failures have separate closed diagnostics; none bypass the required
+child read, model routing or usage evidence.

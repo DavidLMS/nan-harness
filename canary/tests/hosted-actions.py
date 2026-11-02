@@ -597,6 +597,32 @@ class CellTests(unittest.TestCase):
                     cell.gentle_probe(args, live=True)
             self.assertFalse((root / "gentle-probe-private.json").exists())
 
+    def test_gentle_failure_reports_accept_only_closed_diagnostics(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args = SimpleNamespace(directory=root, binary=root / "nanh", model="model-x")
+            report = root / "gentle-probe-private.json"
+            result = {"schemaVersion": 1, "status": "failed", "checks": [],
+                      "failure": {"code": "provider-throttled"}}
+            def probe(*_args, **_kwargs):
+                report.write_text(json.dumps(result))
+                return 1
+            with patch.object(cell, "cell_environment", return_value={"PATH": "fixture"}), \
+                    patch.object(cell.shutil, "which", return_value="gentle-shell"), \
+                    patch.object(cell, "private_command", side_effect=probe):
+                with self.assertRaises(cell.GentleProbeFailure) as failure:
+                    cell.gentle_probe(args, live=True)
+                self.assertEqual(failure.exception.code, "live-gentle-provider-throttled")
+                self.assertFalse(report.exists())
+                for invalid in ({"code": "PRIVATE_SENTINEL"},
+                                {"code": "provider-throttled", "output": "PRIVATE_SENTINEL"}):
+                    result["failure"] = invalid
+                    with self.assertRaises(RuntimeError) as failure:
+                        cell.gentle_probe(args, live=True)
+                    self.assertNotIsInstance(failure.exception, cell.GentleProbeFailure)
+                    self.assertNotIn("PRIVATE_SENTINEL", str(failure.exception))
+                    self.assertFalse(report.exists())
+
     def test_install_fails_closed_when_observed_version_does_not_match(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)

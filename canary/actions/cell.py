@@ -59,6 +59,7 @@ if os.name == "nt":
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from selection import CLI_HARNESSES, PLATFORMS as HOSTED_PLATFORMS, resolve_model
+from gentle_diagnostics import CODES as GENTLE_FAILURE_CODES
 from hermes_diagnostics import DIAGNOSTIC_CODES, safe_frames
 from mimo_live_observation import read_observation
 from mimo_live_evidence import EVIDENCE as MIMO_SESSION_EVIDENCE, DETAIL as MIMO_SESSION_DETAIL
@@ -1057,6 +1058,12 @@ def conformance_result(value, harness):
     return failed
 
 
+class GentleProbeFailure(RuntimeError):
+    def __init__(self, code):
+        super().__init__("Gentle Shell probe did not prove its contract")
+        self.code = code
+
+
 def gentle_probe(args, *, live=False):
     environment = cell_environment(args.directory)
     executable = shutil.which("gentle-shell", path=environment["PATH"])
@@ -1076,6 +1083,14 @@ def gentle_probe(args, *, live=False):
         if report.stat().st_size > 4096:
             raise RuntimeError("Gentle Shell probe report exceeds its bound")
         result = json.loads(report.read_bytes())
+        if (isinstance(result, dict) and set(result) == {"schemaVersion", "status", "checks", "failure"}
+                and type(result["schemaVersion"]) is int and result["schemaVersion"] == 1
+                and result["status"] == "failed" and result["checks"] == [] and status != 0
+                and isinstance(result["failure"], dict) and set(result["failure"]) == {"code"}
+                and isinstance(result["failure"]["code"], str)
+                and result["failure"]["code"] in GENTLE_FAILURE_CODES):
+            prefix = "live" if live else "conformance"
+            raise GentleProbeFailure(prefix + "-gentle-" + result["failure"]["code"])
         if (not isinstance(result, dict) or set(result) != {"schemaVersion", "status", "checks"}
                 or status != 0 or result.get("schemaVersion") != 1 or result.get("status") != "passed"
                 or result.get("checks") != expected_checks):
@@ -1488,7 +1503,7 @@ def failed_report(args, mismatch=None):
         phase = mismatch.phase
     code = None
     summary = "Hosted check did not complete successfully."
-    if isinstance(mismatch, InstallFailure):
+    if isinstance(mismatch, (InstallFailure, GentleProbeFailure)):
         code = mismatch.code
     if isinstance(mismatch, ConformanceFailure) and args.stage == "conformance":
         code = mismatch.code
@@ -1515,6 +1530,7 @@ def failed_report(args, mismatch=None):
                - datetime.datetime.fromisoformat(state["startedAt"].replace("Z", "+00:00")))
     total = max(state["durationMilliseconds"], int(elapsed.total_seconds() * 1000))
     attempts = (mismatch.attempts if isinstance(mismatch, ConformanceFailure)
+                else 1 if isinstance(mismatch, GentleProbeFailure)
                 else CONFORMANCE_ATTEMPTS if code and args.stage == "conformance" else 1)
     state["checks"].append({"name": phase, "status": "failed",
                             "durationMilliseconds": total - state["durationMilliseconds"],

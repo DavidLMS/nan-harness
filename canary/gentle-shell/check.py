@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Isolated Gentle Shell/Pi routing contract against a synthetic provider.
 
-Install gentle-pi 4.1.0 and Pi 1.1.0 in a disposable npm prefix first.
-This probe never reads real credentials or contacts NaN.
+Install the selected Gentle Shell/Pi pairing in a disposable npm prefix first.
+Default checks use a synthetic provider; --live explicitly uses NAN_API_KEY.
 """
 import argparse
 import http.server
@@ -14,8 +14,9 @@ import tempfile
 import threading
 import sys
 import shutil
-from live_provider import LiveProvider
+from live_provider import LiveProvider, Observation
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "actions"))
+from gentle_diagnostics import ProbeError, require
 from cell import private_command, protect_private
 from scenarios import child_prompt, gateway_requests, reader_fixture, verify_child
 
@@ -240,7 +241,7 @@ def main():
     if args.live:
         server.key = os.environ.get("NAN_API_KEY", "")
         server.model = args.model
-        server.parent_seen = server.child_seen = False
+        server.observation = Observation()
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -248,16 +249,20 @@ def main():
             home = Path(directory)
             protect_private(home)
             if args.live:
-                assert os.environ.get("NAN_API_KEY"), "missing-live-key"
+                require(os.environ.get("NAN_API_KEY"), "missing-live-key")
                 agent = home / "agent"
                 agent.mkdir()
                 marker = reader_fixture(home, args.model)
                 result = launch(args, home, agent, ["--model", args.model, "--provider-base-url",
                                 f"http://127.0.0.1:{server.server_port}/v1"], child_prompt(), live=True)
-                assert result.returncode == 0, "live-launch"
+                observation = server.observation
+                require(observation.wait(), "provider-drain-timeout")
+                if observation.failures:
+                    raise ProbeError(sorted(observation.failures)[0])
+                require(result.returncode == 0, "live-launch")
                 verify_child(agent, result.stdout, marker, args.model)
-                assert gateway_requests(result.stderr) >= 4, "live-gateway-accounting"
-                assert server.parent_seen and server.child_seen and not server.failed, "live-child-routing"
+                require(gateway_requests(result.stderr) >= 4, "live-gateway-accounting")
+                require(observation.parent_seen and observation.child_seen, "live-child-routing")
                 checks = ["live-parent-tool", "live-child-read", "live-gateway-accounting"]
             else:
                 check_routing(args, home, server)
@@ -266,6 +271,14 @@ def main():
                           "invalid-native-credential", "child-gateway-routing", "native-search-memory", "forced-search"]
             if args.output:
                 write_json(args.output, {"schemaVersion": 1, "status": "passed", "checks": checks})
+    except (AssertionError, OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+        code = (error.code if isinstance(error, ProbeError) else
+                "probe-timeout" if isinstance(error, subprocess.TimeoutExpired) else
+                "probe-unavailable" if isinstance(error, OSError) else "probe-contract")
+        if args.output:
+            write_json(args.output, {"schemaVersion": 1, "status": "failed", "checks": [],
+                                     "failure": {"code": code}})
+        raise
     finally:
         server.shutdown()
         server.server_close()
