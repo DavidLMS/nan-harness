@@ -75,6 +75,11 @@ all = { level = "deny", priority = -1 }
 pedantic = { level = "deny", priority = -1 }
 module_name_repetitions = "allow"
 
+# Tests inherit dev, including incremental compilation for local iteration.
+# Keep useful backtraces without full debugger type/variable data.
+[profile.dev]
+debug = "line-tables-only"
+
 [profile.release]
 lto = "thin"
 codegen-units = 1

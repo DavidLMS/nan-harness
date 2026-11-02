@@ -9,3 +9,5 @@ for test_script in \
   printf '==> .github/tests/%s\n' "$test_script"
   bash "$tests_directory/$test_script"
 done
+
+python3 "$tests_directory/../../scripts/test-maintain-build-cache.py"
