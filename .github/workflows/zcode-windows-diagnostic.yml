@@ -1,0 +1,39 @@
+name: ZCode Windows native diagnostic
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24.22.1
+      - name: Observe frozen native synthetic contracts
+        run: |
+          python - <<'PY'
+          import json, os, subprocess, sys
+          from pathlib import Path
+          sys.path.insert(0, 'canary/actions')
+          from cell import cell_environment, ensure_private_directory
+          root = Path.cwd()
+          directory = Path(os.environ['RUNNER_TEMP']) / 'zcode-native-diagnostic'
+          ensure_private_directory(directory)
+          env = cell_environment(directory)
+          subprocess.run([sys.executable, str(root / 'canary/guest/zcode-source.py'),
+                          'install', '--version', '0.17.1', '--ref',
+                          'a60ba6a7e5a06742270ca605f5d2cc2766afa7e1',
+                          '--directory', str(directory)], env=env, check=True)
+          receipt = json.loads((directory / 'zcode-source.json').read_text())
+          subprocess.run([sys.executable, str(root / 'canary/research/zcode/native_probe.py'),
+                          '--source', receipt['source'], '--node', receipt['node']],
+                         env=env, check=True)
+          PY
