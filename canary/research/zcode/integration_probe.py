@@ -205,6 +205,20 @@ def main():
                     scenario.steps.append((names[0], {"query": "synthetic", "max_results": 1}))
                 return respond(body)
 
+            # New upstream releases require approval for project MCP declarations.
+            # Managed search must work without granting that approval to other servers.
+            trust_marker = home / "untrusted-mcp-started"
+            project_config = workspace / ".zcode/config.json"
+            trust_module = "apps/zcode-cli/packages/bootstrap/src/workspace-mcp-trust"
+            check_trust = args.source and (args.source / trust_module).is_dir()
+            if check_trust:
+                project_config.parent.mkdir(exist_ok=True)
+                project_config.write_text(json.dumps({"mcp": {"servers": {"untrusted-probe": {
+                    "type": "stdio", "command": sys.executable,
+                    "args": ["-c", "from pathlib import Path; import sys; Path(sys.argv[1]).touch()",
+                             str(trust_marker)]}}}}))
+                project_original = project_config.read_bytes()
+
             scenario.respond = request_search
             result = command([*prefix, "--", *native], workspace, environment, "NATIVE_PROBE_OK")
             if len(searches) != 1:
@@ -215,6 +229,11 @@ def main():
             assert user_config.read_bytes() == original
             scenario.respond = respond
             print("PASS: private managed search MCP inventory, execution and result continuation")
+            if check_trust:
+                assert not trust_marker.exists(), "Untrusted workspace MCP executed"
+                assert project_config.read_bytes() == project_original
+                print("PASS: unrelated workspace MCP remains untrusted and unchanged")
+
 
             scenario.steps.clear()
             scenario.completed.clear()

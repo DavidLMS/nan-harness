@@ -73,3 +73,13 @@ fn zcode_official_source_installation_is_repeatable() {
     assert!(output.status.success());
     assert_eq!(output.stdout.trim_ascii(), b"0.16.9");
 }
+
+#[test]
+fn user_configuration_binding_changes_only_the_private_user_input() {
+    let source = "loadFileConfig(options.userConfigPath);\nkeepWorkspaceTrust();";
+    let bound = binding::user_configuration(source).unwrap();
+    assert!(bound.contains("NAN_HARNESS_ZCODE_USER_CONFIG_FILE"));
+    assert!(bound.contains("keepWorkspaceTrust();"));
+    assert!(binding::user_configuration("changed loader").is_err());
+    assert!(binding::user_configuration(&format!("{source}{source}")).is_err());
+}

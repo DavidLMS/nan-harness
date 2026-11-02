@@ -3,8 +3,9 @@ use crate::direct::{
 };
 use crate::search::{NAN_SEARCH_MCP_ID, nan_search_mcp_server};
 use nan_harness_core::launch_plan::{
-    ArtifactLifecycle, NAN_SEARCH_BLOCK_BEGIN, NAN_SEARCH_BLOCK_END, TemporaryArtifact,
-    TemporaryArtifactKind, TemporaryArtifactMode, ZCODE_PROVIDER_CONFIG_PLACEHOLDER,
+    ArtifactLifecycle, ConfigurationOverlay, NAN_SEARCH_BLOCK_BEGIN, NAN_SEARCH_BLOCK_END,
+    OverlayFile, OverlayFilePolicy, TemporaryArtifact, TemporaryArtifactKind,
+    TemporaryArtifactMode, USER_HOME_PLACEHOLDER, ZCODE_PROVIDER_CONFIG_PLACEHOLDER,
 };
 use nan_harness_core::{
     HarnessAdapter, HarnessCapability, HarnessKind, LaunchPlan, PlanContext, PlanError,
@@ -64,23 +65,26 @@ impl HarnessAdapter for ZCodeAdapter {
                 "modelConfigRules": {"modelRules": [], "modelApiRules": [], "providerSiteRules": [], "templateModelRules": [], "builtinProviderModelRules": []}
             }}).to_string()),
         ];
+        let mut configuration_overlays = Vec::new();
+        let user_config = context
+            .harness
+            .capabilities
+            .contains(&HarnessCapability::ZCodeUserConfigOverride);
         if private_config {
-            let mut server = nan_search_mcp_server(CREDENTIAL_TARGET);
-            server["type"] = json!("stdio");
-            let search =
-                json!({"features": {"mcp": true}, "mcp": {"servers": {NAN_SEARCH_MCP_ID: server}}});
-            let search = search.to_string();
-            temporary_artifacts.push(artifact(
-                "zcode-project",
-                format!(
-                    "{{{NAN_SEARCH_BLOCK_BEGIN}{}{NAN_SEARCH_BLOCK_END}}}",
-                    &search[1..search.len() - 1]
-                ),
-            ));
-            public_environment.insert(
-                "NAN_HARNESS_ZCODE_PROJECT_CONFIG_FILE".to_owned(),
-                "{artifact:zcode-project}".to_owned(),
-            );
+            let contents = search_configuration();
+            if user_config {
+                configuration_overlays.push(user_configuration_overlay(contents));
+                public_environment.insert(
+                    "NAN_HARNESS_ZCODE_USER_CONFIG_FILE".to_owned(),
+                    "{artifact:zcode-user}/config.json".to_owned(),
+                );
+            } else {
+                temporary_artifacts.push(artifact("zcode-project", contents));
+                public_environment.insert(
+                    "NAN_HARNESS_ZCODE_PROJECT_CONFIG_FILE".to_owned(),
+                    "{artifact:zcode-project}".to_owned(),
+                );
+            }
         }
         build_direct_plan(
             context,
@@ -91,9 +95,15 @@ impl HarnessAdapter for ZCodeAdapter {
                 removed_environment: BTreeSet::from([
                     "NAN_API_KEY".to_owned(),
                     "ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG_FILE".to_owned(),
+                    if user_config {
+                        "NAN_HARNESS_ZCODE_PROJECT_CONFIG_FILE"
+                    } else {
+                        "NAN_HARNESS_ZCODE_USER_CONFIG_FILE"
+                    }
+                    .to_owned(),
                 ]),
                 temporary_artifacts,
-                configuration_overlays: Vec::new(),
+                configuration_overlays,
             },
         )
     }
@@ -106,6 +116,35 @@ fn artifact(id: &str, contents: String) -> TemporaryArtifact {
         path_hint: format!("{id}.json"),
         mode: TemporaryArtifactMode::OwnerFile,
         content_template: Some(contents),
+        lifecycle: ArtifactLifecycle::Launch,
+    }
+}
+
+fn search_configuration() -> String {
+    let mut server = nan_search_mcp_server(CREDENTIAL_TARGET);
+    server["type"] = json!("stdio");
+    let search =
+        json!({"features": {"mcp": true}, "mcp": {"servers": {NAN_SEARCH_MCP_ID: server}}})
+            .to_string();
+    format!(
+        "{{{NAN_SEARCH_BLOCK_BEGIN}{}{NAN_SEARCH_BLOCK_END}}}",
+        &search[1..search.len() - 1]
+    )
+}
+
+fn user_configuration_overlay(contents: String) -> ConfigurationOverlay {
+    // Preserve native user settings in a private launch copy. Never promote
+    // project MCP declarations into the user scope or change their trust store.
+    ConfigurationOverlay {
+        id: "zcode-user".to_owned(),
+        path_hint: "zcode-user".to_owned(),
+        source_path: format!("{USER_HOME_PLACEHOLDER}/.zcode/cli"),
+        files: vec![OverlayFile {
+            path: "config.json".to_owned(),
+            mode: TemporaryArtifactMode::OwnerFile,
+            content_template: contents,
+            policy: OverlayFilePolicy::MergeJson,
+        }],
         lifecycle: ArtifactLifecycle::Launch,
     }
 }

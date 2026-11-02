@@ -80,14 +80,16 @@ def run(arguments, cwd, environment=None, stage="probe"):
 
 
 def bind(source):
-    directory = source / "apps/zcode-cli/packages/cli/src"
+    directory = source / "apps/zcode-cli/packages"
     replacements = {
-        "main.ts": [("void main();", 'if (process.argv[2] === "--nanh-source-info") {\n'
-                     '  console.log("nanh-zcode-config-v1");\n} else {\n  void main();\n}'),
+        "cli/src/main.ts": [("void main();", 'if (process.argv[2] === "--nanh-source-info") {\n'
+                     '  console.log("nanh-zcode-config-v2");\n} else {\n  void main();\n}'),
                     ("const exitCode = await run(context, {", "const exitCode = await run(context, {\n"
                      "      projectConfigPath: process.env.NAN_HARNESS_ZCODE_PROJECT_CONFIG_FILE,")],
-        "prompt-command.ts": [("      env: appEnv,", "      env: appEnv,\n"
+        "cli/src/prompt-command.ts": [("      env: appEnv,", "      env: appEnv,\n"
                                "      projectConfigPath: deps.projectConfigPath,")],
+        "adapters/src/config/config-factory.ts": [("loadFileConfig(options.userConfigPath)",
+            "loadFileConfig(options.env?.NAN_HARNESS_ZCODE_USER_CONFIG_FILE ?? process.env.NAN_HARNESS_ZCODE_USER_CONFIG_FILE ?? options.userConfigPath)")],
     }
     for name, changes in replacements.items():
         path = directory / name
@@ -144,7 +146,7 @@ def install(version, ref, destination):
          "--frozen-lockfile"], source, install_environment, stage="dependencies")
     bind(source)
     run([node, pnpm, "--filter", "@zcode/cli...", "build"], source, environment, stage="build")
-    for argument, expected in (("version", version), ("--nanh-source-info", "nanh-zcode-config-v1")):
+    for argument, expected in (("version", version), ("--nanh-source-info", "nanh-zcode-config-v2")):
         if expected not in run([node, source / CLI, argument], source, environment, stage="command-verify"):
             raise ValueError("ZCode built command failed verification")
     bin_directory = Path(os.environ.get("HOME", "")) / ".local/bin"

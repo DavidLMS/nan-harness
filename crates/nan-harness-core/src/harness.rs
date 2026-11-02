@@ -155,6 +155,7 @@ pub enum HarnessCapability {
     ClaudeModelPicker,
     CodexConfigProfile,
     ZCodeConfigOverride,
+    ZCodeUserConfigOverride,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
