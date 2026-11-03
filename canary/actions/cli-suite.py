@@ -570,25 +570,44 @@ def main():
             if frozen_item.ref:
                 base_command += ["--harness-ref", frozen_item.ref]
             stages = ["install", "conformance"] + (["live"] if args.mode == "live" else []) + ["report"]
-        for stage in stages:
-            command = base_command[:]
-            command.insert(2, stage)
-            stage_env = base_env if stage == "live" else deterministic_env
-            completed = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                       env=stage_env, check=False)
-            if completed.returncode == 3:
-                print("Native suite aborted because process cleanup is unproven.", file=sys.stderr)
-                return 3
-            if completed.returncode:
-                if harness in unresolved_names:
-                    _annotate_resolution_report(report, harness,
-                                                next(item.diagnostic for item in unresolved
-                                                     if item.harness == harness))
+        for attempt in range(1, 5):
+            attempt_command = base_command[:]
+            if attempt > 1:
+                attempt_command[attempt_command.index("--directory") + 1] = str(
+                    args.directory / f"{harness}-attempt-{attempt}")
+            failed = False
+            for stage in stages:
+                command = attempt_command[:]
+                command.insert(2, stage)
+                stage_env = base_env if stage == "live" else deterministic_env
+                completed = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                           env=stage_env, check=False)
+                if completed.returncode == 3:
+                    print("Native suite aborted because process cleanup is unproven.", file=sys.stderr)
+                    return 3
+                if completed.returncode:
+                    failed = True
+                    if harness in unresolved_names:
+                        _annotate_resolution_report(report, harness,
+                                                    next(item.diagnostic for item in unresolved
+                                                         if item.harness == harness))
+                    if report.is_file():
+                        history = args.output / "attempts" / harness
+                        history.mkdir(mode=0o700, parents=True, exist_ok=True)
+                        (history / f"{attempt}.json").write_bytes(report.read_bytes())
+                    print(f"::warning::{harness}: compatibility attempt {attempt}/4 failed at {stage}.")
+                    break
+            if not failed:
+                if attempt > 1:
+                    print(f"::warning::{harness}: recovered on compatibility attempt {attempt}/4.")
+                if harness == 'mimo-code' and args.mode == 'live':
+                    emit_mimo_session_warning(report)
+                break
+            if attempt == 4 or harness in unresolved_names:
                 failures.append(harness)
                 break
-        else:
-            if harness == 'mimo-code' and args.mode == 'live':
-                emit_mimo_session_warning(report)
+            report.unlink(missing_ok=True)
+            time.sleep(5 * attempt)
     if failures:
         print("One or more hosted CLI cells failed; sanitized reports were retained.", file=sys.stderr)
         return 1

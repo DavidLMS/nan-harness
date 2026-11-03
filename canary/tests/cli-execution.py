@@ -544,6 +544,24 @@ class CliExecutionTests(unittest.TestCase):
                                 for command, _ in calls))
             self.assertTrue(all("NAN_API_KEY" not in kwargs["env"] for _, kwargs in calls))
 
+            for codes, expected, attempts in (([1, 1, 1, 0, 0, 0], 0, 4),
+                                               ([1, 1, 1, 1], 1, 4),
+                                               ([3], 3, 1)):
+                with self.subTest(codes=codes):
+                    calls.clear()
+                    results = iter(codes)
+                    def retry_run(command, **kwargs):
+                        calls.append((command, kwargs))
+                        return type("Result", (), {"returncode": next(results)})()
+                    with patch.object(sys, "argv", argv), \
+                            patch.object(cli_suite.subprocess, "run", side_effect=retry_run), \
+                            patch.object(cli_suite.time, "sleep"):
+                        self.assertEqual(cli_suite.main(), expected)
+                    installs = [cmd for cmd, _ in calls if cmd[2] == "install"]
+                    self.assertEqual(len(installs), attempts)
+                    self.assertEqual(len({cmd[cmd.index("--directory") + 1] for cmd in installs}), attempts)
+
+
     def test_live_mode_has_key_only_for_live_stage(self):
         calls = []
         with tempfile.TemporaryDirectory() as temporary:

@@ -669,7 +669,8 @@ if stage == 'report':
             result = subprocess.run(command, env=environment, capture_output=True, check=False)
             self.assertEqual(result.returncode, 1)
             self.assertEqual(log.read_text().splitlines(), [
-                "install:codex", "install:fx", "conformance:fx", "live:fx", "report:fx"])
+                "install:codex", "install:codex", "install:codex", "install:codex",
+                "install:fx", "conformance:fx", "live:fx", "report:fx"])
             self.assertTrue((root / "reports/linux-aarch64-fx.json").exists())
             self.assertNotIn(b"PRIVATE_KEY", result.stdout + result.stderr)
 
