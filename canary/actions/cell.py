@@ -245,6 +245,20 @@ DEPENDENCY_FAILURE_CODES = frozenset(code for code in (
 ) if code is not None)
 INSTALL_FAILURE_CODES.update(DEPENDENCY_FAILURE_CODES)
 
+# Only fixed categories leave the private npm log; never retain exception text.
+GENTLE_INSTALL_DIAGNOSTICS = (
+    ("npm-gentle-download-timeout", ("GENTLE_AI_DOWNLOAD_TIMEOUT",)),
+    ("npm-gentle-download-http", ("GENTLE_AI_DOWNLOAD_HTTP", "GENTLE_AI_DOWNLOAD_TRANSIENT_HTTP")),
+    ("npm-gentle-asset-unavailable", ("GENTLE_AI_ASSET_UNAVAILABLE",)),
+    ("npm-gentle-integrity", ("Gentle AI archive checksum mismatch", "Gentle AI binary checksum mismatch")),
+    ("npm-gentle-extraction", ("with trusted system extractor", "Gentle AI archive must contain exactly one regular")),
+    ("npm-gentle-module", ("ERR_MODULE_NOT_FOUND", "Cannot find module")),
+    ("npm-gentle-permission", ("EACCES", "EPERM")),
+)
+INSTALL_FAILURE_CODES.update(code for code, _ in GENTLE_INSTALL_DIAGNOSTICS)
+INSTALL_FAILURE_CODES.add("npm-gentle-postinstall")
+
+
 NPM_RECORD_PACKAGE = re.compile(
     r"^path\s+[^\n]*node_modules[\\/]"
     r"(?P<package>@[^/\\\s]+[\\/][^/\\\s]+|[^/\\\s]+)(?=[/\\\s]|$)", re.IGNORECASE)
@@ -357,6 +371,13 @@ def classify_install_failure(log, status, expected_package=None):
                 record_categories.append(matches[0] if len(matches) == 1 else "npm-openclaw-preinstall")
             else:
                 record_categories.append("npm-openclaw-postinstall")
+        elif (expected_package == "gentle-pi" and package == "gentle-pi"
+              and command_matches[0].group("script") == "node scripts/install-gentle-ai.mjs"):
+            record_text = "\n".join(record)
+            matches = [code for code, markers in GENTLE_INSTALL_DIAGNOSTICS
+                       if any(marker in record_text for marker in markers)]
+            record_categories.append(matches[0] if len(matches) == 1 else
+                                     "diagnostic-unknown" if matches else "npm-gentle-postinstall")
         elif package in OPENCLAW_DEPENDENCIES:
             record_categories.append(dependency_failure_code(
                 package, command_matches[0].group("executable"),
@@ -960,7 +981,7 @@ def install(args, state):
     def capture_installer(log, status):
         nonlocal installer_code
         installer_code = classify_install_failure(log, status,
-                                                  "openclaw" if args.harness == "openclaw" else None)
+                                                  {"openclaw": "openclaw", "gentle-shell": "gentle-pi"}.get(args.harness))
 
     try:
         status = private_command(command, args.directory, allow_failure=True,

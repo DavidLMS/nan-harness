@@ -243,6 +243,31 @@ class CliExecutionTests(unittest.TestCase):
                     self.assertRaises(cell.CleanupError):
                 cell.install(args, state)
 
+    def test_gentle_installer_classifies_only_expected_package_and_script(self):
+        prefix = ("npm error code 1\n"
+                  "npm error path /private/secret/node_modules/gentle-pi\n"
+                  "npm error command failed\n"
+                  "npm error command sh -c node scripts/install-gentle-ai.mjs\n")
+
+        def classify(text, package="gentle-pi", status=1):
+            return cell.classify_install_failure(io.BytesIO(text.encode()), status, package)
+
+        for code, markers in cell.GENTLE_INSTALL_DIAGNOSTICS:
+            for marker in markers:
+                with self.subTest(code=code, marker=marker):
+                    self.assertEqual(classify(prefix + "npm error " + marker + " secret-token"), code)
+                    self.assertIn(code, cell.INSTALL_FAILURE_CODES)
+        evidence = prefix + "npm error GENTLE_AI_DOWNLOAD_TIMEOUT secret-token"
+        self.assertEqual(classify(evidence, status=-9), "signal-terminated")
+        self.assertEqual(classify(evidence, package=None), "diagnostic-unknown")
+        self.assertEqual(classify(evidence.replace("node_modules/gentle-pi", "node_modules/other")),
+                         "diagnostic-unknown")
+        self.assertEqual(classify(evidence.replace("install-gentle-ai.mjs", "unrelated.mjs")),
+                         "diagnostic-unknown")
+        self.assertEqual(classify(evidence + "\nnpm error EACCES"), "diagnostic-unknown")
+        self.assertEqual(classify(prefix + "npm error private unrecognized failure"),
+                         "npm-gentle-postinstall")
+
     def test_private_installer_capture_classifies_bounded_private_output(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "cell"
