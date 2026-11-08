@@ -118,7 +118,7 @@ class ReleaseGateTests(unittest.TestCase):
         self.assertNotIn("ref: ${{ inputs.tag }}", gate)
         # The hosted runner labels live in the hosted platform table, which every
         # consumer shares.
-        self.assertIn('"macos-14"', (ROOT / "canary/actions/selection.py").read_text())
+        self.assertIn('"macos-15"', (ROOT / "canary/actions/selection.py").read_text())
         self.assertIn('test "$(uname -m)" = arm64', gate)
         self.assertIn("--reports-dir reports", gate)
         self.assertNotIn("gh run download", recommend)
