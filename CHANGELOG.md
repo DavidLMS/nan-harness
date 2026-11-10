@@ -9,6 +9,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Retain closed cleanup diagnostics for hosted CLI cells without publishing
+  process output or allowing retries after unproven cleanup.
+
 - Recheck a vertically moving Claude Linux Copy control within the original
   response deadline, retaining full native proofs before any clipboard action.
 

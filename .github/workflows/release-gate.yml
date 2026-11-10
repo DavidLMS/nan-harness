@@ -263,7 +263,7 @@ jobs:
         with:
           name: release-gate-report-${{ matrix.system }}-${{ matrix.harness }}
           overwrite: true
-          path: ${{ runner.temp }}/cli-reports/*.json
+          path: ${{ runner.temp }}/cli-reports/**/*.json
           if-no-files-found: error
           retention-days: 7
 

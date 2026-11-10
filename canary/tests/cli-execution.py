@@ -11,7 +11,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 
 ACTION_DIRECTORY = Path(__file__).resolve().parents[1] / "actions"
@@ -46,6 +46,31 @@ cli_suite = load("cli-suite")
 
 
 class CliExecutionTests(unittest.TestCase):
+    def test_cleanup_diagnostic_distinguishes_kill_and_wait_without_private_text(self):
+        for operation, cause in [
+            ("terminate-process-group", PermissionError(1, "PRIVATE process")),
+            ("wait-child", cell.subprocess.TimeoutExpired("PRIVATE command", 10)),
+        ]:
+            with self.subTest(operation=operation), tempfile.TemporaryDirectory() as temporary:
+                child = Mock(pid=123)
+                child.wait.side_effect = cause if operation == "wait-child" else None
+                with patch.object(cell, "terminate_process_tree", side_effect=cause if operation != "wait-child" else None):
+                    with self.assertRaises(cell.CleanupError) as caught:
+                        cell.finish_stage(child, None)
+                args = SimpleNamespace(output=Path(temporary) / "report.json", stage="install")
+                cell.write_cleanup_diagnostic(args, caught.exception)
+                value = cell.read_cleanup_diagnostic(args.output)
+                self.assertEqual(value["operation"], operation)
+                self.assertEqual(value["errno"], 1 if operation == "terminate-process-group" else None)
+                self.assertEqual(value["category"], "os-error" if operation == "terminate-process-group" else "timeout")
+                self.assertNotIn("PRIVATE", json.dumps(value))
+                self.assertFalse(args.output.exists())
+                for key, bad in [("extra", "PRIVATE"), ("stage", []), ("operation", "PRIVATE"),
+                                 ("errno", True), ("errno", 999), ("schemaVersion", True)]:
+                    rejected = value | {key: bad}
+                    cell.cleanup_diagnostic_path(args.output).write_text(json.dumps(rejected))
+                    self.assertIsNone(cell.read_cleanup_diagnostic(args.output))
+
     def test_suite_forwards_only_the_fixed_validated_mimo_advisory(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

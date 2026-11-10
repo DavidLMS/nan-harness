@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from selection import CLI_HARNESSES, SYSTEMS, identity, resolve_model
-from cell import SEMVER, source_identity, MIMO_SESSION_DETAIL
+from cell import SEMVER, source_identity, MIMO_SESSION_DETAIL, read_cleanup_diagnostic
 
 
 @dataclass(frozen=True)
@@ -583,6 +583,9 @@ def main():
                 completed = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                            env=stage_env, check=False)
                 if completed.returncode == 3:
+                    diagnostic = read_cleanup_diagnostic(report)
+                    if diagnostic is not None and diagnostic["stage"] == stage:
+                        print("Cleanup diagnostic: " + json.dumps(diagnostic, sort_keys=True), file=sys.stderr)
                     print("Native suite aborted because process cleanup is unproven.", file=sys.stderr)
                     return 3
                 if completed.returncode:

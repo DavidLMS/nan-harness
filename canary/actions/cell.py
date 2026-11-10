@@ -101,6 +101,44 @@ SMOKE_LIMIT = 4
 class CleanupError(RuntimeError):
     """The next harness must not start when process cleanup is unproven."""
 
+    def __init__(self, message, operation="unknown", cause=None):
+        super().__init__(message)
+        self.operation = operation if operation in {"terminate-process-group", "close-job", "wait-child"} else "unknown"
+        self.category = ("timeout" if isinstance(cause, subprocess.TimeoutExpired) else
+                         "os-error" if isinstance(cause, OSError) else "unknown")
+        number = getattr(cause, "errno", None)
+        self.errno = number if type(number) is int and 0 < number < 256 else None
+
+
+def cleanup_diagnostic_path(report):
+    return report.parent / "diagnostics" / report.name
+
+
+def write_cleanup_diagnostic(args, error):
+    write_json(cleanup_diagnostic_path(args.output), {
+        "schemaVersion": 1, "kind": "cleanup-unproven", "stage": args.stage,
+        "operation": error.operation, "category": error.category, "errno": error.errno,
+    })
+
+
+def read_cleanup_diagnostic(report):
+    try:
+        path = cleanup_diagnostic_path(report)
+        if path.stat().st_size > 1024:
+            return None
+        value = json.loads(path.read_bytes())
+        if (not isinstance(value, dict) or set(value) != {"schemaVersion", "kind", "stage", "operation", "category", "errno"}
+                or type(value["schemaVersion"]) is not int or value["schemaVersion"] != 1
+                or value["kind"] != "cleanup-unproven"
+                or value["stage"] not in ("install", "conformance", "live", "report", "unresolved")
+                or value["operation"] not in ("terminate-process-group", "close-job", "wait-child", "unknown")
+                or value["category"] not in ("timeout", "os-error", "unknown")
+                or not (value["errno"] is None or type(value["errno"]) is int and 0 < value["errno"] < 256)):
+            return None
+        return value
+    except (OSError, ValueError, TypeError):
+        return None
+
 
 class StageTimeout(RuntimeError):
     """A stage limit says nothing about compatibility; it remains retryable."""
@@ -785,12 +823,13 @@ def finish_stage(child, job):
             except ProcessLookupError:
                 pass
     except (OSError, RuntimeError, subprocess.SubprocessError) as error:
-        raise CleanupError("stage process cleanup could not be verified") from error
+        raise CleanupError("stage process cleanup could not be verified",
+                           "close-job" if job else "terminate-process-group", error) from error
     finally:
         try:
             child.wait(timeout=10)
         except (subprocess.TimeoutExpired, OSError) as error:
-            raise CleanupError("stage process did not exit after cleanup") from error
+            raise CleanupError("stage process did not exit after cleanup", "wait-child", error) from error
 
 
 def terminate_process_tree(pid):
@@ -1627,8 +1666,12 @@ def main():
         if args.stage == "unresolved":
             raise RuntimeError("official harness version metadata was unavailable")
         run(args)
-    except CleanupError:
+    except CleanupError as error:
         args.output.unlink(missing_ok=True)
+        try:
+            write_cleanup_diagnostic(args, error)
+        except OSError:
+            pass
         print("Hosted CLI cleanup is unproven; abort the native suite.", file=sys.stderr)
         return 3
     except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError) as error:
