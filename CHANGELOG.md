@@ -7,6 +7,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Recheck a vertically moving Claude Linux Copy control within the original
+  response deadline, retaining full native proofs before any clipboard action.
+
 ## [0.1.30] - 2026-11-10
 
 ### Added

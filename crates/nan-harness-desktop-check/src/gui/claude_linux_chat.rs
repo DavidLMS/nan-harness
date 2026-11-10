@@ -175,6 +175,21 @@ fn copy_control_change(facts: &Value) -> Option<CopyControlChange> {
         && value.height_same))
         .then_some(value)
 }
+// The helper emits this boundary before touching the clipboard or invoking Copy.
+// A vertical-only layout shift may settle, but every new observation must repeat
+// the complete ownership, response-scope, state and hit-target proofs.
+fn copy_layout_pending(facts: &Value) -> bool {
+    copy_control_change(facts).is_some_and(|change| {
+        change.role_same
+            && change.name_same
+            && change.description_same
+            && change.x_same
+            && !change.y_same
+            && change.width_same
+            && change.height_same
+    })
+}
+
 fn project_copy_control_change(summary: &mut Value, value: Option<CopyControlChange>) {
     if summary["stage"] == "blocked"
         && summary["failureBoundary"] == "copy-control-changed"
@@ -1139,7 +1154,7 @@ impl ClaudeLinuxChatSession<'_> {
                 self.copy_in_flight = false;
                 return Ok(());
             }
-            if self.stage != "response-pending" {
+            if self.stage != "response-pending" && !copy_layout_pending(&facts) {
                 return Err(Reason::ActionUnsupported);
             }
             self.copy_in_flight = false;
@@ -1841,6 +1856,49 @@ mod query_timing_tests {
             let mut changed = timing.clone();
             changed[key] = value;
             assert!(query_observation(&json!({"queryObservation":changed})).is_none());
+        }
+    }
+}
+
+#[cfg(test)]
+mod copy_layout_tests {
+    use super::copy_layout_pending;
+    use serde_json::json;
+
+    #[test]
+    fn only_pre_action_vertical_layout_drift_can_be_observed_again() {
+        let facts = json!({"stage":"blocked","failureBoundary":"copy-control-changed",
+            "responseVerified":false,"copyControlChange":{"sample":"first",
+            "roleSame":true,"nameSame":true,"descriptionSame":true,"xSame":true,
+            "ySame":false,"widthSame":true,"heightSame":true}});
+        for sample in ["first", "second"] {
+            let mut pending = facts.clone();
+            pending["copyControlChange"]["sample"] = json!(sample);
+            assert!(copy_layout_pending(&pending));
+        }
+        for field in [
+            "roleSame",
+            "nameSame",
+            "descriptionSame",
+            "xSame",
+            "widthSame",
+            "heightSame",
+        ] {
+            let mut changed = facts.clone();
+            changed["copyControlChange"][field] = json!(false);
+            assert!(!copy_layout_pending(&changed));
+        }
+        for (field, value) in [
+            ("stage", json!("action-uncertain")),
+            ("stage", json!("deadline")),
+            ("failureBoundary", json!("copy-final-reproof")),
+            ("failureBoundary", json!("copy-invoke")),
+            ("responseVerified", json!(true)),
+            ("copyControlChange", json!(null)),
+        ] {
+            let mut changed = facts.clone();
+            changed[field] = value;
+            assert!(!copy_layout_pending(&changed));
         }
     }
 }
