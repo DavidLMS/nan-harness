@@ -7,6 +7,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.30] - 2026-11-10
+
 ### Added
 
 - Add bundled profiles for Kimi K3.1 Pro, Qwen 3.8 Max, DeepSeek V4-Pro (0813)
@@ -1115,7 +1117,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.29...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.30...HEAD
+[0.1.30]: https://github.com/DavidLMS/nan-harness/compare/v0.1.29...v0.1.30
 [0.1.29]: https://github.com/DavidLMS/nan-harness/compare/v0.1.28...v0.1.29
 [0.1.28]: https://github.com/DavidLMS/nan-harness/compare/v0.1.27...v0.1.28
 [0.1.27]: https://github.com/DavidLMS/nan-harness/compare/v0.1.26...v0.1.27
