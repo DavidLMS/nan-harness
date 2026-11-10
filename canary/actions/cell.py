@@ -101,7 +101,7 @@ SMOKE_LIMIT = 4
 class CleanupError(RuntimeError):
     """The next harness must not start when process cleanup is unproven."""
 
-    def __init__(self, message, operation="unknown", cause=None):
+    def __init__(self, message="process cleanup is unproven", operation="unknown", cause=None):
         super().__init__(message)
         self.operation = operation if operation in {"terminate-process-group", "close-job", "wait-child"} else "unknown"
         self.category = ("timeout" if isinstance(cause, subprocess.TimeoutExpired) else
