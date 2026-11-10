@@ -316,3 +316,33 @@ fn effort_policy_loads_legacy_state_and_round_trips_new_controls() {
         );
     }
 }
+
+#[test]
+fn external_models_receive_bundled_profiles_without_invented_reasoning_controls() {
+    for (id, output, vision) in [
+        ("kimi-k3.1-pro", 1_000_000, true),
+        ("qwen3.8-max", 131_072, true),
+        ("deepseek-v4-pro", 393_216, false),
+        ("hy4", 65_536, true),
+    ] {
+        let models = coding_models_from_provider_ids([id.to_owned()]);
+        assert_eq!(models.len(), 1);
+        let profile = &models[0];
+        assert_eq!(profile.id, id);
+        assert_eq!(profile.source, ProfileSource::Bundled);
+        assert_eq!(profile.context_window, 1_000_000);
+        assert_eq!(profile.max_output_tokens, output);
+        assert_eq!(profile.image_input, vision);
+        assert_eq!(profile.reasoning, ReasoningPolicy::Unknown);
+        assert_eq!(
+            profile.reasoning.default_selection(),
+            ReasoningSelection::Auto
+        );
+        assert!(!profile.reasoning.accepts(ReasoningSelection::Toggle(false)));
+        assert!(
+            !profile
+                .reasoning
+                .accepts(ReasoningSelection::Effort(ReasoningEffort::High))
+        );
+    }
+}

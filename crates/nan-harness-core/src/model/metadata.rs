@@ -15,7 +15,7 @@ pub const KNOWN_NON_CODING_MODELS: [&str; 7] = [
     "qwen-image-2.1",
     "minimax-h3",
 ];
-pub const KNOWN_CODING_MODELS: [CodingModelMetadata; 8] = [
+pub const KNOWN_CODING_MODELS: [CodingModelMetadata; 12] = [
     CodingModelMetadata {
         id: "qwen3.6",
         display_name: "NaN · Qwen 3.6",
@@ -113,6 +113,45 @@ pub const KNOWN_CODING_MODELS: [CodingModelMetadata; 8] = [
             default: ReasoningEffort::Medium,
             supports_disabled: false,
         },
+    },
+    // NaN model sheets: https://nan.builders/docs/models (2026-11-10).
+    // These models have no published per-level reasoning contract yet. Unknown
+    // preserves provider defaults without inventing toggle or effort controls.
+    CodingModelMetadata {
+        id: "kimi-k3.1-pro",
+        display_name: "NaN · Kimi K3.1 Pro",
+        description: "Agentic reasoning · tools + vision · 1M context",
+        context_window: 1_000_000,
+        max_output_tokens: 1_000_000,
+        image_input: true,
+        reasoning: ReasoningPolicy::Unknown,
+    },
+    CodingModelMetadata {
+        id: "qwen3.8-max",
+        display_name: "NaN · Qwen 3.8 Max",
+        description: "Advanced reasoning · tools + vision · 1M context",
+        context_window: 1_000_000,
+        max_output_tokens: 131_072,
+        image_input: true,
+        reasoning: ReasoningPolicy::Unknown,
+    },
+    CodingModelMetadata {
+        id: "deepseek-v4-pro",
+        display_name: "NaN · DeepSeek V4-Pro (0813)",
+        description: "Agentic reasoning · tools · 1M context",
+        context_window: 1_000_000,
+        max_output_tokens: 393_216,
+        image_input: false,
+        reasoning: ReasoningPolicy::Unknown,
+    },
+    CodingModelMetadata {
+        id: "hy4",
+        display_name: "NaN · Hy4",
+        description: "Agentic reasoning · tools + vision · 1M context",
+        context_window: 1_000_000,
+        max_output_tokens: 65_536,
+        image_input: true,
+        reasoning: ReasoningPolicy::Unknown,
     },
 ];
 

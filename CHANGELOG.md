@@ -7,6 +7,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Add bundled profiles for Kimi K3.1 Pro, Qwen 3.8 Max, DeepSeek V4-Pro (0813)
+  and Hy4, with 1M context, model-specific output limits and image capabilities.
+  Preserve provider reasoning defaults until per-level controls are qualified.
+
 ## [0.1.29] - 2026-11-02
 
 ### Fixed
