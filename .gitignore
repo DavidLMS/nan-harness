@@ -2,3 +2,7 @@
 .DS_Store
 # Local Pi runtime state
 .atl/
+
+# Generated Python bytecode
+__pycache__/
+*.py[cod]
