@@ -183,11 +183,33 @@ function Invoke-OfficialScript([string]$Uri, [string[]]$Arguments) {
   $all = @('-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$script) + $Arguments
   Invoke-Native 'pwsh.exe' $all 'pwsh' 'install'
 }
-function Invoke-HermesPinned([string]$Uri, [string[]]$Arguments) {
+function Copy-PinnedHermesInstaller([string]$Repository, [string]$Revision) {
+  $source = Join-Path $Repository 'scripts/install.ps1'
+  if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+    Set-InstallDiagnostic 'install' 'git' $null $null $null 'expected-executable-missing'
+    throw 'the pinned Hermes installer is missing'
+  }
+  Invoke-Native 'git.exe' @('-C',$Repository,'rev-parse',($Revision + ':scripts/install.ps1')) 'git' 'install'
+  $expected = [IO.File]::ReadAllText($stdoutLog).Trim()
+  # Execute a stable copy: the official installer may update its own checkout.
+  $destination = Join-Path $tmp 'official-installer.ps1'
+  Copy-Item -LiteralPath $source -Destination $destination -Force
+  Invoke-Native 'git.exe' @('-C',$Repository,'hash-object','--no-filters',$destination) 'git' 'install'
+  $actual = [IO.File]::ReadAllText($stdoutLog).Trim()
+  if ($expected -notmatch '^[0-9a-f]{40}$' -or $actual -cne $expected) {
+    Set-InstallDiagnostic 'install' 'git' $null $null $null 'invalid-frozen-ref'
+    throw 'the pinned Hermes installer identity differs'
+  }
+  return $destination
+}
+function Invoke-HermesPinned([string]$ScriptPath, [string[]]$Arguments) {
   $savedPath = [Environment]::GetEnvironmentVariable('Path', 'User')
   $savedHome = [Environment]::GetEnvironmentVariable('HERMES_HOME', 'User')
   $savedGit = [Environment]::GetEnvironmentVariable('HERMES_GIT_BASH_PATH', 'User')
-  try { Invoke-OfficialScript $Uri $Arguments }
+  try {
+    $all = @('-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$ScriptPath) + $Arguments
+    Invoke-Native 'pwsh.exe' $all 'pwsh' 'install'
+  }
   finally {
     [Environment]::SetEnvironmentVariable('Path', $savedPath, 'User')
     [Environment]::SetEnvironmentVariable('HERMES_HOME', $savedHome, 'User')
@@ -308,9 +330,11 @@ try {
       # The installer stages its launchers into <HermesHome>\bin only when it manages the
       # virtual environment, and -NoVenv skips that staging entirely: without it the cell
       # has no `hermes` to run at all. <cell>\hermes\bin is already on the cell PATH.
-      # Execute the downloaded script as a file so upstream returns failing exit
+      # Reuse the verified checkout instead of downloading the same script again.
+      # Execute a private copy as a file so upstream returns failing exit
       # codes. All emitted frames remain private; deprecated ForceCommit is gone.
-      Invoke-HermesPinned "https://raw.githubusercontent.com/NousResearch/hermes-agent/$Ref/scripts/install.ps1" @('-SkipSetup','-HermesHome',$hermesHome,'-InstallDir',$hermesInstall,'-Commit',$Ref,'-Branch',$branch,'-NonInteractive','-Json','-SkipBrowser')
+      $pinnedInstaller = Copy-PinnedHermesInstaller $hermesInstall $Ref
+      Invoke-HermesPinned $pinnedInstaller @('-SkipSetup','-HermesHome',$hermesHome,'-InstallDir',$hermesInstall,'-Commit',$Ref,'-Branch',$branch,'-NonInteractive','-Json','-SkipBrowser')
       # The installer stages its launchers into <HermesHome>\bin and verifies them there, so a
       # missing launcher afterwards is an installer failure worth reporting as such instead of
       # letting the product's doctor discover it later as an uninstalled harness.

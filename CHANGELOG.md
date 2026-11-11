@@ -9,6 +9,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Install Hermes on Windows from a verified copy of its frozen Git installer,
+  avoiding a redundant raw GitHub download. Retain closed HTTP failure codes
+  for other Windows installer downloads.
+
 - Retry hosted Desktop semantic qualification up to three times after native
   interaction failures with proven cleanup, retaining each closed attempt report.
 

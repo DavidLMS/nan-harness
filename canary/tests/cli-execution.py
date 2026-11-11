@@ -133,6 +133,20 @@ class CliExecutionTests(unittest.TestCase):
                 self.assertEqual(cell.windows_install_failure(marker, "unknown"), "windows-installer-" + expected)
                 self.assertFalse(marker.exists())
 
+    def test_windows_download_diagnostic_keeps_only_closed_http_status(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            marker = Path(temporary) / 'installer-result.json'
+            for status in (403, 404, 429, 502, 503, None, 'PRIVATE_URL', [502], True, 999):
+                marker.write_text(json.dumps(dict(schemaVersion=2, status='failed',
+                    diagnostic=dict(subphase='download', httpStatus=status, url='PRIVATE_URL'))))
+                code = cell.windows_install_failure(marker, 'unknown')
+                expected = (f'windows-installer-download-http-{status}'
+                            if type(status) is int and status in cell.WINDOWS_DOWNLOAD_HTTP_STATUSES
+                            else 'windows-installer-download-failed')
+                self.assertEqual(code, expected)
+                self.assertIn(code, cell.INSTALL_FAILURE_CODES)
+                self.assertFalse(marker.exists())
+
     def test_windows_installer_preserves_only_known_upstream_stages(self):
         with tempfile.TemporaryDirectory() as temporary:
             marker = Path(temporary) / "installer-result.json"

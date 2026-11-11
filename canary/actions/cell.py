@@ -226,6 +226,8 @@ WINDOWS_INSTALL_DETAILS = frozenset({
     "marker-missing", "marker-invalid", "marker-passed", "download-failed", "native-exit",
 })
 INSTALL_FAILURE_CODES.update("windows-installer-" + code for code in WINDOWS_INSTALL_DETAILS)
+WINDOWS_DOWNLOAD_HTTP_STATUSES = frozenset({400, 401, 403, 404, 408, 410, 429, 500, 502, 503, 504})
+INSTALL_FAILURE_CODES.update(f"windows-installer-download-http-{status}" for status in WINDOWS_DOWNLOAD_HTTP_STATUSES)
 PRIVATE_DIAGNOSTIC_LIMIT = 64 * 1024
 NPM_ERROR_LINE = re.compile(r"^\s*npm\s+(?:err!|error)\s?(.*)$", re.IGNORECASE)
 # Reviewed against npm metadata for pinned openclaw@2026.9.2: its 65 direct
@@ -992,6 +994,9 @@ def windows_install_failure(marker, fallback):
             if isinstance(asset, str) and asset in WINDOWS_INSTALL_DETAILS:
                 return "windows-installer-" + asset
             if diagnostic.get("subphase") == "download":
+                status = diagnostic.get("httpStatus")
+                if type(status) is int and status in WINDOWS_DOWNLOAD_HTTP_STATUSES:
+                    return f"windows-installer-download-http-{status}"
                 return "windows-installer-download-failed"
             if diagnostic.get("processReason") == "exit-nonzero":
                 return "windows-installer-native-exit"

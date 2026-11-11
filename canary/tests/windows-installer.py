@@ -2,6 +2,9 @@
 """Static installer contracts that run without Windows or network access."""
 from pathlib import Path
 import unittest
+import shutil
+import subprocess
+import tempfile
 
 SCRIPT = (Path(__file__).resolve().parents[1] / "guest" / "install-harness.ps1").read_text(encoding="utf-8")
 
@@ -9,7 +12,7 @@ SCRIPT = (Path(__file__).resolve().parents[1] / "guest" / "install-harness.ps1")
 class WindowsInstallerTests(unittest.TestCase):
     def test_native_paths_use_exact_sources_and_private_cell_roots(self):
         for marker in (
-            "raw.githubusercontent.com/NousResearch/hermes-agent/$Ref/scripts/install.ps1",
+            "Copy-PinnedHermesInstaller $hermesInstall $Ref",
             "can1357/oh-my-pi",
             "omp-windows-x64.exe",
                 "https://code.kimi.com/kimi-code/install.ps1",
@@ -43,6 +46,49 @@ class WindowsInstallerTests(unittest.TestCase):
         self.assertIn("'launcher-missing'", SCRIPT)
         self.assertIn("https://openclaw.ai/install.ps1", SCRIPT)
         self.assertNotIn("'openclaw' { Npm", SCRIPT)
+
+    @unittest.skipUnless(shutil.which('pwsh'), 'PowerShell runtime is unavailable')
+    def test_pinned_installer_copy_rejects_modified_or_missing_source(self):
+        function = SCRIPT.split('function Copy-PinnedHermesInstaller', 1)[1].split('function Invoke-HermesPinned', 1)[0]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repository = root / 'repository'
+            repository.mkdir()
+            def git(*args):
+                return subprocess.run(['git', '-C', str(repository), *args], check=True,
+                                      capture_output=True, text=True).stdout.strip()
+            git('init')
+            source = repository / 'scripts/install.ps1'
+            source.parent.mkdir()
+            original = b"Write-Output 'official fixture'\n"
+            source.write_bytes(original)
+            git('add', '.')
+            git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                'commit', '-m', 'Fixture')
+            revision = git('rev-parse', 'HEAD')
+            script = root / 'test.ps1'
+            script.write_text("""param($Repository, $Revision, $tmp)
+$ErrorActionPreference = 'Stop'
+$stdoutLog = Join-Path $tmp 'stdout.log'
+function Set-InstallDiagnostic { }
+function Invoke-Native($File, $Arguments, $Executable, $Subphase) {
+  $output = & git @Arguments
+  if ($LASTEXITCODE -ne 0) { throw 'git failed' }
+  [IO.File]::WriteAllText($stdoutLog, ($output -join "`n"))
+}
+function Copy-PinnedHermesInstaller""" + function + """
+try { $null = Copy-PinnedHermesInstaller $Repository $Revision }
+catch { exit 7 }
+""")
+            def run():
+                return subprocess.run(['pwsh', '-NoProfile', '-File', str(script),
+                    str(repository), revision, str(root)], capture_output=True).returncode
+            self.assertEqual(run(), 0)
+            self.assertEqual((root / 'official-installer.ps1').read_bytes(), original)
+            source.write_bytes(b"Write-Output 'changed'\n")
+            self.assertEqual(run(), 7)
+            source.unlink()
+            self.assertEqual(run(), 7)
 
     def test_safe_argument_boundary_does_not_use_start_process_argumentlist(self):
         self.assertIn("ProcessStartInfo", SCRIPT)
