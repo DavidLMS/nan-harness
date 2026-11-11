@@ -39,7 +39,8 @@ record={'operation':operation,'options':options,'sources':source.read_text(),
         'metadataDirectory':str(lists.parent)}
 with open(os.environ['COMMANDS'],'a') as output: output.write(json.dumps(record)+'\\n')
 if operation=='update':
- if os.environ['FAILURE']=='update':
+ if os.environ['FAILURE']=='update' or (os.environ['FAILURE']=='primary' and 'mirrors.edge.kernel.org' not in source.read_text()):
+  (lists/'partial-index').write_text('incomplete')
   print('W: synthetic incomplete index update',file=sys.stderr)
   raise SystemExit(100)
  (lists/'verified-index').write_text('complete')
@@ -80,6 +81,17 @@ else:
         self.assertNotIn('trusted=yes', records[0]['sources'])
         self.assertNotIn('AllowInsecureRepositories', str(records))
         self.assertEqual(records[1]['arguments'][-2:], ['xvfb', 'python3-dbus'])
+
+    def test_fallback_discards_partial_indexes_and_installs_once(self):
+        result, records = self.execute('primary')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([r['operation'] for r in records], ['update', 'update', 'install'])
+        self.assertTrue(records[1]['freshLists'])
+        self.assertEqual(records[1]['options'], records[2]['options'])
+        self.assertEqual(records[1]['sources'].count('https://mirrors.edge.kernel.org/ubuntu '), 4)
+        self.assertEqual(records[1]['sources'].count('signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg'), 4)
+        self.assertIn('noble-security ', records[1]['sources'])
+        self.assertNotIn('trusted=yes', str(records))
 
     def test_incomplete_update_and_timeout_never_run_install(self):
         for failure in ('update', 'timeout'):
