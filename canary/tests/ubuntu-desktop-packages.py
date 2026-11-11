@@ -35,7 +35,8 @@ source=Path(options['Dir::Etc::sourcelist'])
 parts=Path(options['Dir::Etc::sourceparts'])
 record={'operation':operation,'options':options,'sources':source.read_text(),
         'emptySourceparts':not list(parts.iterdir()),'freshLists':not list(lists.iterdir()),
-        'errorOnAny':'--error-on=any' in args,'arguments':args}
+        'errorOnAny':'--error-on=any' in args,'arguments':args,
+        'metadataDirectory':str(lists.parent)}
 with open(os.environ['COMMANDS'],'a') as output: output.write(json.dumps(record)+'\\n')
 if operation=='update':
  if os.environ['FAILURE']=='update':
@@ -59,6 +60,9 @@ else:
                                     env=environment, capture_output=True, text=True)
             records = [json.loads(line) for line in commands.read_text().splitlines()] if commands.exists() else []
             self.assertFalse(list(root.glob('nan-desktop-apt.*')))
+            for record in records:
+                self.assertFalse(Path(record['metadataDirectory']).exists())
+                self.assertEqual(Path(record['metadataDirectory']).parent, Path('/tmp'))
             self.assertEqual((old / 'azure-index').read_text(), 'must remain unused')
             return result, records
 

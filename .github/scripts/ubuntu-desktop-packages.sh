@@ -14,7 +14,8 @@ install_desktop_packages() (
   for package in "$@"; do
     [[ "$package" =~ ^[a-z0-9][a-z0-9.+-]*$ ]] || { echo 'Invalid package name.' >&2; exit 1; }
   done
-  apt_directory=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/nan-desktop-apt.XXXXXX")
+  # Hosted runner temporary directories can have non-traversable ancestors for _apt.
+  apt_directory=$(mktemp -d /tmp/nan-desktop-apt.XXXXXX)
   trap 'sudo rm -rf -- "$apt_directory"' EXIT
   mkdir "$apt_directory/lists" "$apt_directory/sourceparts"
   # Metadata contains no credentials; the _apt sandbox must be able to traverse it.
