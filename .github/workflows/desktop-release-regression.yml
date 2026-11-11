@@ -54,7 +54,7 @@ jobs:
           RELEASE_COMMIT: ${{ inputs.tag_commit }}
         run: |
           python3 - <<'PYTHON'
-          import os, sys
+          import json, os, subprocess, sys
           from pathlib import Path
           sys.path.insert(0, 'canary/actions')
           from desktop_release import stage
@@ -65,8 +65,11 @@ jobs:
           if not validate_selection(tag, commit):
               raise SystemExit('Exact draft selection is required.')
           store = Store(os.environ['GITHUB_REPOSITORY'])
-          release = store.call(f'releases/tags/{tag}')
-          if release.get('tag_name') != tag or release.get('draft') is not True:
+          selected = subprocess.run(['gh', 'release', 'view', tag, '--repo', store.repository,
+                                     '--json', 'tagName,isDraft'], stdout=subprocess.PIPE,
+                                    stderr=subprocess.DEVNULL, text=True, check=True, timeout=180)
+          release = json.loads(selected.stdout)
+          if release.get('tagName') != tag or release.get('isDraft') is not True:
               raise SystemExit('The selected release is not the exact draft.')
           directory = Path(os.environ['RUNNER_TEMP']) / 'desktop-release-assets'
           stage(store, tag, commit, 'windows', 'x86_64', directory)

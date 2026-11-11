@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Release qualification rejects branch-built, mixed, stale and incomplete evidence."""
 import copy
+import json
 import os
 import re
 import subprocess
@@ -14,7 +15,6 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'actions'))
 import desktop_release_binding as binding
 import desktop_release
-import state
 from desktop_maintenance import APPS, TARGETS, STEPS, baseline
 from desktop_qualification import digest, envelope
 
@@ -76,15 +76,13 @@ print(json.dumps([[dict(tag_name='v0.1.30')]]))
         with tempfile.TemporaryDirectory() as temporary:
             root, calls = Path(temporary), []
             output = root / 'output'
-            release = dict(tag_name='v0.1.30', draft=True)
-            class Store:
-                def __init__(self, repository):
-                    self.repository = repository
-                def call(self, endpoint):
-                    self_endpoint = 'releases/tags/v0.1.30'
-                    if endpoint != self_endpoint:
-                        raise AssertionError('unexpected release lookup')
-                    return release
+            release = dict(tagName='v0.1.30', isDraft=True)
+            def release_view(command, **kwargs):
+                self.assertEqual(command, ['gh', 'release', 'view', 'v0.1.30', '--repo',
+                                           'owner/repo', '--json', 'tagName,isDraft'])
+                self.assertEqual(kwargs, dict(stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                             text=True, check=True, timeout=180))
+                return subprocess.CompletedProcess(command, 0, stdout=json.dumps(release))
             def stage(store, tag, commit, system, architecture, directory):
                 calls.append((store.repository, tag, commit, system, architecture))
                 self.assertFalse(directory.exists())
@@ -92,16 +90,20 @@ print(json.dumps([[dict(tag_name='v0.1.30')]]))
                 (directory / 'SHA256SUMS').write_text('synthetic attested manifest')
             env = dict(RELEASE_TAG='v0.1.30', RELEASE_COMMIT=COMMIT,
                        GITHUB_REPOSITORY='owner/repo', RUNNER_TEMP=temporary, GITHUB_OUTPUT=str(output))
-            with patch.dict(os.environ, env), patch.object(state, 'Store', Store), patch.object(desktop_release, 'stage', stage):
+            with patch.dict(os.environ, env), patch.object(subprocess, 'run', side_effect=release_view) as lookup, patch.object(desktop_release, 'stage', stage):
                 exec(compile(source, '<workflow fixture>', 'exec'), {})
                 self.assertEqual(calls, [('owner/repo', 'v0.1.30', COMMIT, 'windows', 'x86_64')])
                 self.assertEqual(output.read_text(), 'manifest_sha256=' + digest(root / 'desktop-release-assets/SHA256SUMS') + '\n')
-                for change in (dict(draft=False), dict(tag_name='v0.1.29')):
+                for change in (dict(isDraft=False), dict(tagName='v0.1.29')):
                     previous = dict(release)
                     release.update(change)
                     with self.assertRaises(SystemExit):
                         exec(compile(source, '<workflow fixture>', 'exec'), {})
                     release.clear(); release.update(previous)
+                self.assertEqual(len(calls), 1)
+                lookup.side_effect = subprocess.CalledProcessError(1, ['gh', 'release', 'view'])
+                with self.assertRaises(subprocess.CalledProcessError):
+                    exec(compile(source, '<workflow fixture>', 'exec'), {})
                 self.assertEqual(len(calls), 1)
 
     def test_release_selection_cannot_be_partial_or_malformed(self):
