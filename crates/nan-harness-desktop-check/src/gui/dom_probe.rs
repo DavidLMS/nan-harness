@@ -72,6 +72,7 @@ enum DriverError {
     ResponseObservationFailed,
     AttachmentOrActionFailed,
     ReadinessTimeout,
+    ReadinessControlChanged,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1138,6 +1139,7 @@ fn readiness_result(facts: &Facts) -> Result<(), Reason> {
     match facts.error_category {
         None => Ok(()),
         Some(DriverError::ReadinessTimeout) => Err(Reason::Timeout),
+        Some(DriverError::ReadinessControlChanged) => Err(Reason::SelectorNotMatched),
         _ => Err(Reason::IsolationUnavailable),
     }
 }
@@ -1610,6 +1612,25 @@ mod tests {
         value["errorCategory"] = json!("attachment-or-action-failed");
         let facts: Facts = serde_json::from_value(value).unwrap();
         assert_eq!(readiness_result(&facts), Err(Reason::IsolationUnavailable));
+    }
+
+    #[test]
+    fn readiness_control_change_requires_custody_and_no_submission() {
+        let mut value = base_facts();
+        value["errorCategory"] = json!("readiness-control-changed");
+        let facts: Facts = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(readiness_result(&facts), Err(Reason::SelectorNotMatched));
+        for (key, invalid) in [
+            ("endpointOwned", false),
+            ("targetVerified", false),
+            ("attached", false),
+            ("inputSubmitted", true),
+        ] {
+            let mut changed = value.clone();
+            changed[key] = json!(invalid);
+            let facts: Facts = serde_json::from_value(changed).unwrap();
+            assert_eq!(readiness_result(&facts), Err(Reason::IsolationUnavailable));
+        }
     }
 
     fn read(value: &serde_json::Value, qualification: bool) -> Result<Facts, Reason> {

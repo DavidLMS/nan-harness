@@ -829,6 +829,13 @@ identity failures and semantic mismatches stop immediately. Startup diagnostics
 remain single-attempt. Each retry creates a new checker session and fact directory;
 the frozen installation is reused and its identity rechecked.
 
+Hermes Windows also admits a blocked pre-launch retry for two closed cases:
+a model-menu timeout with retained custody, or a replaced onboarding choice
+before dispatch while the original document, cover, root and editor are still
+verified. The replaced choice is never clicked or adopted. Missing ownership
+proof and failed cleanup remain terminal; the replacement observation cannot
+admit multiple unrelated blocked probes.
+
 The `desktop-qualification-attempts-*` artifacts retain closed reductions of all
 completed attempts. Private reports and native facts remain on the disposable
 runner. The canonical qualification artifact always describes the final complete

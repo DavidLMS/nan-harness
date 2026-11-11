@@ -8,7 +8,7 @@ async function trial(scenario) {
  let clickCalls=0,snapshotCalls=0;
  let coverReads=0, actionSamples=0, frameReads=0, pillSamples=0, coverDismissed=false;
  let onboardingPresent=scenario.startsWith('onboarding-') && !scenario.startsWith('onboarding-late-');
- let pageReplacedByOwner=false;
+ let pageReplacedByOwner=false,choiceReplaced=false;
  const session=new EventEmitter(); session.send=async method=>{
    if(method!=='Page.getFrameTree')return;
    frameReads++;
@@ -18,7 +18,7 @@ async function trial(scenario) {
    if(scenario==='stalled-frame')return new Promise(()=>{});
    const url=new URL(page.url());
    return {frameTree:{frame:{id:scenario==='frame-replaced' && clock>=100?'other':'main',
-     loaderId:(scenario==='reload' && clock>=100)||(scenario==='frame-transition-reload'&&frameReads>1)?'new':'original',
+     loaderId:(scenario==='onboarding-choice-replaced-frame-loss'&&choiceReplaced)||(scenario==='reload' && clock>=100)||(scenario==='frame-transition-reload'&&frameReads>1)?'new':'original',
      url:scenario==='frame-url-mismatch'?'file:///foreign/index.html':url.href.slice(0,url.href.length-url.hash.length),
      urlFragment:scenario.startsWith('frame-transition-')&&frameReads===1?'':scenario==='frame-fragment-mismatch'?'#/foreign':scenario==='frame-fragment-invalid'?null:scenario==='frame-fragment-missing'?undefined:url.hash}}};
  };
@@ -88,17 +88,17 @@ async function trial(scenario) {
  }};
  const choice={count:async()=>(scenario.startsWith('onboarding-auto-dismiss')||scenario.startsWith('onboarding-dismiss-before-click'))&&!onboardingPresent?0:scenario==='onboarding-missing-choice'?0:scenario==='onboarding-duplicate-choice'?2:1,
    isVisible:async()=>scenario!=='onboarding-pending-visible' || clock>=300,
-   isEnabled:async()=>scenario!=='onboarding-disabled' && (scenario!=='onboarding-pending-enabled' || clock>=300),elementHandle:async()=>choiceHandle,evaluate:async()=>{if(scenario.startsWith('onboarding-dismiss-before-click')){onboardingPresent=false;return false;}return true;}};
+   isEnabled:async()=>scenario!=='onboarding-disabled' && (scenario!=='onboarding-pending-enabled' || clock>=300),elementHandle:async()=>choiceHandle,evaluate:async()=>{if(scenario.startsWith('onboarding-choice-replaced')){choiceReplaced=true;if(scenario.endsWith('owner-loss'))owner=false;return false;}if(scenario.startsWith('onboarding-dismiss-before-click')){onboardingPresent=false;return false;}return true;}};
  const cover={count:async()=>{if(scenario==='onboarding-cover-pending'&&++coverReads<3)return 0;if(scenario.startsWith('onboarding-auto-dismiss') && !coverDismissed){onboardingPresent=false;coverDismissed=true;}return onboardingPresent?(scenario==='onboarding-duplicate-cover'?2:1):0;},
    isVisible:async()=>onboardingPresent,getByRole:()=>choice,elementHandle:async()=>heldCover,
-   evaluate:async()=>scenario!=='onboarding-replaced'};
- const editor={count:async()=>1,elementHandle:async()=>editorHandle,evaluate:async()=>!(['onboarding-auto-dismiss-remount','onboarding-dismiss-before-click-remount'].includes(scenario)&&!onboardingPresent) && scenario!=='composer-changed' && !(scenario==='composer-remount' && clock>=100)};
+   evaluate:async()=>scenario!=='onboarding-replaced' && !(choiceReplaced&&scenario.endsWith('cover-loss'))};
+ const editor={count:async()=>1,elementHandle:async()=>editorHandle,evaluate:async()=>!(choiceReplaced&&scenario.endsWith('editor-loss')) && !(['onboarding-auto-dismiss-remount','onboarding-dismiss-before-click-remount'].includes(scenario)&&!onboardingPresent) && scenario!=='composer-changed' && !(scenario==='composer-remount' && clock>=100)};
  const row={...control,filter(){return this;},isVisible:async()=>true,
    evaluate:async()=>scenario!=='wrong-row-label',
    count:async()=>{rowReads++;return scenario==='wrong-row'?0:scenario==='duplicate-row'?2:
      scenario==='row-pending' && rowReads<3?0:1;}};
  const menu={filter(){return this;},count:async()=>opened?1:0,getByRole(_role,options){return options?.name?control:row;}};
- const roots={elementHandle:async()=>rootHandle,evaluate:async()=>scenario!=='root-remount' || clock<100,count:async()=>scenario==='missing-root' || scenario==='composer-pending' && clock<200?0:1,
+ const roots={elementHandle:async()=>rootHandle,evaluate:async()=>!(choiceReplaced&&scenario.endsWith('root-loss')) && (scenario!=='root-remount' || clock<100),count:async()=>scenario==='missing-root' || scenario==='composer-pending' && clock<200?0:1,
  locator:()=>scenario==='missing-editor'?{...editor,count:async()=>0}:editor,
  getByRole(_role,options){
    if(options.name==='Open model picker')return {...control,count:async()=>scenario==='picker-only'?1:0};
@@ -311,6 +311,18 @@ for(const element of [modelElement([text('Qwen3.6 27B'),meta]),modelElement([tex
  for(const scenario of ['onboarding-auto-dismiss-remount','onboarding-auto-dismiss-covered']) {
   const rejected=await trial(scenario);assert.notEqual(rejected.facts.stage,'ready');
   assert.equal(rejected.skipClicks,0);assert.equal(rejected.pillClicks,0);
+ }
+ for(const suffix of ['', '-owner-loss', '-cover-loss', '-editor-loss', '-root-loss', '-frame-loss']) {
+   const result=await trial('onboarding-choice-replaced'+suffix);
+   assert.equal(result.skipClicks,0);assert.equal(result.pillClicks,0);assert.equal(result.refreshClicks,0);
+   if(suffix==='') {
+     assert.equal(result.facts.errorCategory,'onboarding-control-replaced');
+     assert.equal(result.facts.onboardingCustodyVerified,true);
+     assert.equal(result.facts.actionObservation.sampleStatus,'control-replaced');
+   } else {
+     assert.notEqual(result.facts.errorCategory,'onboarding-control-replaced',suffix);
+     assert.equal(result.facts.onboardingCustodyVerified,undefined,suffix);
+   }
  }
  const disappeared=await trial('onboarding-dismiss-before-click');
  assert.equal(disappeared.facts.stage,'ready');assert.equal(disappeared.skipClicks,0);

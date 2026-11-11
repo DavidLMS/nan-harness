@@ -663,13 +663,22 @@ def retryable_qualification(result):
     readiness_timeout = (result.get('app') == 'hermes-desktop' and result.get('platform') == 'windows'
                          and any(item.get('mechanism') == 'hermes-windows-catalog-readiness'
                                  and item.get('errorCategory') == 'menu-timeout' for item in observations))
+    control_changes = [item for item in observations
+                       if item.get('mechanism') == 'hermes-windows-catalog-readiness'
+                       and item.get('errorCategory') == 'onboarding-control-replaced'
+                       and item.get('onboardingCustodyVerified') is True]
+    readiness_control_change = (result.get('app') == 'hermes-desktop' and result.get('platform') == 'windows'
+                                and len(control_changes) == 1
+                                and sum(probe.get('status') == 'blocked' for probe in failed) == 1)
     return (result.get('reason') == 'incomplete-acceptance'
             and result.get('appCleanup') == 'passed'
             and result.get('globalCleanup') == 'passed'
             and len(probes) == 3 and bool(failed)
             and all((probe.get('status') == 'failed' and probe.get('reason') in RETRYABLE_REASONS)
                     or (readiness_timeout and probe.get('status') == 'blocked'
-                        and probe.get('reason') == 'timeout' and probe.get('steps') == []) for probe in failed)
+                        and probe.get('reason') == 'timeout' and probe.get('steps') == [])
+                    or (readiness_control_change and probe.get('status') == 'blocked'
+                        and probe.get('reason') == 'selector-not-matched' and probe.get('steps') == []) for probe in failed)
             and all(item.get('clipboardCleanup', 'passed') == 'passed' for item in observations)
             and all(item.get('restored') is True for item in observations
                     if item.get('mechanism') == 'windows-foreground-session'))

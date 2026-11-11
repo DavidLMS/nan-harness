@@ -239,13 +239,25 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
       // replacement, loss of custody or an obscured hit point remain terminal.
       while (guard()) {
         await frame();
-        if (await locator.count()!==1 || !await locator.evaluate((element,held)=>element===held,handle)) {
+        const controlCount=await locator.count();
+        if (controlCount!==1 || !await locator.evaluate((element,held)=>element===held,handle)) {
           observation.sampleStatus='control-replaced';
           // First-run configuration can dismiss this cover while it is read.
           // No click occurred. The caller must still prove cover absence and
           // the original composer; a replacement button is never adopted.
           if(action==='onboarding' && await locator.count()===0
               && await handle.evaluate(element=>!element.isConnected))return false;
+          if(action==='onboarding' && controlCount===1) {
+            // Stop this session before dispatch. A replaced choice is a UI
+            // readiness failure only while its original enclosing custody holds.
+            await frame();
+            if(await additionalProof() && await roots.count()===1 && await editor.count()===1
+                && await roots.evaluate((element,held)=>element===held,originalRoot)
+                && await editor.evaluate((element,held)=>element===held,original) && guard()) {
+              facts.onboardingCustodyVerified=true;
+              facts.errorCategory='onboarding-control-replaced';
+            }
+          }
           throw new Error('actionability');
         }
         const current=await inspect();

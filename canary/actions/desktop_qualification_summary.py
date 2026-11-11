@@ -17,7 +17,7 @@ STATUSES = {'passed', 'failed', 'blocked', 'skipped'}
 LAUNCH_STAGES = {'not-started', 'started', 'exited-before-window', 'window-unavailable',
                  'window-acquired', 'renderer-acquired'}
 READINESS_STAGES = {'policy', 'onboarding', 'menu', 'refresh', 'catalog', 'dismiss', 'composer', 'ready'}
-READINESS_ERRORS = {'policy-rejected', 'onboarding-unavailable', 'menu-unavailable',
+READINESS_ERRORS = {'policy-rejected', 'onboarding-unavailable', 'onboarding-control-replaced', 'menu-unavailable',
                     'menu-timeout', 'refresh-uncertain', 'catalog-unavailable', 'dismiss-uncertain',
                     'composer-changed', 'composer-unavailable'}
 

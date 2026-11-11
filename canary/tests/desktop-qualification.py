@@ -76,6 +76,26 @@ class QualificationRetryTests(unittest.TestCase):
         result['probes'][0]['reason'] = 'isolation-unavailable'
         self.assertFalse(runner.retryable_qualification(result))
 
+    def test_pre_dispatch_control_change_retries_only_one_proven_blocked_probe(self):
+        result = self.result()
+        observation = dict(mechanism='hermes-windows-catalog-readiness',
+                           errorCategory='onboarding-control-replaced', onboardingCustodyVerified=True)
+        result.update(app='hermes-desktop', platform='windows', semanticObservations=[observation])
+        result['probes'][0] = dict(status='blocked', reason='selector-not-matched', steps=[])
+        self.assertTrue(runner.retryable_qualification(result))
+        for change in ({'app': 'zed-desktop'}, {'platform': 'macos'}, {'appCleanup': 'failed'},
+                       {'globalCleanup': 'failed'}, {'semanticObservations': []},
+                       {'semanticObservations': [observation, observation]},
+                       {'semanticObservations': [{**observation, 'onboardingCustodyVerified': False}]},
+                       {'semanticObservations': [observation, {'clipboardCleanup': 'failed'}]},
+                       {'semanticObservations': [observation, {'mechanism': 'windows-foreground-session', 'restored': False}]}):
+            self.assertFalse(runner.retryable_qualification({**result, **change}))
+        for probe in (dict(status='blocked', reason='isolation-unavailable', steps=[]),
+                      dict(status='blocked', reason='selector-not-matched', steps=['launched'])):
+            self.assertFalse(runner.retryable_qualification({**result, 'probes': [probe, *result['probes'][1:]]}))
+        self.assertFalse(runner.retryable_qualification({**result, 'probes': [
+            result['probes'][0], result['probes'][0], dict(status='passed')]}))
+
     def execute(self, results, statuses, error=None):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -2499,6 +2519,48 @@ class QualificationTests(unittest.TestCase):
                 path.write_text(json.dumps(changed))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'hermes-desktop')
+
+    def test_hermes_control_replacement_requires_closed_pre_dispatch_custody(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'readiness.json'
+            value = dict(schemaVersion=1, mechanism='hermes-windows-catalog-readiness', diagnosticsOnly=True,
+                         stage='onboarding', errorCategory='onboarding-control-replaced', menuOpened=False,
+                         refreshAttempted=False, catalogVerified=False, modelRowVerified=False,
+                         menuDismissed=False, composerReverified=False, guardFailure=None,
+                         onboardingSkipped=False, onboardingCustodyVerified=True,
+                         composerObservation=dict(roots=1, editors=1, expectedModelPills=1, modelPills=1,
+                                                  pickerButtons=0, switchButtons=0, readyState='complete'),
+                         actionObservation=dict(action='onboarding', sampleStatus='control-replaced', blocker='none'),
+                         onboardingObservation=dict(coverCount=1, choiceCount=1, coverVisible=True,
+                                                    choiceVisible=True, choiceEnabled=True))
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'hermes-desktop'), [value])
+            dom = dict(schemaVersion=1, mechanism='hermes-renderer-qualification',
+                       endpointOwned=True, targetVerified=True, attached=True, inputSubmitted=False,
+                       errorCategory='readiness-control-changed')
+            (root / 'dom.json').write_text(json.dumps(dom))
+            observations = q.semantic_observations(root, 'hermes-desktop', 'windows')
+            self.assertEqual(len(observations), 2)
+            self.assertIn(dom, observations)
+            retry = dict(app='hermes-desktop', platform='windows', reason='incomplete-acceptance',
+                         appCleanup='passed', globalCleanup='passed', semanticObservations=observations,
+                         probes=[dict(status='blocked', reason='selector-not-matched', steps=[]),
+                                 dict(status='passed'), dict(status='passed')])
+            self.assertTrue(runner.retryable_qualification(retry))
+            for change in ({'onboardingCustodyVerified': False}, {'onboardingCustodyVerified': 1},
+                           {'onboardingSkipped': True}, {'guardFailure': 'ownership-lost'},
+                           {'composerObservation': None}, {'stage': 'menu'}, {'menuOpened': True},
+                           {'refreshAttempted': True}, {'errorCategory': 'onboarding-unavailable'},
+                           {'actionObservation': dict(action='onboarding', sampleStatus='click-failed', blocker='none')},
+                           {'onboardingObservation': {**value['onboardingObservation'], 'choiceCount': 2}}):
+                path.write_text(json.dumps({**value, **change}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'hermes-desktop')
+            del value['onboardingCustodyVerified']
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'hermes-desktop')
 
     def test_hermes_action_diagnostics_reject_private_or_untyped_values(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -1207,7 +1207,7 @@ def bounded_json(path, limit=1024 * 1024):
     return json.loads(raw)
 
 
-DOM_ERRORS = set('unclassified invalid-request launcher-unowned endpoint-unowned target-ambiguous target-invalid composer-ambiguous send-unavailable stale-response input-mismatch response-timeout submit-action-timeout submit-action-intercepted submit-action-detached submit-action-failed response-observation-failed attachment-or-action-failed readiness-timeout'.split())
+DOM_ERRORS = set('unclassified invalid-request launcher-unowned endpoint-unowned target-ambiguous target-invalid composer-ambiguous send-unavailable stale-response input-mismatch response-timeout submit-action-timeout submit-action-intercepted submit-action-detached submit-action-failed response-observation-failed attachment-or-action-failed readiness-timeout readiness-control-changed'.split())
 NATIVE_STAGES = set('trust panel input submit response-control response-readback completed'.split())
 NATIVE_SUBSTAGES = set('trust-query trust-before trust-after panel-query layout-zoom-before layout-zoom-after new-thread-before new-thread-after panel-settle select-all-before select-all-after type-before type-after paste-before paste-after paste-settle input-sentinel-write copy-select-all-before copy-select-all-after input-copy-before input-copy-after collapse-selection-before submit-before response-control-query response-sentinel-write response-copy-before response-copy-after clipboard-read-before clipboard-read-after export-copy-before export-copy-after export-read-before export-read-after export-parse completed retry-control-query retry-visible-wait retry-element-capture retry-action-dispatch retry-before retry-after retry-title-query retry-tooltip-reset retry-tooltip-hover retry-tooltip-query retry-tooltip-clear retry-revalidate retry-label-query retry-label-parent activation-before activation-after retry-inventory-before retry-inventory-after icon-baseline-before icon-baseline-after icon-observation-before icon-observation-settle icon-observation-after icon-observation-completed'.split())
 DOM_TAGS = {'html', 'body', 'button', 'div', 'span', 'svg', 'other', 'none', 'unmeasured'}
@@ -1395,9 +1395,9 @@ def semantic_observations(directory, app, platform=None):
             fields = booleans | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'stage', 'errorCategory'}
             diagnostics = {'composerObservation', 'guardFailure'}
             optional = {'actionObservation', 'onboardingSkipped', 'onboardingObservation', 'queryFailure',
-                        'frameTransitionWaited', 'catalogState', 'clickFailure', 'menuClickRecovered', 'frameRequestRetries'}
+                        'frameTransitionWaited', 'catalogState', 'clickFailure', 'menuClickRecovered', 'frameRequestRetries', 'onboardingCustodyVerified'}
             stages = {'policy', 'onboarding', 'menu', 'refresh', 'catalog', 'dismiss', 'composer', 'ready'}
-            errors = {None, 'policy-rejected', 'onboarding-unavailable', 'menu-unavailable', 'menu-timeout', 'refresh-uncertain',
+            errors = {None, 'policy-rejected', 'onboarding-unavailable', 'onboarding-control-replaced', 'menu-unavailable', 'menu-timeout', 'refresh-uncertain',
                       'catalog-unavailable', 'dismiss-uncertain', 'composer-changed', 'composer-unavailable'}
             if (app != 'hermes-desktop' or (set(value) != fields and not (diagnostics <= set(value) and fields <= set(value) and set(value) <= fields | diagnostics | optional)) or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in stages
@@ -1517,6 +1517,19 @@ def semantic_observations(directory, app, platform=None):
                 if type(value['onboardingSkipped']) is not bool:
                     raise ValueError('invalid Hermes onboarding observation')
                 record['onboardingSkipped'] = value['onboardingSkipped']
+            if 'onboardingCustodyVerified' in value or value['errorCategory'] == 'onboarding-control-replaced':
+                if (value.get('onboardingCustodyVerified') is not True
+                        or value['errorCategory'] != 'onboarding-control-replaced' or value['stage'] != 'onboarding'
+                        or value.get('guardFailure', 'unmeasured') is not None
+                        or value.get('onboardingSkipped') is not False or any(value[key] for key in booleans)
+                        or value.get('composerObservation') != dict(roots=1, editors=1, expectedModelPills=1,
+                            modelPills=1, pickerButtons=0, switchButtons=0, readyState='complete')
+                        or value.get('actionObservation', {}).get('action') != 'onboarding'
+                        or value.get('actionObservation', {}).get('sampleStatus') != 'control-replaced'
+                        or value.get('onboardingObservation') != dict(coverCount=1, choiceCount=1,
+                            coverVisible=True, choiceVisible=True, choiceEnabled=True)):
+                    raise ValueError('invalid Hermes pre-dispatch control custody')
+                record['onboardingCustodyVerified'] = True
         elif mechanism == 'semantic-failure-policy':
             if set(value) != set('schemaVersion mechanism failureStatus recoveryAction'.split()) or type(value['failureStatus']) is not int or value['failureStatus'] not in {400, 503} or value['recoveryAction'] != 'explicit-ui-retry':
                 raise ValueError('invalid semantic failure policy')

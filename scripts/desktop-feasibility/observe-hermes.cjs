@@ -228,7 +228,9 @@ async function driveDom() {
         deadline, process.env.FEASIBILITY_HERMES_CATALOG_PROFILE);
       require('node:fs').writeFileSync(output + '.ready.json', JSON.stringify(readiness), { mode: 0o600, flag: 'wx' });
       facts.errorCategory = readiness.stage === 'ready' ? null
-        : readiness.errorCategory === 'menu-timeout' ? 'readiness-timeout' : 'attachment-or-action-failed';
+        : readiness.errorCategory === 'menu-timeout' ? 'readiness-timeout'
+        : readiness.errorCategory === 'onboarding-control-replaced' && readiness.onboardingCustodyVerified === true
+          ? 'readiness-control-changed' : 'attachment-or-action-failed';
     } else facts.errorCategory = null;
     saveFacts(); return;
   }
