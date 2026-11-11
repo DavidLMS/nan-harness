@@ -203,7 +203,7 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.select.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 75
+    timeout-minutes: 105
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -670,7 +670,7 @@ jobs:
           if [[ '${{ matrix.platform }}' == linux && '${{ matrix.app }}' == chatgpt-desktop ]]; then
             umask 077
           fi
-          bash scripts/run-desktop-check-session.sh python3 scripts/desktop-feasibility/run-qualification.py --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --source-sha "$QUALIFICATION_SOURCE_SHA" --checker "$FEASIBILITY_CHECKER" --real-nanh "$FEASIBILITY_REAL_NANH" --prepared "$RUNNER_TEMP/semantic-feasibility/prepared.json" --frozen "$RUNNER_TEMP/semantic-feasibility/frozen.json" --directory "$RUNNER_TEMP/semantic-feasibility"
+          bash scripts/run-desktop-check-session.sh python3 scripts/desktop-feasibility/run-qualification.py --attempts '${{ inputs.experiment == 'deterministic-full' && '3' || '1' }}' --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --source-sha "$QUALIFICATION_SOURCE_SHA" --checker "$FEASIBILITY_CHECKER" --real-nanh "$FEASIBILITY_REAL_NANH" --prepared "$RUNNER_TEMP/semantic-feasibility/prepared.json" --frozen "$RUNNER_TEMP/semantic-feasibility/frozen.json" --directory "$RUNNER_TEMP/semantic-feasibility"
       - name: Reduce full deterministic qualification
         if: always() && contains(fromJSON('["deterministic-full","startup-baseline"]'), inputs.experiment)
         shell: bash
@@ -697,6 +697,13 @@ jobs:
         with:
           name: desktop-installation-${{ matrix.app }}-${{ matrix.platform }}
           path: ${{ runner.temp }}/semantic-feasibility/installation-diagnostics.json
+          if-no-files-found: ignore
+          retention-days: 30
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && inputs.experiment == 'deterministic-full'
+        with:
+          name: desktop-qualification-attempts-${{ matrix.app }}-${{ matrix.platform }}
+          path: ${{ runner.temp }}/semantic-feasibility/attempts/attempt-*.json
           if-no-files-found: ignore
           retention-days: 30
       - name: Remove owned Electron namespace policy

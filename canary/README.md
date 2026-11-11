@@ -807,3 +807,19 @@ for frozen app identities, branch versus exact-release launchers, deterministic
 and live prerequisites, privacy boundaries and cleanup. Synthetic or OCR-backed
 checks do not establish semantic/no-OCR qualification. These workflows do not
 replace the current main CLI daily/release workflows or authorize feed writes.
+
+### Desktop semantic qualification retries
+
+The hosted `deterministic-full` workflow allows at most three complete ephemeral
+qualification attempts, with 5 and 10 second delays. Only native interaction
+failures (timeout, focus/window changes, occlusion, application exit, selector
+misses or unsupported actions) are eligible after validated application, global,
+clipboard and foreground cleanup. Process cleanup exceptions, invalid evidence,
+identity failures and semantic mismatches stop immediately. Startup diagnostics
+remain single-attempt. Each retry creates a new checker session and fact directory;
+the frozen installation is reused and its identity rechecked.
+
+The `desktop-qualification-attempts-*` artifacts retain closed reductions of all
+completed attempts. Private reports and native facts remain on the disposable
+runner. The canonical qualification artifact always describes the final complete
+attempt; passing probes from different attempts are never combined.

@@ -22,6 +22,71 @@ runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
 
 
+class QualificationRetryTests(unittest.TestCase):
+    def result(self):
+        return dict(outcome='blocked', reason='incomplete-acceptance', appCleanup='passed',
+                    globalCleanup='passed', semanticObservations=[], probes=[
+                        dict(status='failed', reason='action-unsupported'),
+                        dict(status='passed'), dict(status='passed')])
+
+    def test_retry_requires_proven_cleanup_and_native_failure(self):
+        result = self.result()
+        self.assertTrue(runner.retryable_qualification(result))
+        for change in ({'appCleanup': 'failed'}, {'globalCleanup': None},
+                       {'reason': 'instrumented-diagnostic'}, {'probes': []},
+                       {'semanticObservations': [{'clipboardCleanup': 'failed'}]},
+                       {'semanticObservations': [{'mechanism': 'windows-foreground-session', 'restored': False}]}):
+            self.assertFalse(runner.retryable_qualification({**result, **change}))
+        for reason in ('cleanup-failed', 'isolation-unavailable', 'input-mismatch',
+                       'response-mismatch', 'tool-mismatch', 'cancelled', 'unknown'):
+            result['probes'][0]['reason'] = reason
+            self.assertFalse(runner.retryable_qualification(result))
+
+    def execute(self, results, statuses, error=None):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            args = argparse.Namespace(attempts=3, directory=root, app='zed-desktop',
+                platform='linux', source_sha='a' * 40, real_nanh=root/'nanh',
+                checker=root/'checker', prepared=root/'prepared', frozen=root/'frozen')
+            calls = []
+            def run(options):
+                self.assertFalse((root/'report.json').exists())
+                self.assertFalse((root/'qualification-facts').exists())
+                (root/'report.json').write_text(str(len(calls)))
+                (root/'qualification-facts').mkdir()
+                calls.append(options)
+                if error:
+                    raise error
+                return statuses[len(calls)-1]
+            with patch.object(runner, 'run', side_effect=run), patch.object(
+                    runner, 'reduce_report', side_effect=results), patch.object(runner.time, 'sleep'):
+                if error:
+                    with self.assertRaises(type(error)):
+                        runner.run_attempts(args)
+                    status = None
+                else:
+                    status = runner.run_attempts(args)
+            history = [json.loads(path.read_text()) for path in sorted((root/'attempts').glob('*.json'))]
+            return status, len(calls), history
+
+    def test_success_requires_one_whole_passing_attempt_and_retains_failures(self):
+        failed = self.result()
+        passed = {**failed, 'outcome': 'passed', 'reason': None,
+                  'probes': [dict(status='passed')] * 3}
+        status, count, history = self.execute([failed, passed], [1, 0])
+        self.assertEqual((status, count), (0, 2))
+        self.assertEqual(history, [failed, passed])
+
+    def test_exhaustion_and_uncertain_cleanup_stop(self):
+        failed = self.result()
+        self.assertEqual(self.execute([failed] * 3, [1] * 3)[:2], (1, 3))
+        unsafe = {**failed, 'globalCleanup': 'failed'}
+        self.assertEqual(self.execute([unsafe], [1])[:2], (1, 1))
+        from cell import CleanupError
+        self.assertEqual(self.execute([], [], CleanupError())[:2], (None, 1))
+        self.assertEqual(self.execute([], [], ValueError('identity changed'))[:2], (None, 1))
+
+
 class CodexProjectPreflightTests(unittest.TestCase):
     def test_reducer_rejection_publishes_counts_and_never_exception_contents(self):
         with tempfile.TemporaryDirectory() as tmp:

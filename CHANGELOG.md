@@ -9,6 +9,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Retry hosted Desktop semantic qualification up to three times after native
+  interaction failures with proven cleanup, retaining each closed attempt report.
+
 - Retain closed cleanup diagnostics for hosted CLI cells without publishing
   process output or allowing retries after unproven cleanup.
 

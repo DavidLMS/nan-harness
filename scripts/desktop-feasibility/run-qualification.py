@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -18,7 +19,7 @@ from desktop_diagnostics import Capture
 from zed_retry_trace import Capture as ZedRetryTrace
 from windows_foreground_session import prepare as prepare_windows_foreground
 from codex_release import CODEX_PROJECT_RELEASES, CODEX_PROJECT_VERSIONS
-from desktop_qualification import APPS, PREPARATION_FAILURES, bounded_json, cell, digest, envelope
+from desktop_qualification import APPS, PREPARATION_FAILURES, bounded_json, cell, digest, envelope, reduce_report
 from desktop_suite import read_frozen_manifest
 
 # Start from a session allowlist, rather than attempting to enumerate every
@@ -650,19 +651,72 @@ def publish_runner_failure(args, category, preparation_reason=None):
         return
 
 
+# Only native interaction failures may get another complete ephemeral session.
+RETRYABLE_REASONS = {'timeout', 'focus-changed', 'window-changed', 'window-occluded',
+                     'application-exited', 'selector-not-matched', 'action-unsupported'}
+
+
+def retryable_qualification(result):
+    probes = result.get('probes', [])
+    failed = [probe for probe in probes if probe.get('status') != 'passed']
+    observations = result.get('semanticObservations', [])
+    return (result.get('reason') == 'incomplete-acceptance'
+            and result.get('appCleanup') == 'passed'
+            and result.get('globalCleanup') == 'passed'
+            and len(probes) == 3 and bool(failed)
+            and all(probe.get('status') == 'failed'
+                    and probe.get('reason') in RETRYABLE_REASONS for probe in failed)
+            and all(item.get('clipboardCleanup', 'passed') == 'passed' for item in observations)
+            and all(item.get('restored') is True for item in observations
+                    if item.get('mechanism') == 'windows-foreground-session'))
+
+
+def run_attempts(args):
+    if args.attempts == 1:
+        return run(args)
+    history = args.directory / 'attempts'
+    ensure_private_directory(history)
+    launcher = args.real_nanh if args.app == 'zed-desktop' else (
+        Path(os.environ['FEASIBILITY_HERMES_LAUNCHER']) if args.platform == 'windows'
+        else Path(__file__).with_name('nanh-shim.py'))
+    for attempt in range(1, args.attempts + 1):
+        # Exceptions (including process cleanup and provenance failures) never retry.
+        status = run(args)
+        result = reduce_report(app=args.app, platform=args.platform,
+            architecture='aarch64' if args.platform == 'macos' else 'x86_64',
+            source_sha=args.source_sha, model='qwen3.6', frozen=args.frozen,
+            prepared=args.prepared, checker=args.checker, launcher=launcher,
+            real_nanh=args.real_nanh, report=args.directory / 'report.json',
+            facts=args.directory / 'qualification-facts')
+        write_json(history / f'attempt-{attempt}.json', result)
+        print(f'Desktop qualification attempt {attempt}/{args.attempts}: {result["outcome"]}', flush=True)
+        if status == 0 and result['outcome'] == 'passed':
+            return 0
+        if attempt == args.attempts or not retryable_qualification(result):
+            return 1
+        # Retain private evidence locally. Only the closed reductions are uploaded.
+        archive = args.directory / f'private-attempt-{attempt}'
+        ensure_private_directory(archive)
+        for name in ('report.json', 'qualification-facts'):
+            (args.directory / name).rename(archive / name)
+        time.sleep(5 * attempt)
+    return 1
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--app', choices=APPS, required=True)
     parser.add_argument('--platform', choices=['linux', 'macos', 'windows'], required=True)
     parser.add_argument('--source-sha', required=True)
     parser.add_argument('--release-tag')
+    parser.add_argument('--attempts', type=int, choices=range(1, 4), default=1)
     for name in ('checker', 'real-nanh', 'prepared', 'frozen', 'directory'):
         parser.add_argument('--' + name, type=Path, required=True)
     args = parser.parse_args()
     for name in ('checker', 'real_nanh', 'prepared', 'frozen', 'directory'):
         setattr(args, name, getattr(args, name).absolute())
     try:
-        return run(args)
+        return run_attempts(args)
     except ValueError as error:
         categories = {
             'Windows ownership helper is missing': 'windows-ownership-helper-missing',
