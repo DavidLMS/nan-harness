@@ -8,6 +8,7 @@ the provider secret. All child output is private, even on a timeout or failure.
 import argparse
 from contextlib import contextmanager
 import datetime
+import errno
 import hashlib
 import json
 import os
@@ -848,6 +849,10 @@ def finish_stage(child, job):
                 terminate_process_tree(child.pid)
             except ProcessLookupError:
                 pass
+            except PermissionError as error:
+                if not settled_darwin_group(child, error):
+                    raise
+                print("::notice::macOS process group absence verified after permission denial.")
     except (OSError, RuntimeError, subprocess.SubprocessError) as error:
         raise CleanupError("stage process cleanup could not be verified",
                            "close-job" if job else "terminate-process-group", error) from error
@@ -856,6 +861,28 @@ def finish_stage(child, job):
             child.wait(timeout=10)
         except (subprocess.TimeoutExpired, OSError) as error:
             raise CleanupError("stage process did not exit after cleanup", "wait-child", error) from error
+
+
+def settled_darwin_group(child, error):
+    """Darwin can reject signalling an exiting zombie-only group with EPERM."""
+    if (sys.platform != "darwin" or error.errno != errno.EPERM
+            or type(child.returncode) is not int):
+        return False
+    deadline = time.monotonic() + 2
+    for _ in range(40):
+        if time.monotonic() >= deadline:
+            break
+        try:
+            # Signal zero only observes the original group. Never replay a kill,
+            # adopt descendants, or treat permission denial as proof of cleanup.
+            os.killpg(child.pid, 0)
+        except OSError as observed:
+            if observed.errno == errno.ESRCH:
+                return True
+            if observed.errno != errno.EPERM:
+                return False
+        time.sleep(min(0.05, max(0, deadline - time.monotonic())))
+    return False
 
 
 def terminate_process_tree(pid):
