@@ -258,7 +258,7 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
       try {
         beforeDispatch();
         const started=Date.now(),remaining=deadline-started;
-        const budget=Math.min(5000,Math.max(1,remaining));
+        const budget=Math.min(action==='menu'?15000:5000,Math.max(1,remaining));
         if(action==='menu')menuTiming={started,remaining,budget};
         // Frozen ModelPill only changes controlled Radix dropdown state. Keep
         // the single input independent of navigation waits; the exact menu,
@@ -292,6 +292,15 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
               if(value===undefined)delete facts[key];else facts[key]=value;
             }
           }
+        }
+        const failure=facts.clickFailure,post=failure?.postFailure;
+        if(action==='menu' && failure?.errorFamily==='timeout' && post?.status==='observed'
+            && ['documentSame','rootConnected','rootSame','controlConnected','controlSame'].every(key=>post[key]===true)
+            && guard(deadline)) {
+          // A timed-out click may already have opened the controlled menu.
+          // Observe that effect; never toggle the same control a second time.
+          if(post.menuCount===1) { facts.menuClickRecovered=true; return true; }
+          if(post.menuCount===0)facts.errorCategory='menu-timeout';
         }
         throw new Error('action');
       }

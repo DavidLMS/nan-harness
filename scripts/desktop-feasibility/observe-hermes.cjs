@@ -227,7 +227,8 @@ async function driveDom() {
       const readiness = await require('./hermes-windows-ready.cjs').run(page, session, ownedEndpoint,
         deadline, process.env.FEASIBILITY_HERMES_CATALOG_PROFILE);
       require('node:fs').writeFileSync(output + '.ready.json', JSON.stringify(readiness), { mode: 0o600, flag: 'wx' });
-      facts.errorCategory = readiness.stage === 'ready' ? null : 'attachment-or-action-failed';
+      facts.errorCategory = readiness.stage === 'ready' ? null
+        : readiness.errorCategory === 'menu-timeout' ? 'readiness-timeout' : 'attachment-or-action-failed';
     } else facts.errorCategory = null;
     saveFacts(); return;
   }

@@ -660,12 +660,16 @@ def retryable_qualification(result):
     probes = result.get('probes', [])
     failed = [probe for probe in probes if probe.get('status') != 'passed']
     observations = result.get('semanticObservations', [])
+    readiness_timeout = (result.get('app') == 'hermes-desktop' and result.get('platform') == 'windows'
+                         and any(item.get('mechanism') == 'hermes-windows-catalog-readiness'
+                                 and item.get('errorCategory') == 'menu-timeout' for item in observations))
     return (result.get('reason') == 'incomplete-acceptance'
             and result.get('appCleanup') == 'passed'
             and result.get('globalCleanup') == 'passed'
             and len(probes) == 3 and bool(failed)
-            and all(probe.get('status') == 'failed'
-                    and probe.get('reason') in RETRYABLE_REASONS for probe in failed)
+            and all((probe.get('status') == 'failed' and probe.get('reason') in RETRYABLE_REASONS)
+                    or (readiness_timeout and probe.get('status') == 'blocked'
+                        and probe.get('reason') == 'timeout' and probe.get('steps') == []) for probe in failed)
             and all(item.get('clipboardCleanup', 'passed') == 'passed' for item in observations)
             and all(item.get('restored') is True for item in observations
                     if item.get('mechanism') == 'windows-foreground-session'))

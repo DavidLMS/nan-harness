@@ -1207,7 +1207,7 @@ def bounded_json(path, limit=1024 * 1024):
     return json.loads(raw)
 
 
-DOM_ERRORS = set('unclassified invalid-request launcher-unowned endpoint-unowned target-ambiguous target-invalid composer-ambiguous send-unavailable stale-response input-mismatch response-timeout submit-action-timeout submit-action-intercepted submit-action-detached submit-action-failed response-observation-failed attachment-or-action-failed'.split())
+DOM_ERRORS = set('unclassified invalid-request launcher-unowned endpoint-unowned target-ambiguous target-invalid composer-ambiguous send-unavailable stale-response input-mismatch response-timeout submit-action-timeout submit-action-intercepted submit-action-detached submit-action-failed response-observation-failed attachment-or-action-failed readiness-timeout'.split())
 NATIVE_STAGES = set('trust panel input submit response-control response-readback completed'.split())
 NATIVE_SUBSTAGES = set('trust-query trust-before trust-after panel-query layout-zoom-before layout-zoom-after new-thread-before new-thread-after panel-settle select-all-before select-all-after type-before type-after paste-before paste-after paste-settle input-sentinel-write copy-select-all-before copy-select-all-after input-copy-before input-copy-after collapse-selection-before submit-before response-control-query response-sentinel-write response-copy-before response-copy-after clipboard-read-before clipboard-read-after export-copy-before export-copy-after export-read-before export-read-after export-parse completed retry-control-query retry-visible-wait retry-element-capture retry-action-dispatch retry-before retry-after retry-title-query retry-tooltip-reset retry-tooltip-hover retry-tooltip-query retry-tooltip-clear retry-revalidate retry-label-query retry-label-parent activation-before activation-after retry-inventory-before retry-inventory-after icon-baseline-before icon-baseline-after icon-observation-before icon-observation-settle icon-observation-after icon-observation-completed'.split())
 DOM_TAGS = {'html', 'body', 'button', 'div', 'span', 'svg', 'other', 'none', 'unmeasured'}
@@ -1395,9 +1395,9 @@ def semantic_observations(directory, app, platform=None):
             fields = booleans | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'stage', 'errorCategory'}
             diagnostics = {'composerObservation', 'guardFailure'}
             optional = {'actionObservation', 'onboardingSkipped', 'onboardingObservation', 'queryFailure',
-                        'frameTransitionWaited', 'catalogState', 'clickFailure'}
+                        'frameTransitionWaited', 'catalogState', 'clickFailure', 'menuClickRecovered'}
             stages = {'policy', 'onboarding', 'menu', 'refresh', 'catalog', 'dismiss', 'composer', 'ready'}
-            errors = {None, 'policy-rejected', 'onboarding-unavailable', 'menu-unavailable', 'refresh-uncertain',
+            errors = {None, 'policy-rejected', 'onboarding-unavailable', 'menu-unavailable', 'menu-timeout', 'refresh-uncertain',
                       'catalog-unavailable', 'dismiss-uncertain', 'composer-changed', 'composer-unavailable'}
             if (app != 'hermes-desktop' or (set(value) != fields and not (diagnostics <= set(value) and fields <= set(value) and set(value) <= fields | diagnostics | optional)) or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in stages
@@ -1460,14 +1460,15 @@ def semantic_observations(directory, app, platform=None):
                 failure = value['clickFailure']
                 timing = {'budgetMs', 'remainingBeforeMs', 'elapsedMs', 'remainingAfterMs'}
                 action = value.get('actionObservation', {})
-                if (value['stage'] != 'menu' or value['errorCategory'] != 'menu-unavailable'
-                        or action.get('action') != 'menu' or action.get('sampleStatus') != 'click-failed'
+                recovered = value.get('menuClickRecovered') is True
+                if (not recovered and (value['stage'] != 'menu' or value['errorCategory'] not in {'menu-unavailable', 'menu-timeout'}
+                        or action.get('action') != 'menu' or action.get('sampleStatus') != 'click-failed')
                         or type(failure) is not dict
                         or set(failure) != timing | {'errorFamily', 'postFailure'}
                         or type(failure['errorFamily']) is not str
                         or failure['errorFamily'] not in {'timeout', 'target-closed', 'protocol', 'error', 'other'}
                         or any(type(failure[key]) is not int or not 0 <= failure[key] <= 120000 for key in timing)
-                        or failure['budgetMs'] != min(5000, max(1, failure['remainingBeforeMs']))):
+                        or failure['budgetMs'] not in {min(limit, max(1, failure['remainingBeforeMs'])) for limit in (5000, 15000)}):
                     raise ValueError('invalid Hermes menu click failure')
                 post = failure['postFailure']
                 flags = {'documentSame', 'rootConnected', 'rootSame', 'controlConnected', 'controlSame'}
@@ -1485,7 +1486,20 @@ def semantic_observations(directory, app, platform=None):
                         raise ValueError('invalid observed Hermes post-click observation')
                 else:
                     raise ValueError('invalid Hermes post-click status')
+                if recovered or value['errorCategory'] == 'menu-timeout':
+                    if (failure['errorFamily'] != 'timeout' or post['status'] != 'observed'
+                            or not all(post[key] for key in flags)
+                            or not recovered and value.get('guardFailure') is not None
+                            or post['menuCount'] != (1 if recovered else 0)
+                            or recovered and value['menuOpened'] is not True):
+                        raise ValueError('invalid Hermes menu timeout proof')
                 record['clickFailure'] = failure
+            if 'menuClickRecovered' in value:
+                if value['menuClickRecovered'] is not True or 'clickFailure' not in value:
+                    raise ValueError('invalid Hermes recovered menu click')
+                record['menuClickRecovered'] = True
+            if value['errorCategory'] == 'menu-timeout' and 'clickFailure' not in value:
+                raise ValueError('missing Hermes menu timeout proof')
             if 'onboardingObservation' in value:
                 observation = value['onboardingObservation']
                 counts = {'coverCount', 'choiceCount'}

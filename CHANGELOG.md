@@ -9,6 +9,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Distinguish owned Hermes Windows menu readiness timeouts from isolation failures,
+  verify ambiguous menu clicks without toggling twice, and retry cleaned startup
+  timeouts in fresh sessions. Summarize failed probes and expected injected errors
+  separately in Desktop qualification jobs.
+
 - Install Hermes on Windows from a verified copy of its frozen Git installer,
   avoiding a redundant raw GitHub download. Retain closed HTTP failure codes
   for other Windows installer downloads.

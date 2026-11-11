@@ -57,8 +57,8 @@ async function trial(scenario) {
  return diagnostic?{sampleStatus:status,blocker,point:status==='owned'?sampledPoint:null}:status==='owned'?sampledPoint:null;},click:async options=>{
  clickCalls++;
  assert.equal(options.noWaitAfter,opened?undefined:true,'only the menu click skips the navigation wait');
- assert.equal(options.force,undefined);assert(options.timeout>=1&&options.timeout<=5000);
- if(menuFailure) {
+ assert.equal(options.force,undefined);assert(options.timeout>=1&&options.timeout<=(opened?5000:15000));
+ if(menuFailure && clickCalls===1) {
    const families={'menu-failure-target-closed':'TargetClosedError','menu-failure-protocol':'ProtocolError',
      'menu-failure-other':'PRIVATE_ERROR_NAME'};
    const error=new Error('PRIVATE native output, paths and prompts');
@@ -195,7 +195,7 @@ for(const element of [modelElement([text('Qwen3.6 27B'),meta]),modelElement([tex
  assert.equal(noEffect.facts.clickFailure,undefined,'returned click still needs native menu effect');
  let menuFailureFixture;
  for(const [scenario,family,postStatus] of [
-  ['menu-failure-before-open','timeout','observed'],['menu-failure-after-open','timeout','observed'],
+  ['menu-failure-before-open','timeout','observed'],
   ['menu-failure-target-closed','target-closed','unavailable'],['menu-failure-protocol','protocol','observed'],
   ['menu-failure-error','error','observed'],['menu-failure-other','other','observed'],
   ['menu-failure-observer-throw','timeout','unavailable'],['menu-failure-owner-loss','timeout','unavailable'],
@@ -205,13 +205,13 @@ for(const element of [modelElement([text('Qwen3.6 27B'),meta]),modelElement([tex
  ]) {
   const result=await trial(scenario),failure=result.facts.clickFailure;
   assert.equal(result.facts.stage,'menu',scenario);
-  assert.equal(result.facts.errorCategory,'menu-unavailable',scenario);
+  assert.equal(result.facts.errorCategory,scenario==='menu-failure-before-open'?'menu-timeout':'menu-unavailable',scenario);
   assert.equal(result.facts.actionObservation.sampleStatus,'click-failed',scenario);
   assert.equal(result.facts.guardFailure,null,'post-failure observer preserves original guard facts');
   assert.equal(result.clickCalls,1,scenario);assert.equal(result.refreshClicks,0);assert.equal(result.escapes,0);
   assert.equal(result.facts.menuOpened,false);assert.equal(result.facts.catalogVerified,false);
   assert.equal(failure.errorFamily,family,scenario);assert.equal(failure.postFailure.status,postStatus,scenario);
-  assert.equal(failure.budgetMs,Math.min(5000,Math.max(1,failure.remainingBeforeMs)),scenario);
+  assert.equal(failure.budgetMs,Math.min(15000,Math.max(1,failure.remainingBeforeMs)),scenario);
   assert.equal(failure.elapsedMs,failure.budgetMs,scenario);
   for(const key of ['remainingBeforeMs','remainingAfterMs','elapsedMs'])
    assert(Number.isInteger(failure[key])&&failure[key]>=0&&failure[key]<=120000,scenario);
@@ -227,8 +227,15 @@ for(const element of [modelElement([text('Qwen3.6 27B'),meta]),modelElement([tex
   if(scenario==='menu-failure-deadline') {
    assert.equal(failure.budgetMs,1);assert.equal(failure.remainingAfterMs,0);assert.equal(result.snapshotCalls,0);
   }
-  if(scenario==='menu-failure-after-open')menuFailureFixture=result.facts;
+  if(scenario==='menu-failure-before-open')menuFailureFixture=result.facts;
  }
+ const recoveredMenu=await trial('menu-failure-after-open');
+ assert.equal(recoveredMenu.facts.stage,'ready');
+ assert.equal(recoveredMenu.facts.menuClickRecovered,true);
+ assert.equal(recoveredMenu.pillClicks,1,'an ambiguous successful toggle is never repeated');
+ assert.equal(recoveredMenu.refreshClicks,1);
+ assert.equal(recoveredMenu.escapes,1);
+ assert.equal(recoveredMenu.facts.clickFailure.postFailure.menuCount,1);
  if(process.argv[2])fs.writeFileSync(process.argv[2],JSON.stringify(menuFailureFixture)+'\n',{mode:0o600});
  const pending=await trial('row-pending');assert.equal(pending.facts.stage,'ready');assert.equal(pending.rowReads,3);
  assert.equal(pending.refreshClicks,1);assert.equal(pending.escapes,1);

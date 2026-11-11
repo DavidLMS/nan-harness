@@ -71,6 +71,7 @@ enum DriverError {
     SubmitActionFailed,
     ResponseObservationFailed,
     AttachmentOrActionFailed,
+    ReadinessTimeout,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1097,16 +1098,7 @@ impl<'a> RendererSession<'a> {
             .map_err(|_| Reason::IsolationUnavailable)?;
         outcome?;
         if matches!(turn.action, DomAction::Ready) {
-            return if facts.endpoint.endpoint_owned
-                && facts.endpoint.target_verified
-                && facts.endpoint.attached
-                && facts.error_category.is_none()
-                && !facts.input.input_submitted
-            {
-                Ok(())
-            } else {
-                Err(Reason::IsolationUnavailable)
-            };
+            return readiness_result(&facts);
         }
         if !facts.input.input_submitted
             || facts.error_category.is_some()
@@ -1132,6 +1124,21 @@ impl<'a> RendererSession<'a> {
             }
             _ => Err(Reason::ResponseMismatch),
         }
+    }
+}
+
+fn readiness_result(facts: &Facts) -> Result<(), Reason> {
+    if !facts.endpoint.endpoint_owned
+        || !facts.endpoint.target_verified
+        || !facts.endpoint.attached
+        || facts.input.input_submitted
+    {
+        return Err(Reason::IsolationUnavailable);
+    }
+    match facts.error_category {
+        None => Ok(()),
+        Some(DriverError::ReadinessTimeout) => Err(Reason::Timeout),
+        _ => Err(Reason::IsolationUnavailable),
     }
 }
 
@@ -1581,6 +1588,28 @@ mod tests {
 
     fn base_facts() -> serde_json::Value {
         json!({"schemaVersion":1,"mechanism":"hermes-playwright-dom","endpointOwned":true,"targetVerified":true,"attached":true,"uniqueComposer":true,"inputReadback":true,"inputSubmitted":false,"responseVerified":false,"syntheticTextPresent":false,"errorCategory":null,"playwrightVersion":"1.61.0","observedRuntimeVersion":"22.0.0","inputCleared":false,"userTurnObserved":false,"assistantTurnCount":0,"uniqueSendControl":false,"canSend":false,"sendBlocker":null,"sendMechanism":"semantic-keyboard","requestFailedCount":0,"requestFailureCategory":null,"apiErrorStatus":null,"apiErrorResponseCount":0})
+    }
+
+    #[test]
+    fn readiness_timeout_requires_retained_custody_and_no_submission() {
+        let mut value = base_facts();
+        value["errorCategory"] = json!("readiness-timeout");
+        let facts: Facts = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(readiness_result(&facts), Err(Reason::Timeout));
+        for (key, invalid) in [
+            ("endpointOwned", false),
+            ("targetVerified", false),
+            ("attached", false),
+            ("inputSubmitted", true),
+        ] {
+            let mut changed = value.clone();
+            changed[key] = json!(invalid);
+            let facts: Facts = serde_json::from_value(changed).unwrap();
+            assert_eq!(readiness_result(&facts), Err(Reason::IsolationUnavailable));
+        }
+        value["errorCategory"] = json!("attachment-or-action-failed");
+        let facts: Facts = serde_json::from_value(value).unwrap();
+        assert_eq!(readiness_result(&facts), Err(Reason::IsolationUnavailable));
     }
 
     fn read(value: &serde_json::Value, qualification: bool) -> Result<Facts, Reason> {

@@ -64,6 +64,18 @@ class QualificationRetryTests(unittest.TestCase):
             result['probes'][0]['reason'] = reason
             self.assertFalse(runner.retryable_qualification(result))
 
+    def test_blocked_readiness_timeout_needs_typed_hermes_evidence_and_cleanup(self):
+        result = self.result()
+        result.update(app='hermes-desktop', platform='windows', semanticObservations=[
+            dict(mechanism='hermes-windows-catalog-readiness', errorCategory='menu-timeout')])
+        result['probes'][0] = dict(status='blocked', reason='timeout', steps=[])
+        self.assertTrue(runner.retryable_qualification(result))
+        for change in ({'app': 'zed-desktop'}, {'platform': 'linux'},
+                       {'semanticObservations': []}, {'globalCleanup': 'failed'}):
+            self.assertFalse(runner.retryable_qualification({**result, **change}))
+        result['probes'][0]['reason'] = 'isolation-unavailable'
+        self.assertFalse(runner.retryable_qualification(result))
+
     def execute(self, results, statuses, error=None):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -2557,6 +2569,31 @@ class QualificationTests(unittest.TestCase):
                 path.write_text(json.dumps(item))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'hermes-desktop')
+            timeout = copy.deepcopy(value)
+            timeout['errorCategory'] = 'menu-timeout'
+            timeout['clickFailure']['postFailure']['menuCount'] = 0
+            path.write_text(json.dumps(timeout))
+            self.assertEqual(q.semantic_observations(root, 'hermes-desktop'), [timeout])
+            for key in ('documentSame', 'rootSame', 'controlSame'):
+                invalid = copy.deepcopy(timeout)
+                invalid['clickFailure']['postFailure'][key] = False
+                path.write_text(json.dumps(invalid))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'hermes-desktop')
+            recovered = copy.deepcopy(value)
+            recovered.update(stage='ready', errorCategory=None, menuClickRecovered=True,
+                             menuOpened=True, refreshAttempted=True, catalogVerified=True,
+                             modelRowVerified=True, menuDismissed=True, composerReverified=True)
+            recovered['composerObservation'] = dict(roots=1, editors=1, expectedModelPills=1,
+                modelPills=1, pickerButtons=0, switchButtons=0, readyState='complete')
+            recovered['actionObservation'] = dict(action='refresh', sampleStatus='owned', blocker='none')
+            path.write_text(json.dumps(recovered))
+            self.assertEqual(q.semantic_observations(root, 'hermes-desktop'), [recovered])
+            invalid = copy.deepcopy(recovered)
+            invalid['clickFailure']['postFailure']['menuCount'] = 0
+            path.write_text(json.dumps(invalid))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'hermes-desktop')
             item = copy.deepcopy(value)
             item['actionObservation']['action'] = 'refresh'
             path.write_text(json.dumps(item))
