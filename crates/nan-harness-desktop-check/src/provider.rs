@@ -410,7 +410,7 @@ async fn authenticate(
     let response = next.run(request).await;
     if chat_request {
         state.record_boundary(|boundary| {
-            boundary.last_chat_status = Some(response.status().as_u16())
+            boundary.last_chat_status = Some(response.status().as_u16());
         });
     }
     response
@@ -427,14 +427,14 @@ impl Drop for ProviderGate {
 
 async fn models(State(state): State<Arc<GateState>>) -> Response {
     state.record_boundary(|boundary| {
-        boundary.models_entered = boundary.models_entered.saturating_add(1).min(4096)
+        boundary.models_entered = boundary.models_entered.saturating_add(1).min(4096);
     });
     forward(&state, None).await
 }
 
 async fn chat(State(state): State<Arc<GateState>>, Json(mut body): Json<Value>) -> Response {
     state.record_boundary(|boundary| {
-        boundary.chat_entered = boundary.chat_entered.saturating_add(1).min(4096)
+        boundary.chat_entered = boundary.chat_entered.saturating_add(1).min(4096);
     });
     #[cfg(any(target_os = "macos", test))]
     let inject_failure = {
