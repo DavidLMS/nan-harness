@@ -3,6 +3,7 @@
 import copy
 import os
 import re
+import subprocess
 import textwrap
 from unittest.mock import patch
 from pathlib import Path
@@ -22,6 +23,41 @@ COMMIT = 'b' * 40
 
 
 class ReleaseBindingTests(unittest.TestCase):
+    def test_regression_preflight_validates_without_a_manifest_anchor(self):
+        root = Path(__file__).resolve().parents[2]
+        workflow = (root / '.github/workflows/desktop-release-regression.yml').read_text()
+        step = workflow.split('      - name: Verify trusted source and release selection\n', 1)[1].split('      - id: assets', 1)[0]
+        script = textwrap.dedent(step.split('        run: |\n', 1)[1])
+        head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=root, capture_output=True,
+                              text=True, check=True).stdout.strip()
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            called = directory / 'gh-called'
+            gh = directory / 'gh'
+            gh.write_text("""#!/usr/bin/env python3
+import json, os
+from pathlib import Path
+Path(os.environ['GH_FIXTURE_CALLED']).write_text('called')
+print(json.dumps([[dict(tag_name='v0.1.30')]]))
+""")
+            gh.chmod(0o700)
+            env = {**os.environ, 'PATH': temporary + os.pathsep + os.environ['PATH'],
+                   'RELEASE_TAG': 'v0.1.30', 'RELEASE_COMMIT': COMMIT,
+                   'GITHUB_SHA': head, 'GITHUB_REPOSITORY': 'owner/repo',
+                   'GH_FIXTURE_CALLED': str(called)}
+            for key in ('RELEASE_MANIFEST_SHA', 'GH_TOKEN', 'GITHUB_TOKEN'):
+                env.pop(key, None)
+            for change, accepted in (({}, True), ({'RELEASE_TAG': 'main'}, False),
+                                     ({'RELEASE_COMMIT': 'main'}, False),
+                                     ({'GITHUB_SHA': '0' * 40}, False),
+                                     ({'RELEASE_TAG': '', 'RELEASE_COMMIT': ''}, False)):
+                with self.subTest(change=change):
+                    called.unlink(missing_ok=True)
+                    result = subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', script],
+                        cwd=root, env={**env, **change}, capture_output=True, text=True)
+                    self.assertEqual(result.returncode == 0, accepted, result.stderr)
+                    self.assertEqual(called.exists(), accepted)
+
     def test_isolated_regression_stages_attested_same_run_windows_assets(self):
         workflow = (Path(__file__).resolve().parents[2] /
                     '.github/workflows/desktop-release-regression.yml').read_text()

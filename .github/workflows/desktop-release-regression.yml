@@ -38,7 +38,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          python3 canary/actions/desktop_release_binding.py validate-selection
+          python3 - <<'PYTHON_SELECTION'
+          import os, sys
+          sys.path.insert(0, 'canary/actions')
+          from desktop_release_binding import validate_selection
+          if not validate_selection(os.environ['RELEASE_TAG'], os.environ['RELEASE_COMMIT']):
+              raise SystemExit('Exact draft selection is required.')
+          PYTHON_SELECTION
           bash .github/scripts/check-release-tag.sh "$GITHUB_REPOSITORY" "$RELEASE_TAG" unique
       - id: assets
         name: Attest the exact Windows draft binary
