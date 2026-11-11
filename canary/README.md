@@ -850,6 +850,13 @@ verified. The replaced choice is never clicked or adopted. Missing ownership
 proof and failed cleanup remain terminal; the replacement observation cannot
 admit multiple unrelated blocked probes.
 
+During recovery, a whole turn-group replacement remains a refused action. When
+the same observation proves the exact session URL and retained parent, viewport
+and surface, plus the replacement group's containment, a refusal before any
+Retry dispatch is classified as a selector failure. It can use the same bounded
+cleaned-session retry policy; no replacement control is adopted. Missing boundary
+proof and actual submitted-response mismatches remain terminal.
+
 The `desktop-qualification-attempts-*` artifacts retain closed reductions of all
 completed attempts. Private reports and native facts remain on the disposable
 runner. The canonical qualification artifact always describes the final complete

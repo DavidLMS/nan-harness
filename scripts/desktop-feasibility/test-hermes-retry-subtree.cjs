@@ -52,7 +52,7 @@ function fixture(route={}) {
   const capability=source.create({page,
     scope,owned:()=>{proofs++;return owned;},deadline:1000,claim:()=>{attempts++;if(tickets)return false;tickets++;return true;},
     publish:value=>statuses.push(value),now:()=>clock,pause:async ms=>{clock+=ms;afterPause();}});
-  return {capability,scope,original,surface,viewport,parent,group,location,doc,statuses,nodes,node,tuple,page,
+  return {source,capability,scope,original,surface,viewport,parent,group,location,doc,statuses,nodes,node,tuple,page,
     detach(){for(const n of [original.pair,original.user,original.assistant,original.alert,original.button])n.isConnected=false;
       original.pair.parentElement=null;},
     replace(){this.detach();return tuple();},loseOwner(){owned=false;},expire(){clock=1000;},
@@ -67,6 +67,28 @@ function fixture(route={}) {
   assert.equal(f.tickets(),1);assert.equal(f.queries(),2);assert.equal(f.proofs(),3);
   assert.deepEqual(f.statuses,['completed']);assert.equal((await f.capability.ensure()).state,'unchanged');
   assert.ok(!JSON.stringify(f.statuses).includes('PRIVATE'));
+  // Whole-group replacement remains a refused action, even with its session
+  // boundary retained. Only the closed refusal may classify a fresh session.
+  for (const [name, alter, expected] of [
+    ['retained', () => {}, true],
+    ['missing anchors', x => { x.scope.value.anchors = null; }, undefined],
+    ['route', x => { x.location.href += '/changed'; }, false],
+    ['document', x => { x.scope.value.document = {}; }, false],
+    ['parent', x => { x.parent.isConnected = false; }, false],
+    ['viewport', x => { x.viewport.isConnected = false; }, false],
+    ['surface', x => { x.surface.isConnected = false; }, false],
+    ['foreign group', (x, group) => { group.parentElement = x.node('foreign'); }, false],
+  ]) {
+    const x = fixture(), next = x.replace(), group = x.node('aui_message-group', x.parent);
+    next.pair.parentElement = group; x.group.isConnected = false;
+    alter(x, group);
+    const refusal = x.source.observeScopeRefusal(next.alert, x.scope.value);
+    assert.equal(refusal.observation.sessionBoundaryVerified, expected, name);
+    assert.equal(refusal.observation.heldGroupConnected, false, name);
+    assert.equal((await x.capability.ensure()).state, name === 'missing anchors' ? 'unchanged' : 'rejected', name);
+    assert.equal(x.tickets(), 0, name);
+    assert.ok(!JSON.stringify(refusal).includes('PRIVATE'), name);
+  }
   for(const hash of ['','#/','#/new','#/settings','#/one/two','#/%ZZ']) {
     const x=fixture({hash,href:'file:///synthetic/index.html'+hash});x.replace();
     assert.equal((await x.capability.ensure()).state,'unchanged','no source session '+hash);

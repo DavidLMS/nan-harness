@@ -393,6 +393,8 @@ enum RetrySubtreeSettlement {
     reason = "keep independent DOM identity observations explicit in the closed diagnostic contract"
 )]
 struct RetryScopeObservation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    session_boundary_verified: Option<bool>,
     phase: RetryScopePhase,
     document_same: bool,
     current_pair_present: bool,
@@ -410,6 +412,27 @@ struct RetryScopeObservation {
 }
 
 impl RetryScopeObservation {
+    fn replaced_group(&self) -> bool {
+        self.session_boundary_verified == Some(true)
+            && self.document_same
+            && self.current_pair_present
+            && self.current_pair_connected
+            && self.current_user_count == 1
+            && ![
+                self.current_pair_same,
+                self.current_group_same,
+                self.current_user_same,
+                self.current_alert_same,
+                self.held_group_connected,
+                self.held_pair_connected,
+                self.held_user_connected,
+                self.held_alert_connected,
+                self.held_retry_connected,
+            ]
+            .into_iter()
+            .any(|connected| connected)
+    }
+
     fn valid(&self, failure: Option<&RetryScopeFailure>) -> bool {
         let reason = if !self.document_same {
             RetryScopeFailure::DocumentChanged
@@ -426,6 +449,7 @@ impl RetryScopeObservation {
             return false;
         };
         failure == Some(&reason)
+            && (self.session_boundary_verified != Some(true) || self.document_same)
             && self.current_user_count <= 2
             && (self.current_pair_present
                 || !(self.current_pair_same
@@ -700,6 +724,10 @@ fn valid_fact_keys(
         || ["retryScopeObservation", "retrySubtreeSettlement"]
             .iter()
             .any(|key| object.get(*key).is_some_and(serde_json::Value::is_null))
+        || object
+            .get("retryScopeObservation")
+            .and_then(|value| value.get("sessionBoundaryVerified"))
+            .is_some_and(|value| !value.is_boolean())
         || !count.contains(&(object.len() - optional_scope))
         || object.keys().any(|key| {
             !DOM_FACT_KEYS.contains(&key.as_str())
@@ -1101,15 +1129,7 @@ impl<'a> RendererSession<'a> {
         if matches!(turn.action, DomAction::Ready) {
             return readiness_result(&facts);
         }
-        if !facts.input.input_submitted
-            || facts.error_category.is_some()
-            || matches!(turn.action, DomAction::Retry)
-                && !facts
-                    .qualification
-                    .retry_verified(&facts.submission.send_mechanism)
-        {
-            return Err(Reason::ResponseMismatch);
-        }
+        submission_result(&facts, turn.action, turn.purpose)?;
         match turn.purpose {
             DomPurpose::Failure
                 if facts.qualification.error_observed == Some(true)
@@ -1126,6 +1146,46 @@ impl<'a> RendererSession<'a> {
             _ => Err(Reason::ResponseMismatch),
         }
     }
+}
+
+fn submission_result(facts: &Facts, action: DomAction, purpose: DomPurpose) -> Result<(), Reason> {
+    let sample = &facts.qualification.sample;
+    // No replacement target is adopted. A complete cleaned session can retry
+    // this pre-dispatch selector loss; submitted response mismatches cannot.
+    let replaced = matches!((action, purpose), (DomAction::Retry, DomPurpose::Response))
+        && !facts.input.input_submitted
+        && facts.endpoint.endpoint_owned
+        && facts.endpoint.target_verified
+        && facts.endpoint.attached
+        && facts.input.unique_composer
+        && facts.input.input_readback
+        && facts.qualification.error_observed == Some(true)
+        && facts.qualification.retry_control == Some(true)
+        && !facts.response.response_verified
+        && !facts.response.provider_response_verified
+        && matches!(facts.error_category, Some(DriverError::SendUnavailable))
+        && sample.scope_failure == Some(RetryScopeFailure::PairChanged)
+        && matches!(
+            sample.subtree_settlement,
+            Some(RetrySubtreeSettlement::Rejected)
+        )
+        && sample
+            .scope_observation
+            .as_ref()
+            .is_some_and(RetryScopeObservation::replaced_group);
+    if replaced {
+        return Err(Reason::SelectorNotMatched);
+    }
+    if !facts.input.input_submitted
+        || facts.error_category.is_some()
+        || matches!(action, DomAction::Retry)
+            && !facts
+                .qualification
+                .retry_verified(&facts.submission.send_mechanism)
+    {
+        return Err(Reason::ResponseMismatch);
+    }
+    Ok(())
 }
 
 fn readiness_result(facts: &Facts) -> Result<(), Reason> {
@@ -1753,6 +1813,72 @@ mod tests {
             .unwrap()
             .remove("firstRunPreparation");
         assert!(read(&legacy, true).is_ok());
+    }
+
+    #[test]
+    fn retained_session_group_replacement_is_a_pre_dispatch_selector_failure() {
+        let mut value: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../canary/tests/fixtures/hermes-retry-scope.json"
+        ))
+        .unwrap();
+        value["retrySubtreeSettlement"] = json!("rejected");
+        value["retryScopeObservation"]["sessionBoundaryVerified"] = json!(true);
+        value["retryScopeObservation"]["heldGroupConnected"] = json!(false);
+        value["retryScopeObservation"]["currentGroupSame"] = json!(false);
+        let classify =
+            |facts: &Facts| submission_result(facts, DomAction::Retry, DomPurpose::Response);
+        let facts = read(&value, true).unwrap();
+        assert_eq!(classify(&facts), Err(Reason::SelectorNotMatched));
+        for (key, invalid) in [
+            ("sessionBoundaryVerified", json!(false)),
+            ("sessionBoundaryVerified", json!(null)),
+            ("heldGroupConnected", json!(true)),
+            ("heldRetryConnected", json!(true)),
+            ("heldAlertConnected", json!(true)),
+            ("heldUserConnected", json!(true)),
+            ("heldPairConnected", json!(true)),
+            ("currentUserCount", json!(2)),
+            ("documentSame", json!(false)),
+        ] {
+            let mut changed = value.clone();
+            changed["retryScopeObservation"][key] = invalid;
+            assert!(
+                read(&changed, true).is_err()
+                    || classify(&read(&changed, true).unwrap()) != Err(Reason::SelectorNotMatched),
+                "{key}"
+            );
+        }
+        let mut legacy = value.clone();
+        legacy["retryScopeObservation"]
+            .as_object_mut()
+            .unwrap()
+            .remove("sessionBoundaryVerified");
+        assert_eq!(
+            classify(&read(&legacy, true).unwrap()),
+            Err(Reason::ResponseMismatch)
+        );
+        for action in [DomAction::Ready, DomAction::Submit] {
+            assert_eq!(
+                submission_result(&facts, action, DomPurpose::Response),
+                Err(Reason::ResponseMismatch)
+            );
+        }
+        assert_eq!(
+            submission_result(&facts, DomAction::Retry, DomPurpose::Failure),
+            Err(Reason::ResponseMismatch)
+        );
+        for mutate in [
+            |f: &mut Facts| f.endpoint.endpoint_owned = false,
+            |f: &mut Facts| f.endpoint.target_verified = false,
+            |f: &mut Facts| f.endpoint.attached = false,
+            |f: &mut Facts| f.input.input_submitted = true,
+            |f: &mut Facts| f.error_category = Some(DriverError::StaleResponse),
+            |f: &mut Facts| f.qualification.sample.subtree_settlement = None,
+        ] {
+            let mut facts = read(&value, true).unwrap();
+            mutate(&mut facts);
+            assert_eq!(classify(&facts), Err(Reason::ResponseMismatch));
+        }
     }
 
     #[test]

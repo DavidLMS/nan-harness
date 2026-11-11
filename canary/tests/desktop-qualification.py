@@ -6099,6 +6099,17 @@ class HermesRetryScopeObservationTests(unittest.TestCase):
             path.write_text(json.dumps(value))
             self.assertEqual(q.semantic_observations(root, 'hermes-desktop', 'macos')[0]['firstRunPreparation'], 'absent')
 
+    def test_retained_session_boundary_is_optional_and_strictly_closed(self):
+        value = json.loads((ROOT / 'canary/tests/fixtures/hermes-retry-scope.json').read_text())['retryScopeObservation']
+        for boundary in (True, False):
+            receipt = value | {'sessionBoundaryVerified': boundary}
+            self.assertEqual(q.hermes_retry_scope_observation(receipt, 'pair-changed'), receipt)
+        for boundary in (None, 1, 'true', {}):
+            with self.assertRaises(ValueError):
+                q.hermes_retry_scope_observation(value | {'sessionBoundaryVerified': boundary}, 'pair-changed')
+        with self.assertRaises(ValueError):
+            q.hermes_retry_scope_observation(value | {'sessionBoundaryVerified': True, 'documentSame': False}, 'document-changed')
+
     def test_actual_refusal_fixture_is_closed_and_keeps_legacy_receipts_valid(self):
         value = json.loads((ROOT / 'canary/tests/fixtures/hermes-retry-scope.json').read_text())
         with tempfile.TemporaryDirectory() as root:

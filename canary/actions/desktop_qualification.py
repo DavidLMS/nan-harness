@@ -628,11 +628,15 @@ def hermes_retry_scope_observation(value, failure):
                 'heldUserConnected currentAlertSame heldAlertConnected heldRetryConnected'.split())
     phases = set('initial-reproof initial-stability sampling sampling-remount '
                  'onboarding-readiness command-readiness final-reproof final-remount'.split())
-    if (type(value) is not dict or set(value) != flags | {'phase', 'currentUserCount'}
+    if (type(value) is not dict or set(value) - {'sessionBoundaryVerified'} != flags | {'phase', 'currentUserCount'}
             or type(value['phase']) is not str or value['phase'] not in phases
             or any(type(value[key]) is not bool for key in flags)
             or type(value['currentUserCount']) is not int or not 0 <= value['currentUserCount'] <= 2):
         raise ValueError('invalid Hermes retry scope observation')
+    if ('sessionBoundaryVerified' in value
+            and (type(value['sessionBoundaryVerified']) is not bool
+                 or value['sessionBoundaryVerified'] and not value['documentSame'])):
+        raise ValueError('invalid Hermes retained session boundary')
     if not value['documentSame']:
         reason = 'document-changed'
     elif not value['currentPairSame'] or not value['currentPairConnected']:

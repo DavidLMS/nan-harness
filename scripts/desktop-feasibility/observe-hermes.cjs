@@ -425,32 +425,7 @@ async function driveDom() {
     retainedScope = async (phase, prepared = false) => {
       const admitted = prepared || await prepareScope();
       if (await errorCards.count() !== 1) return scopeFailure('error-turn');
-      const result = await errorCards.evaluate((alert, held) => {
-        const pair = alert.closest('[data-slot="aui_turn-pair"]');
-        const users = pair?.querySelectorAll('[data-role="user"]');
-        let reason = null;
-        if (alert.ownerDocument !== held.document || held.document !== document) reason = 'document-changed';
-        else if (pair !== held.pair || !pair?.isConnected) reason = 'pair-changed';
-        else if (users?.length !== 1 || users[0] !== held.user || !held.user.isConnected) reason = 'user-changed';
-        else if (alert !== held.alert || !alert.isConnected) reason = 'alert-changed';
-        let observation;
-        // This matrix describes the same refusal snapshot. It grants no input
-        // and an unavailable advisory observation must not change the verdict.
-        if (reason !== null) try {
-          observation = {
-            documentSame: alert.ownerDocument === held.document && held.document === document,
-            currentPairPresent: Boolean(pair), currentPairSame: pair === held.pair,
-            currentPairConnected: Boolean(pair?.isConnected), heldPairConnected: Boolean(held.pair.isConnected),
-            currentGroupSame: pair?.closest('[data-slot="aui_message-group"]') === held.group,
-            heldGroupConnected: Boolean(held.group.isConnected),
-            currentUserSame: users?.length === 1 && users[0] === held.user,
-            heldUserConnected: Boolean(held.user.isConnected),
-            currentAlertSame: alert === held.alert, heldAlertConnected: Boolean(held.alert.isConnected),
-            heldRetryConnected: Boolean(held.button.isConnected), currentUserCount: Math.min(users?.length ?? 0, 2),
-          };
-        } catch { /* Diagnostics cannot change the original identity refusal. */ }
-        return { reason, observation };
-      }, retryScope);
+      const result = await errorCards.evaluate(subtreeSource.observeScopeRefusal, retryScope);
       if (result.reason !== null && result.observation && !facts.retryScopeObservation) try {
         facts.retryScopeObservation = { phase, ...result.observation };
       } catch { /* Diagnostics cannot grant or prevent an action. */ }

@@ -86,6 +86,44 @@ function inspectSubtree(held) {
     ||button.disabled||button.getAttribute('aria-disabled')==='true')return {state:'invalid'};
   return {state:'ready',document,pair,group:a.group,user,alert,button,anchors:a,prompt:held.prompt};
 }
+// Closed refusal evidence only: a surviving session boundary never authorizes
+// adopting a replacement group or dispatching another action in this session.
+function observeScopeRefusal(alert, held) {
+  const pair = alert.closest('[data-slot="aui_turn-pair"]');
+  const users = pair?.querySelectorAll('[data-role="user"]');
+  let reason = null;
+  if (alert.ownerDocument !== held.document || held.document !== document) reason = 'document-changed';
+  else if (pair !== held.pair || !pair?.isConnected) reason = 'pair-changed';
+  else if (users?.length !== 1 || users[0] !== held.user || !held.user.isConnected) reason = 'user-changed';
+  else if (alert !== held.alert || !alert.isConnected) reason = 'alert-changed';
+  let observation;
+  // This matrix describes the same refusal snapshot. It grants no input
+  // and an unavailable advisory observation must not change the verdict.
+  if (reason !== null) try {
+    const a = held.anchors, group = pair?.closest('[data-slot="aui_message-group"]');
+      const boundary = a ? { sessionBoundaryVerified: Boolean(
+        held.document === document && location.href === a.href && location.hash === a.hash
+        && [a.parent, a.viewport, a.surface].every(e => e.isConnected && e.ownerDocument === document)
+        && a.viewport.contains(a.parent) && a.viewport.closest('[data-chat-surface]') === a.surface
+        && a.surface.getAttribute('data-session-anchor') === 'workspace'
+        && a.surface.getAttribute('data-composer-target') === 'main'
+        && group?.isConnected && group.ownerDocument === document && group.parentElement === a.parent
+        && group.closest('[data-slot="aui_thread-viewport"]') === a.viewport
+        && group.closest('[data-chat-surface]') === a.surface) } : {};
+      observation = { ...boundary,
+      documentSame: alert.ownerDocument === held.document && held.document === document,
+      currentPairPresent: Boolean(pair), currentPairSame: pair === held.pair,
+      currentPairConnected: Boolean(pair?.isConnected), heldPairConnected: Boolean(held.pair.isConnected),
+      currentGroupSame: pair?.closest('[data-slot="aui_message-group"]') === held.group,
+      heldGroupConnected: Boolean(held.group.isConnected),
+      currentUserSame: users?.length === 1 && users[0] === held.user,
+      heldUserConnected: Boolean(held.user.isConnected),
+      currentAlertSame: alert === held.alert, heldAlertConnected: Boolean(held.alert.isConnected),
+      heldRetryConnected: Boolean(held.button.isConnected), currentUserCount: Math.min(users?.length ?? 0, 2),
+    };
+  } catch { /* Diagnostics cannot change the original identity refusal. */ }
+  return { reason, observation };
+}
 function sameTuple(next,previous) {
   return ['document','pair','group','user','alert','button'].every(key=>next[key]===previous[key]);
 }
@@ -153,4 +191,4 @@ function create({page,scope,owned,deadline,claim,publish,now=Date.now,
     }
   }};
 }
-module.exports={policy,captureInitialScope,inspectSubtree,create};
+module.exports={policy,captureInitialScope,inspectSubtree,observeScopeRefusal,create};
