@@ -29,6 +29,28 @@ class QualificationRetryTests(unittest.TestCase):
                         dict(status='failed', reason='action-unsupported'),
                         dict(status='passed'), dict(status='passed')])
 
+    def test_workflow_command_passes_zed_session_admission(self):
+        import os
+        import shlex
+        import subprocess
+        workflow = (ROOT / '.github/workflows/desktop-automation-feasibility.yml').read_text()
+        command = next(line.strip() for line in workflow.splitlines()
+                       if line.strip().startswith('bash scripts/run-desktop-check-session.sh python3'))
+        command = command.replace("${{ matrix.app }}", 'zed-desktop').replace("${{ matrix.platform }}", 'linux')
+        command = command.replace("${{ inputs.experiment == 'deterministic-full' && '3' || '1' }}", '3')
+        with tempfile.TemporaryDirectory() as tmp:
+            bus = Path(tmp) / 'dbus-run-session'
+            bus.write_text('#!/bin/sh\nexit 42\n')
+            bus.chmod(0o700)
+            env = {**os.environ, 'PATH': tmp + os.pathsep + os.environ['PATH'],
+                   'GITHUB_ACTIONS': 'true', 'RUNNER_ENVIRONMENT': 'github-hosted',
+                   'RUNNER_OS': 'Linux', 'NANH_ZED_SCREEN_POLICY': 'height-1536',
+                   'FEASIBILITY_ZED_MAXIMIZED': '1', 'NANH_ZED_PANEL_LAYOUT': 'fixed-wide'}
+            env.pop('NANH_ZED_LAYOUT_POLICY', None)
+            env.pop('NANH_ZED_PANEL_ZOOM', None)
+            result = subprocess.run(shlex.split(command), cwd=ROOT, env=env, capture_output=True)
+            self.assertEqual(result.returncode, 42)
+
     def test_retry_requires_proven_cleanup_and_native_failure(self):
         result = self.result()
         self.assertTrue(runner.retryable_qualification(result))
