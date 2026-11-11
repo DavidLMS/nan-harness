@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 import tomllib
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 from urllib.parse import urlsplit
 
@@ -189,12 +189,17 @@ def _rate_limit_delay(headers, attempt):
     return max(1, delay) if delay <= 120 else None
 
 
-def _open_official(request, timeout):
-    """Retry throttled metadata reads at most twice, without following redirects."""
+def _read_official(request, timeout, limit):
+    """Retry only throttling/timeouts, sharing three attempts for open and body.
+
+    Every attempt starts a fresh bounded body; no partial response can become a
+    frozen version. Redirects and all metadata validation remain fail-closed.
+    """
     opener = build_opener(_NoRedirect)
     for attempt in range(3):
         try:
-            return opener.open(request, timeout=timeout)
+            with opener.open(request, timeout=timeout) as response:
+                return response.read(limit + 1)
         except HTTPError as error:
             error.close()
             if error.code != 429 or attempt == 2:
@@ -203,6 +208,11 @@ def _open_official(request, timeout):
             if delay is None:
                 raise
             time.sleep(delay)
+        except (TimeoutError, URLError) as error:
+            timed_out = isinstance(error, TimeoutError) or isinstance(error.reason, TimeoutError)
+            if not timed_out or attempt == 2:
+                raise
+            time.sleep(attempt + 1)
 
 
 def _official_json(url, timeout=20):
@@ -215,17 +225,15 @@ def _official_json(url, timeout=20):
         if token:
             headers["Authorization"] = "Bearer " + token
     request = Request(url, headers=headers)
-    with _open_official(request, timeout) as response:
-        raw = response.read(2_000_001)
-        if len(raw) > 2_000_000:
-            raise ValueError("official version metadata exceeds its size limit")
-        return json.loads(raw)
+    raw = _read_official(request, timeout, 2_000_000)
+    if len(raw) > 2_000_000:
+        raise ValueError("official version metadata exceeds its size limit")
+    return json.loads(raw)
 
 
 def _official_text(url, limit=256, timeout=20):
     request = Request(url, headers={"User-Agent": "nan-harness-cli-gate"})
-    with _open_official(request, timeout) as response:
-        raw = response.read(limit + 1)
+    raw = _read_official(request, timeout, limit)
     if len(raw) > limit:
         raise ValueError("official version marker exceeds its size limit")
     return raw.decode("ascii" if limit <= 256 else "utf-8").strip()

@@ -43,6 +43,96 @@ suite = load("cli_suite_resolution", "cli-suite.py")
 
 
 class CliResolutionTests(unittest.TestCase):
+    def test_timeout_recovery_freezes_one_complete_official_version(self):
+        for failure in (TimeoutError("private"), URLError(socket.timeout("private"))):
+            with self.subTest(failure=type(failure).__name__):
+                response = io.BytesIO(b"2.5.3")
+                opener = Mock()
+                opener.open.side_effect = [failure, response]
+                with patch.object(suite, "build_opener", return_value=opener), \
+                        patch.object(suite.time, "sleep") as sleep:
+                    resolved, unresolved = suite.resolve_manifest(
+                        ["kimi-code"], "linux", "aarch64", "qwen3.6")
+                    self.assertEqual(unresolved, [])
+                    self.assertEqual(resolved[0].version, "2.5.3")
+                    with tempfile.TemporaryDirectory() as directory:
+                        manifest = Path(directory) / "versions.json"
+                        manifest.write_text(json.dumps({"harnesses": [resolved[0].as_dict()]}))
+                        opener.open.side_effect = AssertionError("frozen versions cannot resolve again")
+                        frozen = suite.read_frozen_manifest(
+                            manifest, ["kimi-code"], "linux", "aarch64", "qwen3.6")
+                        self.assertEqual(frozen[0].version, "2.5.3")
+                self.assertTrue(response.closed)
+                self.assertEqual(opener.open.call_count, 2)
+                requests = [call.args[0] for call in opener.open.call_args_list]
+                self.assertIs(requests[0], requests[1])
+                self.assertEqual(requests[0].full_url, "https://cdn.kimi.com/kimi-code/latest")
+                sleep.assert_called_once_with(1)
+
+    def test_body_timeout_discards_partial_bytes_and_closes_response(self):
+        class PartialBody(io.BytesIO):
+            def read(self, limit):
+                super().read(2)
+                raise socket.timeout("private partial body")
+        for fetch, complete, expected in (
+            (suite._official_text, b"2.5.3", "2.5.3"),
+            (suite._official_json, b'{"version":"2.5.3"}', {"version": "2.5.3"}),
+        ):
+            partial, response = PartialBody(b"99private"), io.BytesIO(complete)
+            opener = Mock()
+            opener.open.side_effect = [partial, response]
+            with patch.object(suite, "build_opener", return_value=opener), \
+                    patch.object(suite.time, "sleep") as sleep:
+                self.assertEqual(fetch("https://example.com/version"), expected)
+            self.assertTrue(partial.closed and response.closed)
+            self.assertEqual(opener.open.call_count, 2)
+            sleep.assert_called_once_with(1)
+
+    def test_timeout_exhaustion_and_throttling_share_one_attempt_budget(self):
+        for errors in (
+            [TimeoutError("private") for _ in range(3)],
+            [TimeoutError("private"), HTTPError("https://example.com", 429, "private",
+                                               {"Retry-After": "2"}, None), TimeoutError("private")],
+        ):
+            opener = Mock()
+            opener.open.side_effect = errors
+            with patch.object(suite, "build_opener", return_value=opener), \
+                    patch.object(suite.time, "sleep") as sleep:
+                resolved, unresolved = suite.resolve_manifest(
+                    ["kimi-code"], "linux", "aarch64", "qwen3.6")
+            self.assertEqual(resolved, [])
+            self.assertEqual(unresolved[0].diagnostic, {"category": "timeout"})
+            self.assertEqual(opener.open.call_count, 3)
+            self.assertEqual([call.args[0] for call in sleep.call_args_list], [1, 2])
+            self.assertNotIn("private", json.dumps(unresolved[0].as_dict()))
+
+    def test_non_timeout_transport_and_invalid_metadata_do_not_retry(self):
+        for error in (URLError(socket.gaierror("private")), URLError(ssl.SSLError("private")),
+                      ConnectionResetError("private")):
+            opener = Mock()
+            opener.open.side_effect = error
+            with patch.object(suite, "build_opener", return_value=opener), \
+                    patch.object(suite.time, "sleep") as sleep:
+                with self.assertRaises(OSError):
+                    suite._official_text("https://example.com/version")
+            self.assertEqual(opener.open.call_count, 1)
+            sleep.assert_not_called()
+        for harness, body, category in (("kimi-code", b"bad", "invalid-version"),
+                                        ("codex", b"{bad", "invalid-json"),
+                                        ("kimi-code", b"9" * 257, "unknown")):
+            response = io.BytesIO(body)
+            opener = Mock()
+            opener.open.return_value = response
+            with patch.object(suite, "build_opener", return_value=opener), \
+                    patch.object(suite.time, "sleep") as sleep:
+                resolved, unresolved = suite.resolve_manifest(
+                    [harness], "linux", "aarch64", "qwen3.6")
+            self.assertEqual(resolved, [])
+            self.assertEqual(unresolved[0].diagnostic, {"category": category})
+            self.assertEqual(opener.open.call_count, 1)
+            self.assertTrue(response.closed)
+            sleep.assert_not_called()
+
     def test_hermes_resolves_tag_version_when_packaging_is_a_placeholder(self):
         commit = "a" * 40
         fetch = Mock(side_effect=[{"tag_name": "v0.21.6"}, {"sha": commit}])
