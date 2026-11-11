@@ -35,7 +35,7 @@ class QualificationRetryTests(unittest.TestCase):
         import subprocess
         workflow = (ROOT / '.github/workflows/desktop-automation-feasibility.yml').read_text()
         command = next(line.strip() for line in workflow.splitlines()
-                       if line.strip().startswith('bash scripts/run-desktop-check-session.sh python3'))
+                       if line.strip().startswith('bash scripts/run-desktop-check-session.sh python3 scripts/desktop-feasibility/run-qualification.py'))
         command = command.replace("${{ matrix.app }}", 'zed-desktop').replace("${{ matrix.platform }}", 'linux')
         command = command.replace("${{ inputs.experiment == 'deterministic-full' && '3' || '1' }}", '3')
         with tempfile.TemporaryDirectory() as tmp:
