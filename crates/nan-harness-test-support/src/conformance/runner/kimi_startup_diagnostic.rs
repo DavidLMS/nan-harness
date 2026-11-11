@@ -23,6 +23,23 @@ const RUNTIME_NAMES: &[&str] = &[
     "USERNAME",
 ];
 
+pub(super) fn configure(
+    mut command: TerminalCommand,
+    runner: &PublishedConformanceRunner,
+    workspace: &Path,
+) -> std::io::Result<TerminalCommand> {
+    if runner.harness != HarnessKind::KimiCode {
+        return Ok(command);
+    }
+    if runner.kimi_runtime_environment {
+        command = restore_runtime_environment(command);
+    }
+    if runner.kimi_canonical_helper {
+        command = stage_canonical_helper(command, &runner.nan_harness, workspace)?;
+    }
+    Ok(command)
+}
+
 pub(super) fn restore_runtime_environment(mut command: TerminalCommand) -> TerminalCommand {
     for name in RUNTIME_NAMES {
         if let Some((_, value)) =
@@ -32,6 +49,31 @@ pub(super) fn restore_runtime_environment(mut command: TerminalCommand) -> Termi
         }
     }
     command
+}
+
+pub(super) fn stage_canonical_helper(
+    command: TerminalCommand,
+    binary: &Path,
+    workspace: &Path,
+) -> std::io::Result<TerminalCommand> {
+    let directory = workspace.join("canonical-helper");
+    std::fs::create_dir(&directory)?;
+    let helper = directory.join(if cfg!(windows) {
+        "nan-harness.exe"
+    } else {
+        "nan-harness"
+    });
+    std::fs::copy(binary, &helper)?;
+    if std::fs::read(binary)? != std::fs::read(&helper)? {
+        return Err(std::io::Error::other("canonical helper identity differs"));
+    }
+    let paths = std::iter::once(directory)
+        .chain(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        ))
+        .collect::<Vec<_>>();
+    let path = std::env::join_paths(paths).map_err(std::io::Error::other)?;
+    Ok(command.env("PATH", path))
 }
 
 // Fixed observations only: never expose a matched line, exception message or path.
@@ -121,7 +163,7 @@ async fn direct(executable: &Path, argument: &str) -> Value {
     })
 }
 
-async fn sentinel(binary: &Path, runtime_environment: bool) -> Value {
+async fn sentinel(binary: &Path, runtime_environment: bool, canonical_helper: bool) -> Value {
     let workspace = ConformanceWorkspace::create().expect("private workspace required");
     let provider = ScriptedProvider::start(ProviderScenario::inventory(SENTINEL_MARKER))
         .await
@@ -129,6 +171,7 @@ async fn sentinel(binary: &Path, runtime_environment: bool) -> Value {
     let registration = *harness_registration(HarnessKind::KimiCode).expect("registered Kimi");
     let mut runner = PublishedConformanceRunner::new(binary, HarnessKind::KimiCode);
     runner.kimi_runtime_environment = runtime_environment;
+    runner.kimi_canonical_helper = canonical_helper;
     let output = runner
         .run_process(
             registration,
@@ -143,7 +186,7 @@ async fn sentinel(binary: &Path, runtime_environment: bool) -> Value {
     let bounded = provider.recording_bounded();
     let shutdown = provider.shutdown().await.is_ok();
     json!({
-        "case": if runtime_environment { "sentinel-runtime-environment" } else { "sentinel-cleared-environment" },
+        "case": if canonical_helper { "sentinel-canonical-helper" } else if runtime_environment { "sentinel-runtime-environment" } else { "sentinel-cleared-environment" },
         "process": capture(output.as_ref().ok()),
         "provider": {"requestCount": request_count, "completed": completed,
             "bounded": bounded, "shutdown": shutdown},
@@ -186,8 +229,10 @@ async fn native_kimi_startup_boundaries() {
         );
     }
     // Preplanned paired fresh sessions, with no credentials restored from the host.
-    for runtime_environment in [false, true, false, true] {
-        records.push(sentinel(&binary, runtime_environment).await);
+    for (runtime_environment, canonical_helper) in
+        [(false, false), (true, false), (false, true), (false, true)]
+    {
+        records.push(sentinel(&binary, runtime_environment, canonical_helper).await);
         checkpoint(&destination, &records);
         assert!(
             records.last().is_some_and(clean_process),
@@ -244,5 +289,31 @@ fn error_signals_export_only_fixed_codes() {
         !serde_json::to_string(&signals)
             .expect("codes serialize")
             .contains("private")
+    );
+}
+
+#[test]
+fn canonical_helper_keeps_exact_bytes_and_refuses_existing_directory() {
+    let workspace = tempfile::tempdir().expect("workspace");
+    let binary = workspace.path().join("selected-release");
+    std::fs::write(&binary, b"selected-release-bytes").expect("fixture");
+    let command = || TerminalCommand::new(&binary, workspace.path());
+    stage_canonical_helper(command(), &binary, workspace.path()).expect("stage exact helper");
+    let helper = workspace
+        .path()
+        .join("canonical-helper")
+        .join(if cfg!(windows) {
+            "nan-harness.exe"
+        } else {
+            "nan-harness"
+        });
+    assert_eq!(
+        std::fs::read(&helper).expect("helper"),
+        b"selected-release-bytes"
+    );
+    assert!(stage_canonical_helper(command(), &binary, workspace.path()).is_err());
+    assert_eq!(
+        std::fs::read(&helper).expect("preserved helper"),
+        b"selected-release-bytes"
     );
 }

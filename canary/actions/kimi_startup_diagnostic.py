@@ -13,8 +13,8 @@ ROOT = Path(__file__).resolve().parents[2]
 TEST = 'conformance::runner::kimi_startup_diagnostic::native_kimi_startup_boundaries'
 
 
-CASES = ['fresh-version', 'fresh-help'] + [
-    'sentinel-cleared-environment', 'sentinel-runtime-environment'] * 2
+CASES = ['fresh-version', 'fresh-help', 'sentinel-cleared-environment',
+         'sentinel-runtime-environment', 'sentinel-canonical-helper', 'sentinel-canonical-helper']
 
 ERROR_SIGNALS = frozenset((
     'not-found', 'permission', 'operation-permission', 'bad-descriptor', 'invalid-argument',

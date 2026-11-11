@@ -50,6 +50,8 @@ pub struct PublishedConformanceRunner {
     mimo_inventory_format: Option<inventory_diagnostic::MimoFormat>,
     #[cfg(test)]
     kimi_runtime_environment: bool,
+    #[cfg(test)]
+    kimi_canonical_helper: bool,
 }
 
 impl PublishedConformanceRunner {
@@ -70,6 +72,8 @@ impl PublishedConformanceRunner {
             mimo_inventory_format: None,
             #[cfg(test)]
             kimi_runtime_environment: false,
+            #[cfg(test)]
+            kimi_canonical_helper: false,
         }
     }
 
@@ -279,8 +283,9 @@ impl PublishedConformanceRunner {
             }
         }
         #[cfg(test)]
-        if self.kimi_runtime_environment && registration.kind == HarnessKind::KimiCode {
-            command = kimi_startup_diagnostic::restore_runtime_environment(command);
+        {
+            command = kimi_startup_diagnostic::configure(command, self, workspace.path())
+                .map_err(ConformanceError::Environment)?;
         }
         command.run().await.map_err(|error| {
             use crate::terminal::TerminalError;
