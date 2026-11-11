@@ -475,6 +475,52 @@ class Transport(unittest.TestCase):
         self.assertFalse(matches(41, 99, unbounded))
         self.assertEqual(len(calls), 16)
 
+    def test_readonly_settling_precedes_one_press_and_never_replays_uncertain_input(self):
+        request = json.dumps(dict(pid=20, window=40, x=100, y=200,
+                                 bus=':1.2', path='/org/a11y/atspi/accessible/3')).encode()
+        for uncertain in (False, True):
+            events, reads, initial_reads = [], [], []
+            class Cursor:
+                def __init__(self, *args): pass
+                def close(self): pass
+            def coordinate(request, active, geometry, facts=None, return_bounds=False, hit_point=None):
+                if not return_bounds and hit_point is None:
+                    self.assertNotIn('mousemove', events)
+                    initial_reads.append(True)
+                    if len(initial_reads) <= 3:
+                        raise module['RetryHitFailure']('accessible-query-unavailable')
+                if hit_point is not None:
+                    self.assertNotIn('click', events)
+                    reads.append(hit_point)
+                    if len(reads) <= 3:
+                        raise module['RetryHitFailure']('accessible-query-unavailable')
+                    facts.update(enabled=True, sensitive=True, defunct=False)
+                return (80, 190, 40, 20) if return_bounds else (100, 200)
+            def execute(args, **kwargs):
+                events.append(args[1])
+                if args[1] == 'click' and uncertain:
+                    raise subprocess.TimeoutExpired('fixed-helper', 2)
+                output = (b'X=0\nY=0\nSCREEN=0\nWINDOW=40\nWIDTH=1280\nHEIGHT=800'
+                          if args[1] == 'getwindowgeometry' else
+                          b'X=100\nY=200\nSCREEN=0\nWINDOW=40'
+                          if args[1] == 'getmouselocation' else
+                          b'40' if args[1] == 'getactivewindow' else b'20')
+                return subprocess.CompletedProcess(args, 0, stdout=output)
+            env = dict(NANH_ZED_RETRY_HIT_POLICY='accessibility', NANH_ZED_CURSOR_HIT='1',
+                       GITHUB_ACTIONS='true', RUNNER_ENVIRONMENT='github-hosted', RUNNER_OS='Linux')
+            with patch.dict(os.environ, env, clear=True), patch.object(sys, 'platform', 'linux'), \
+                 patch('runpy.run_path', return_value={'PointerShape': Cursor}), \
+                 patch('subprocess.run', side_effect=execute), \
+                 patch.dict(module['main'].__globals__, normalized_retry_point=coordinate,
+                            pointer_child=lambda *args: 'client'):
+                self.assertEqual(self.call('retry-click', request), 16 if uncertain else 0)
+            self.assertEqual(len(initial_reads), 4)
+            self.assertGreaterEqual(len(reads), 7)
+            self.assertEqual(set(reads), {(100, 200)})
+            self.assertEqual(events.count('mousemove'), 1)
+            self.assertEqual(events.count('click'), 1)
+            self.assertEqual(events[-1], 'click')
+
     def test_pointer_failure_stage_never_replays_input(self):
         request = json.dumps(dict(pid=20, window=40, x=100, y=200, bus=':1.2', path='/org/a11y/atspi/accessible/3')).encode()
         for failed, code in [('getactivewindow', 13), ('mousemove', 14), ('click', 16)]:
@@ -598,6 +644,49 @@ class AccessibilityIdentity(unittest.TestCase):
             self.assertIs(facts['maximizedVertical'], expected)
             self.assertEqual(run.call_args.args[0], ['/usr/bin/xprop', '-id', '40', '_NET_WM_STATE'])
             self.assertNotIn('PRIVATE', json.dumps(facts))
+
+    def test_initial_read_settles_only_typed_unavailability_under_same_scope(self):
+        read = module['settle_accessibility_read']
+        events, clock = [], [0]
+        def query():
+            events.append('read')
+            if events.count('read') < 4:
+                raise module['RetryHitFailure']('accessible-query-unavailable')
+            return (100, 200)
+        def scope():
+            events.append('scope'); return True
+        def pause(seconds):
+            self.assertGreaterEqual(seconds, .05)
+            clock[0] += seconds
+        with patch('time.monotonic', lambda: clock[0]), patch('time.sleep', pause):
+            self.assertEqual(read(query, scope, 4), (100, 200))
+        self.assertEqual(events, ['scope', 'read', 'scope'] * 4)
+        self.assertLess(clock[0], 4)
+        for error in (ValueError('owner changed'), module['RetryHitFailure']('accessible-hit-mismatch')):
+            with patch('time.sleep') as sleep, self.assertRaises(ValueError):
+                read(lambda: (_ for _ in ()).throw(error), lambda: True, module['time'].monotonic() + 1)
+            sleep.assert_not_called()
+
+    def test_initial_read_lost_custody_expiry_and_limit_never_supply_coordinates(self):
+        read = module['settle_accessibility_read']
+        calls, clock = [], [0]
+        def query():
+            calls.append(True)
+            raise module['RetryHitFailure']('accessible-query-unavailable')
+        guards = iter([True, False])
+        with self.assertRaises(ValueError):
+            read(query, lambda: next(guards), module['time'].monotonic() + 1)
+        self.assertEqual(len(calls), 1)
+        def pause(seconds): clock[0] += seconds
+        with patch('time.monotonic', lambda: clock[0]), patch('time.sleep', pause), self.assertRaises(module['RetryHitFailure']) as caught:
+            read(query, lambda: True, .1)
+        self.assertEqual(caught.exception.category, 'deadline')
+        self.assertLessEqual(clock[0], .1)
+        calls.clear()
+        with patch('time.monotonic', return_value=0), patch('time.sleep'), self.assertRaises(module['RetryHitFailure']) as caught:
+            read(query, lambda: True, 4)
+        self.assertEqual(len(calls), 128)
+        self.assertEqual(caught.exception.category, 'accessible-query-unavailable')
 
     def test_changed_retry_identity_or_failed_queries_never_supply_coordinates(self):
         class QueryFailure(Exception):

@@ -67,8 +67,8 @@ print(json.dumps([[dict(tag_name='v0.1.30')]]))
         self.assertIn('ref: ${{ github.sha }}', workflow)
         self.assertIn('persist-credentials: false', workflow)
         self.assertIn('release_manifest_sha256: ${{ needs.prepare.outputs.manifest_sha256 }}', workflow)
-        self.assertIn('app: hermes-desktop', workflow)
-        self.assertIn('platform: windows', workflow)
+        self.assertIn("app: ${{ inputs.cell == 'zed-linux' && 'zed-desktop' || 'hermes-desktop' }}", workflow)
+        self.assertIn("platform: ${{ inputs.cell == 'zed-linux' && 'linux' || 'windows' }}", workflow)
         self.assertIn('experiment: deterministic-full', workflow)
         self.assertNotIn('release-publication', workflow)
         self.assertNotIn('run-id:', workflow)
@@ -101,10 +101,20 @@ print(json.dumps([[dict(tag_name='v0.1.30')]]))
                         exec(compile(source, '<workflow fixture>', 'exec'), {})
                     release.clear(); release.update(previous)
                 self.assertEqual(len(calls), 1)
+                import shutil
+                shutil.rmtree(root / 'desktop-release-assets')
+                with patch.dict(os.environ, REGRESSION_CELL='zed-linux'):
+                    exec(compile(source, '<workflow fixture>', 'exec'), {})
+                self.assertEqual(calls[-1][3:], ('linux', 'x86_64'))
+                with patch.dict(os.environ, REGRESSION_CELL='unsupported'):
+                    with self.assertRaises(SystemExit):
+                        exec(compile(source, '<workflow fixture>', 'exec'), {})
+
                 lookup.side_effect = subprocess.CalledProcessError(1, ['gh', 'release', 'view'])
                 with self.assertRaises(subprocess.CalledProcessError):
                     exec(compile(source, '<workflow fixture>', 'exec'), {})
-                self.assertEqual(len(calls), 1)
+                self.assertEqual(len(calls), 2)
+
 
     def test_release_selection_cannot_be_partial_or_malformed(self):
         self.assertFalse(binding.validate_selection('', ''))

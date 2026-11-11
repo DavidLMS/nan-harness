@@ -9,6 +9,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Let transient pre-click Zed Linux accessibility queries settle within their
+  existing deadline and retain the same native Retry identity across layout movement.
+
 - Distinguish owned Hermes Windows menu readiness timeouts from isolation failures,
   verify ambiguous menu clicks without toggling twice, and retry cleaned startup
   timeouts in fresh sessions. Summarize failed probes and expected injected errors

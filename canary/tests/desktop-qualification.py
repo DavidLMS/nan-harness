@@ -2589,6 +2589,13 @@ class QualificationTests(unittest.TestCase):
             recovered['actionObservation'] = dict(action='refresh', sampleStatus='owned', blocker='none')
             path.write_text(json.dumps(recovered))
             self.assertEqual(q.semantic_observations(root, 'hermes-desktop'), [recovered])
+            recovered['frameRequestRetries'] = 2
+            path.write_text(json.dumps(recovered))
+            self.assertEqual(q.semantic_observations(root, 'hermes-desktop'), [recovered])
+            for count in (True, 0, 65, 'PRIVATE'):
+                path.write_text(json.dumps({**recovered, 'frameRequestRetries': count}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'hermes-desktop')
             invalid = copy.deepcopy(recovered)
             invalid['clickFailure']['postFailure']['menuCount'] = 0
             path.write_text(json.dumps(invalid))
@@ -4798,8 +4805,8 @@ class HermesReadinessTests(unittest.TestCase):
             sampled = {**classified, 'pointerChecks': 9, 'pointerPositionMatches': 9, 'pointerChildMatches': 9}
             path.write_text(json.dumps({**value, 'cursorSelection': sampled}))
             self.assertEqual(q.semantic_observations(tmp, 'zed-desktop')[0]['cursorSelection'], sampled)
-            boundary = {**sampled, 'guardBeforeVerified': 58, 'guardAfterVerified': 58,
-                        'accessibleChecks': 58, 'accessibleExactMatches': 58,
+            boundary = {**sampled, 'guardBeforeVerified': 128, 'guardAfterVerified': 58,
+                        'accessibleChecks': 128, 'accessibleExactMatches': 58,
                         'pointerChecks': 45, 'pointerPositionMatches': 45, 'pointerChildMatches': 45,
                         'cursorChecks': 46,
                         'cursorClasses': dict(hand=0, arrow=46, notallowed=0, transparent=0, unknown=0)}

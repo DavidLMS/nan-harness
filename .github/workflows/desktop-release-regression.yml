@@ -3,6 +3,11 @@ name: Isolated Desktop release regression
 on:
   workflow_dispatch:
     inputs:
+      cell:
+        description: Exact native regression cell
+        type: choice
+        options: [hermes-windows, zed-linux]
+        default: hermes-windows
       tag:
         description: Exact draft release tag
         required: true
@@ -47,11 +52,12 @@ jobs:
           PYTHON_SELECTION
           bash .github/scripts/check-release-tag.sh "$GITHUB_REPOSITORY" "$RELEASE_TAG" unique
       - id: assets
-        name: Attest the exact Windows draft binary
+        name: Attest the exact native draft binary
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
           RELEASE_COMMIT: ${{ inputs.tag_commit }}
+          REGRESSION_CELL: ${{ inputs.cell }}
         run: |
           python3 - <<'PYTHON'
           import json, os, subprocess, sys
@@ -72,7 +78,11 @@ jobs:
           if release.get('tagName') != tag or release.get('isDraft') is not True:
               raise SystemExit('The selected release is not the exact draft.')
           directory = Path(os.environ['RUNNER_TEMP']) / 'desktop-release-assets'
-          stage(store, tag, commit, 'windows', 'x86_64', directory)
+          selected = os.environ.get('REGRESSION_CELL', 'hermes-windows')
+          if selected not in {'hermes-windows', 'zed-linux'}:
+              raise SystemExit('Unsupported regression cell.')
+          system = 'linux' if selected == 'zed-linux' else 'windows'
+          stage(store, tag, commit, system, 'x86_64', directory)
           with Path(os.environ['GITHUB_OUTPUT']).open('a') as output:
               output.write('manifest_sha256=' + digest(directory / 'SHA256SUMS') + '\n')
           PYTHON
@@ -83,18 +93,18 @@ jobs:
           if-no-files-found: error
           path: |
             ${{ runner.temp }}/desktop-release-assets/SHA256SUMS
-            ${{ runner.temp }}/desktop-release-assets/nan-harness-x86_64-pc-windows-msvc.exe
+            ${{ runner.temp }}/desktop-release-assets/nan-harness-*
           retention-days: 7
 
   qualify:
-    name: Qualify isolated Hermes Desktop Windows
+    name: Qualify isolated native Desktop cell
     needs: prepare
     uses: ./.github/workflows/desktop-automation-feasibility.yml
     with:
       release_tag: ${{ inputs.tag }}
       release_commit: ${{ inputs.tag_commit }}
       release_manifest_sha256: ${{ needs.prepare.outputs.manifest_sha256 }}
-      app: hermes-desktop
-      platform: windows
+      app: ${{ inputs.cell == 'zed-linux' && 'zed-desktop' || 'hermes-desktop' }}
+      platform: ${{ inputs.cell == 'zed-linux' && 'linux' || 'windows' }}
       native_only: true
       experiment: deterministic-full

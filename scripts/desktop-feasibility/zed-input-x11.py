@@ -416,13 +416,37 @@ def normalized_retry_point(request, active, geometry, facts=None, return_bounds=
                 raise ValueError('retry root unavailable')
         return (geometry[0] + window[0], geometry[1] + window[1], window[2], window[3]) if return_bounds else point
     except dbus.DBusException:
-        if hit_point is not None:
-            raise RetryHitFailure('accessible-query-unavailable') from None
-        raise ValueError('accessibility query unavailable') from None
+        raise RetryHitFailure('accessible-query-unavailable') from None
     finally:
         if bus is not None:
             bus.close()
 
+
+
+def settle_accessibility_read(query, scope, deadline):
+    """Initialize retained coordinates by reads only, before any pointer motion."""
+    for _ in range(128):
+        if time.monotonic() >= deadline:
+            raise RetryHitFailure('deadline')
+        if not scope():
+            raise RetryHitFailure('identity-rejected')
+        try:
+            value = query()
+        except RetryHitFailure as error:
+            if error.category != 'accessible-query-unavailable':
+                raise
+            if not scope():
+                raise RetryHitFailure('identity-rejected')
+            if deadline - time.monotonic() < .05:
+                raise RetryHitFailure('deadline')
+            time.sleep(.05)
+            continue
+        if time.monotonic() >= deadline:
+            raise RetryHitFailure('deadline')
+        if not scope():
+            raise RetryHitFailure('identity-rejected')
+        return value
+    raise RetryHitFailure('accessible-query-unavailable')
 
 
 def coordinate_point(screen, window, geometry):
@@ -453,6 +477,8 @@ def guarded_retry_proof(point, scope, hit, observation, deadline):
         while True:
             if time.monotonic() >= deadline:
                 raise RetryHitFailure('deadline')
+            if observation['accessibleChecks'] >= 128:
+                raise RetryHitFailure('accessible-query-unavailable')
             if not scope():
                 raise RetryHitFailure('identity-rejected')
             observation['guardBeforeVerified'] += 1
@@ -460,17 +486,18 @@ def guarded_retry_proof(point, scope, hit, observation, deadline):
             try:
                 matched = hit(point)
             except RetryHitFailure as error:
-                # AT-SPI may time out during a retained control's hover update.
-                # Repeat only a read, at most twice across the whole selection,
-                # with the same point, identity guards and original deadline.
-                unavailable = observation['accessibleChecks'] - observation['accessibleExactMatches']
-                if error.category != 'accessible-query-unavailable' or unavailable > 2:
+                # Before any press, let a retained target's AT-SPI tree settle.
+                # Every read repeats the complete ownership and exact-hit proof;
+                # a previous successful read never authorizes a later click.
+                # The original four-second cutoff and closed counter bound apply
+                # across all selection phases, including the final click guard.
+                if error.category != 'accessible-query-unavailable':
                     raise
                 if not scope():
                     raise RetryHitFailure('identity-rejected')
-                if time.monotonic() >= deadline:
+                if deadline - time.monotonic() < .05:
                     raise RetryHitFailure('deadline')
-                time.sleep(min(.05, max(0, deadline - time.monotonic())))
+                time.sleep(.05)
                 continue
             if not matched:
                 raise RetryHitFailure('identity-rejected')
@@ -770,7 +797,12 @@ def retry_click(payload):
         geometry, relation, authority = geometry_authority(raw_geometry, first_geometry,
             second_geometry, facts['coordinatePackage'])
         facts['coordinateRelation'], facts['coordinateAuthority'] = relation, authority
-        point = normalized_retry_point(request, active, geometry, facts)
+        def cursor_scope():
+            return (owned_foreground() == (0, active)
+                    and independent_client_snapshot(active) == second_geometry)
+        point = (settle_accessibility_read(
+            lambda: normalized_retry_point(request, active, geometry, facts), cursor_scope, deadline)
+            if accessible_policy else normalized_retry_point(request, active, geometry, facts))
         live_cursor = None
         if os.environ.get('NANH_ZED_CURSOR_HIT') == '1':
             facts['cursorSelection'] = dict(status='unavailable', sampledPoints=0,
@@ -783,10 +815,10 @@ def retry_click(payload):
                 return 18
             import runpy
             module = runpy.run_path(str(Path(__file__).with_name('zed-cursor-hit.py')))
-            held_bounds = normalized_retry_point(request, active, geometry, return_bounds=True)
-            def cursor_scope():
-                return (owned_foreground() == (0, active)
-                        and independent_client_snapshot(active) == second_geometry)
+            held_bounds = (settle_accessibility_read(
+                lambda: normalized_retry_point(request, active, geometry, return_bounds=True),
+                cursor_scope, deadline) if accessible_policy else
+                normalized_retry_point(request, active, geometry, return_bounds=True))
             def exact_accessible_hit(candidate):
                 current={}
                 bounds=normalized_retry_point(request,active,geometry,current,

@@ -729,6 +729,34 @@ fn named_retry_mismatch(
     .find_map(|(matches, field)| (!matches).then_some(field))
 }
 
+// Linux exposes an AT-SPI bus/object pair that survives layout movement. Other
+// backends may lack that identity and retain their stricter bounds comparison.
+fn named_retry_custody_mismatch(
+    before: &xa11y::ElementData,
+    after: &xa11y::ElementData,
+) -> Option<&'static str> {
+    let bus = before
+        .raw
+        .get("bus_name")
+        .and_then(serde_json::Value::as_str);
+    if before.stable_id.as_deref().is_none_or(str::is_empty)
+        || bus.is_none_or(str::is_empty)
+        || bus
+            != after
+                .raw
+                .get("bus_name")
+                .and_then(serde_json::Value::as_str)
+    {
+        return Some("identity");
+    }
+    if before.bounds.is_none() || after.bounds.is_none() {
+        return Some("bounds");
+    }
+    let mut retained = before.clone();
+    retained.bounds = after.bounds;
+    named_retry_mismatch(&retained, after)
+}
+
 // An absent accessibility candidate may settle before the original cutoff.
 // Ambiguous candidates and failed ownership proofs remain terminal.
 fn wait_unique_retry<T>(
@@ -812,6 +840,29 @@ fn wait_retained_retry<T>(
     } else {
         Err(Reason::SelectorNotMatched)
     }
+}
+
+fn wait_retained_stable_retry<T>(
+    captured: &T,
+    deadline: Instant,
+    mut sample: impl FnMut() -> Result<Vec<T>, Reason>,
+    retained: impl Fn(&T, &T) -> bool,
+    stable: impl Fn(&T, &T) -> bool,
+) -> Result<T, Reason> {
+    wait_stable_retry(
+        deadline,
+        || {
+            let candidates = sample()?;
+            if candidates
+                .iter()
+                .any(|candidate| !retained(captured, candidate))
+            {
+                return Err(Reason::SelectorNotMatched);
+            }
+            Ok(candidates)
+        },
+        stable,
+    )
 }
 
 fn retry_elements(retry: &xa11y::Locator) -> Result<Vec<xa11y::Element>, Reason> {
@@ -1687,23 +1738,33 @@ impl NativeClipboardSession<'_> {
         deadline: Instant,
     ) -> Result<xa11y::Element, Reason> {
         let mismatch = std::cell::Cell::new(None);
-        let result = wait_retained_retry(
-            captured,
-            deadline,
-            || {
-                self.gui
-                    .native_copy_guard(&mut self.facts, "retry-revalidate")?;
-                let candidates = retry_elements(retry)?;
-                self.facts.retry_control_count = Some(candidates.len());
-                self.gui
-                    .native_copy_guard(&mut self.facts, "retry-revalidate")?;
-                Ok(candidates)
-            },
-            |before, after| {
+        let mut sample = || {
+            self.gui
+                .native_copy_guard(&mut self.facts, "retry-revalidate")?;
+            let candidates = retry_elements(retry)?;
+            self.facts.retry_control_count = Some(candidates.len());
+            self.gui
+                .native_copy_guard(&mut self.facts, "retry-revalidate")?;
+            Ok(candidates)
+        };
+        let result = if cfg!(target_os = "linux") {
+            wait_retained_stable_retry(
+                captured,
+                deadline,
+                &mut sample,
+                |before, after| {
+                    let changed = named_retry_custody_mismatch(before.data(), after.data());
+                    mismatch.set(changed);
+                    changed.is_none()
+                },
+                |before, after| same_named_retry_element(before.data(), after.data()),
+            )
+        } else {
+            wait_retained_retry(captured, deadline, &mut sample, |before, after| {
                 mismatch.set(named_retry_mismatch(before.data(), after.data()));
                 same_named_retry_element(before.data(), after.data())
-            },
-        );
+            })
+        };
         self.facts.retry_identity_mismatch = mismatch.get();
         result
     }
@@ -2367,6 +2428,41 @@ mod tests {
         // xa11y assigns a new cache handle to each query of the same UIA node.
         current.handle = 2;
         assert!(same_named_retry_element(&before, &current));
+        assert_eq!(
+            named_retry_custody_mismatch(&before, &current),
+            Some("identity")
+        );
+        let mut native_before = before.clone();
+        native_before.stable_id = Some("/org/a11y/atspi/accessible/7".into());
+        native_before
+            .raw
+            .insert("bus_name".into(), serde_json::json!(":1.7"));
+        let mut moved = native_before.clone();
+        moved.bounds.as_mut().unwrap().y += 10;
+        assert!(!same_named_retry_element(&native_before, &moved));
+        assert_eq!(named_retry_custody_mismatch(&native_before, &moved), None);
+        for field in 0..4 {
+            let mut changed = moved.clone();
+            match field {
+                0 => changed
+                    .raw
+                    .insert("bus_name".into(), serde_json::json!(":1.8")),
+                1 => {
+                    changed.stable_id = Some("/org/a11y/atspi/accessible/8".into());
+                    None
+                }
+                2 => {
+                    changed.name = Some("Other".into());
+                    None
+                }
+                _ => {
+                    changed.pid = Some(43);
+                    None
+                }
+            };
+            assert!(named_retry_custody_mismatch(&native_before, &changed).is_some());
+        }
+
         for field in 0..7 {
             let mut changed = current.clone();
             match field {
@@ -2380,6 +2476,55 @@ mod tests {
             }
             assert!(!same_named_retry_element(&before, &changed));
         }
+    }
+
+    #[test]
+    fn retained_native_identity_can_settle_at_new_geometry_without_replacement() {
+        let mut observations =
+            vec![vec![(7, 1)], vec![(7, 2)], vec![(7, 2)], vec![(7, 2)]].into_iter();
+        let result = wait_retained_stable_retry(
+            &(7, 0),
+            Instant::now() + Duration::from_secs(2),
+            || {
+                Ok(observations
+                    .next()
+                    .expect("must finish after three stable samples"))
+            },
+            |before, after| before.0 == after.0,
+            |before, after| before == after,
+        );
+        assert_eq!(result, Ok((7, 2)));
+        for observed in [
+            Ok(vec![(8, 1)]),
+            Ok(vec![(7, 1), (7, 1)]),
+            Err(Reason::FocusChanged),
+        ] {
+            let result = wait_retained_stable_retry(
+                &(7, 0),
+                Instant::now() + Duration::from_secs(1),
+                || observed.clone(),
+                |before, after| before.0 == after.0,
+                |before, after| before == after,
+            );
+            assert_eq!(
+                result,
+                Err(if observed.is_err() {
+                    Reason::FocusChanged
+                } else {
+                    Reason::SelectorNotMatched
+                })
+            );
+        }
+        assert_eq!(
+            wait_retained_stable_retry(
+                &7,
+                Instant::now(),
+                || -> Result<Vec<u8>, Reason> { panic!("expired deadline cannot query") },
+                |a, b| a == b,
+                |a, b| a == b
+            ),
+            Err(Reason::Timeout)
+        );
     }
 
     #[test]

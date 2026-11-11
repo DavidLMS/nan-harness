@@ -157,6 +157,15 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
         }
         return {id:current.id,loaderId:current.loaderId};
       } catch {
+        // CDP can briefly reject this read during cold renderer attachment.
+        // Re-read only under retained custody and the original cutoff; shape,
+        // URL and document identity failures are never retried here.
+        if(query==='frame-request' && (facts.frameRequestRetries||0)<64 && guard(callerDeadline)) {
+          facts.frameRequestRetries=(facts.frameRequestRetries||0)+1;
+          clearTimeout(timer);
+          await delay(Math.min(100,Math.max(0,deadline-Date.now())));
+          continue;
+        }
         if (facts.guardFailure===null) {
           facts.guardFailure=Date.now()>=deadline?'deadline-expired':'query-failed';
           if (facts.guardFailure==='query-failed') facts.queryFailure=query;

@@ -1395,7 +1395,7 @@ def semantic_observations(directory, app, platform=None):
             fields = booleans | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'stage', 'errorCategory'}
             diagnostics = {'composerObservation', 'guardFailure'}
             optional = {'actionObservation', 'onboardingSkipped', 'onboardingObservation', 'queryFailure',
-                        'frameTransitionWaited', 'catalogState', 'clickFailure', 'menuClickRecovered'}
+                        'frameTransitionWaited', 'catalogState', 'clickFailure', 'menuClickRecovered', 'frameRequestRetries'}
             stages = {'policy', 'onboarding', 'menu', 'refresh', 'catalog', 'dismiss', 'composer', 'ready'}
             errors = {None, 'policy-rejected', 'onboarding-unavailable', 'menu-unavailable', 'menu-timeout', 'refresh-uncertain',
                       'catalog-unavailable', 'dismiss-uncertain', 'composer-changed', 'composer-unavailable'}
@@ -1441,6 +1441,10 @@ def semantic_observations(directory, app, platform=None):
                         or value.get('guardFailure') != 'query-failed'):
                     raise ValueError('invalid Hermes readiness query phase')
                 record['queryFailure'] = query
+            if 'frameRequestRetries' in value:
+                if type(value['frameRequestRetries']) is not int or not 1 <= value['frameRequestRetries'] <= 64:
+                    raise ValueError('invalid Hermes frame read retry count')
+                record['frameRequestRetries'] = value['frameRequestRetries']
             if 'frameTransitionWaited' in value:
                 if type(value['frameTransitionWaited']) is not bool:
                     raise ValueError('invalid Hermes frame transition observation')
@@ -2768,8 +2772,10 @@ def semantic_observations(directory, app, platform=None):
                 pointer_proved = type(selection) is dict and pointer_fields <= set(selection)
                 if pointer_proved:
                     # The click boundary repeats the cursor and AX proof once.
-                    # Two additional unavailable AX reads may be reobserved.
                     counts = {key: 46 if key.startswith('cursor') else 58 for key in counts}
+                # Read-only AT-SPI settling retains the original deadline and
+                # a hard publication bound, independently of successful samples.
+                counts.update(guardBeforeVerified=128, accessibleChecks=128)
                 if (type(selection) is not dict or set(selection) not in (fields, extended, classified, extended | pointer_fields, classified | pointer_fields)
                         or type(selection['status']) is not str or selection['status'] not in {'matched', 'accessible-hit', 'unavailable', 'no-hit', 'deadline', 'identity-rejected'}
                         or type(selection['sampledPoints']) is not int or not 0 <= selection['sampledPoints'] <= 9

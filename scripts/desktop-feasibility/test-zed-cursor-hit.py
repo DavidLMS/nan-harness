@@ -249,7 +249,7 @@ class CursorTests(unittest.TestCase):
         INPUT['guarded_retry_proof']((123, 456), lambda: True, lambda _: True,
                                     observed, time.monotonic() + 1)
         self.assertEqual(list(observed.values()), [1, 1, 1, 1])
-        for category in ('accessible-hit-mismatch', 'accessible-query-unavailable'):
+        for category in ('accessible-hit-mismatch', 'identity-rejected'):
             observed = observation()
             def reject(_):
                 raise INPUT['RetryHitFailure'](category)
@@ -257,7 +257,7 @@ class CursorTests(unittest.TestCase):
                 INPUT['guarded_retry_proof']((123, 456), lambda: True, reject,
                                             observed, time.monotonic() + 1)
             self.assertEqual(observed['failureReason'], category)
-            self.assertEqual(observed['accessibleChecks'], 3 if category == 'accessible-query-unavailable' else 1)
+            self.assertEqual(observed['accessibleChecks'], 1)
             self.assertEqual(observed['accessibleExactMatches'], 0)
             self.assertEqual(observed['guardAfterVerified'], 0)
             self.assertNotIn('123', str(observed))
@@ -293,29 +293,69 @@ class CursorTests(unittest.TestCase):
         self.assertEqual(len(points), 1)
         self.assertEqual(observed['failureReason'], 'identity-rejected')
 
-    def test_query_reobservations_share_budget_and_do_not_extend_deadline(self):
-        observed = dict(guardBeforeVerified=2, guardAfterVerified=0,
-                        accessibleChecks=2, accessibleExactMatches=0)
-        reads = []
-        def unavailable(point):
+    def test_repeated_query_unavailability_settles_before_original_deadline(self):
+        observed = dict(guardBeforeVerified=3, guardAfterVerified=3,
+                        accessibleChecks=5, accessibleExactMatches=3)
+        reads, clock, sleeps = [], [0], []
+        def hit(point):
             reads.append(point)
-            raise INPUT['RetryHitFailure']('accessible-query-unavailable')
-        with self.assertRaises(ValueError):
-            INPUT['guarded_retry_proof']((12, 34), lambda: True, unavailable,
-                                        observed, time.monotonic() + 1)
-        self.assertEqual(len(reads), 1)
-        self.assertEqual(observed['failureReason'], 'accessible-query-unavailable')
-        clock = [0]
-        observed = dict(guardBeforeVerified=0, guardAfterVerified=0,
-                        accessibleChecks=0, accessibleExactMatches=0)
-        def expires(point):
-            clock[0] = 2
-            return unavailable(point)
-        reads.clear()
-        with patch('time.monotonic', lambda: clock[0]), self.assertRaises(ValueError):
-            INPUT['guarded_retry_proof']((12, 34), lambda: True, expires, observed, 1)
-        self.assertEqual(len(reads), 1)
-        self.assertEqual(observed['failureReason'], 'deadline')
+            if len(reads) <= 3:
+                raise INPUT['RetryHitFailure']('accessible-query-unavailable')
+            return True
+        def pause(seconds):
+            self.assertGreaterEqual(seconds, .05)
+            sleeps.append(seconds); clock[0] += seconds
+        guards = []
+        def scope():
+            guards.append(True); return True
+        with patch('time.monotonic', lambda: clock[0]), patch('time.sleep', pause):
+            INPUT['guarded_retry_proof']((12, 34), scope, hit, observed, 4)
+        self.assertEqual(reads, [(12, 34)] * 4)
+        self.assertEqual(len(guards), 8)
+        self.assertEqual(observed['accessibleChecks'], 9)
+        self.assertEqual(observed['accessibleExactMatches'], 4)
+        self.assertLess(clock[0], 4)
+
+    def test_query_reobservations_stop_at_original_cutoff_or_counter_limit(self):
+        for limit in (False, True):
+            observed = dict(guardBeforeVerified=127 if limit else 2, guardAfterVerified=0,
+                            accessibleChecks=127 if limit else 2, accessibleExactMatches=0)
+            reads, clock = [], [0]
+            def unavailable(point):
+                reads.append(point)
+                raise INPUT['RetryHitFailure']('accessible-query-unavailable')
+            def pause(seconds):
+                clock[0] += seconds
+            with patch('time.monotonic', lambda: clock[0]), patch('time.sleep', pause), self.assertRaises(ValueError):
+                INPUT['guarded_retry_proof']((12, 34), lambda: True, unavailable, observed, .2)
+            self.assertLessEqual(clock[0], .2)
+            self.assertEqual(observed['failureReason'], 'accessible-query-unavailable' if limit else 'deadline')
+            self.assertFalse(observed['accessibleHitVerified'])
+            if limit:
+                self.assertEqual(len(reads), 1)
+                self.assertEqual(observed['accessibleChecks'], 128)
+                self.assertEqual(observed['guardBeforeVerified'], 128)
+            else:
+                self.assertGreater(len(reads), 1)
+
+    def test_settling_never_adopts_changed_target_or_lost_owner(self):
+        for reject in ('hit-mismatch', 'scope-lost'):
+            observed = dict(guardBeforeVerified=0, guardAfterVerified=0,
+                            accessibleChecks=0, accessibleExactMatches=0)
+            reads, scopes = [], []
+            def scope():
+                scopes.append(True)
+                return reject != 'scope-lost' or len(scopes) < 3
+            def hit(point):
+                reads.append(point)
+                if len(reads) == 1:
+                    raise INPUT['RetryHitFailure']('accessible-query-unavailable')
+                return False
+            with patch('time.sleep'), self.assertRaises(ValueError):
+                INPUT['guarded_retry_proof']((12, 34), scope, hit, observed, time.monotonic() + 1)
+            self.assertEqual(observed['failureReason'], 'identity-rejected')
+            self.assertEqual(len(reads), 1 if reject == 'scope-lost' else 2)
+            self.assertEqual(observed['accessibleExactMatches'], 0)
 
     def test_expired_guard_records_deadline_without_querying_or_moving(self):
         observed = dict(guardBeforeVerified=0, guardAfterVerified=0,

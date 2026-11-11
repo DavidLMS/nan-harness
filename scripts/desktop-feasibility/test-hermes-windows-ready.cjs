@@ -3,7 +3,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('nod
 const {EventEmitter}=require('node:events');
 async function trial(scenario) {
  const menuFailure=scenario.startsWith('menu-failure-');
- const deadline=menuFailure?120000:3000;
+ const deadline=menuFailure||scenario==='frame-request-error'?120000:3000;
  let clock=0,opened=false,owner=true,refreshClicks=0,pillClicks=0,escapes=0,skipClicks=0,rowReads=0;
  let clickCalls=0,snapshotCalls=0;
  let coverReads=0, actionSamples=0, frameReads=0, pillSamples=0, coverDismissed=false;
@@ -11,7 +11,9 @@ async function trial(scenario) {
  let pageReplacedByOwner=false;
  const session=new EventEmitter(); session.send=async method=>{
    if(method!=='Page.getFrameTree')return;
-   frameReads++;if(scenario==='frame-request-error')throw new Error('PRIVATE');
+   frameReads++;
+   if(scenario==='frame-request-owner-loss'){owner=false;throw new Error('PRIVATE');}
+   if(scenario==='frame-request-error'||scenario==='frame-request-recover'&&frameReads<=2)throw new Error('PRIVATE');
    if(scenario==='menu-failure-target-closed'&&clickCalls)throw new Error('PRIVATE');
    if(scenario==='stalled-frame')return new Promise(()=>{});
    const url=new URL(page.url());
@@ -174,6 +176,14 @@ for(const element of [modelElement([text('Qwen3.6 27B'),meta]),modelElement([tex
   assert.equal(result.refreshClicks,scenario==='moving-refresh'?1:0);
   assert.equal(result.facts.stage==='ready',scenario==='moving-refresh');
  }
+ const transientFrame=await trial('frame-request-recover');
+ assert.equal(transientFrame.facts.stage,'ready');assert.equal(transientFrame.facts.frameRequestRetries,2);
+ assert.equal(transientFrame.pillClicks,1);assert.equal(transientFrame.refreshClicks,1);
+ const lostFrame=await trial('frame-request-owner-loss');
+ assert.equal(lostFrame.facts.guardFailure,'ownership-lost');assert.equal(lostFrame.pillClicks,0);
+ assert.equal(lostFrame.facts.frameRequestRetries,undefined);
+ const exhaustedFrames=await trial('frame-request-error');
+ assert.equal(exhaustedFrames.facts.frameRequestRetries,64);assert.equal(exhaustedFrames.pillClicks,0);
  const transitioned=await trial('frame-transition-race');
  assert.equal(transitioned.facts.stage,'ready');assert.equal(transitioned.facts.frameTransitionWaited,true);
  const reloaded=await trial('frame-transition-reload');assert.notEqual(reloaded.facts.stage,'ready');assert.equal(reloaded.pillClicks,0);
