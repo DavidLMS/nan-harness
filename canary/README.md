@@ -818,11 +818,19 @@ and live prerequisites, privacy boundaries and cleanup. Synthetic or OCR-backed
 checks do not establish semantic/no-OCR qualification. These workflows do not
 replace the current main CLI daily/release workflows or authorize feed writes.
 
-Linux Desktop preparation uses command-scoped official Noble repositories and
-fresh package lists, preserving Ubuntu archive signature checks and the runner's
-system repository configuration. Metadata acquisition has a five-minute limit
-and `apt-get update --error-on=any`; incomplete indexes never feed an installation.
-The same helper covers the later sandbox and tracing prerequisites.
+Linux Desktop preparation uses command-scoped Noble repositories and fresh lists
+under `/tmp`, preserving Ubuntu archive signature checks, the `_apt` sandbox and
+the runner's system repository configuration. Each metadata acquisition has a
+five-minute limit and `apt-get update --error-on=any`. If Canonical metadata
+acquisition fails, the helper discards partial lists and tries the kernel.org
+Ubuntu mirror with the same archive keyring. Installation runs once, only after
+a complete update; a package configuration failure is never replayed. The same
+helper covers the later sandbox and tracing prerequisites.
+
+For repeated package DNS failures, `ubuntu-network-diagnostic.yml` compares
+bounded resolution and HTTPS results for fixed public endpoints under the
+runner, root and `_apt` identities. It retains only statuses/counts, without
+changing DNS settings, dumping configuration or bypassing package verification.
 
 ### Desktop semantic qualification retries
 
