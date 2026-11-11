@@ -48,7 +48,7 @@ class WindowsInstallerTests(unittest.TestCase):
         self.assertNotIn("'openclaw' { Npm", SCRIPT)
 
     @unittest.skipUnless(shutil.which('pwsh'), 'PowerShell runtime is unavailable')
-    def test_pinned_installer_copy_rejects_modified_or_missing_source(self):
+    def test_pinned_installer_uses_blob_bytes_despite_checkout_filters(self):
         function = SCRIPT.split('function Copy-PinnedHermesInstaller', 1)[1].split('function Invoke-HermesPinned', 1)[0]
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -62,6 +62,7 @@ class WindowsInstallerTests(unittest.TestCase):
             source.parent.mkdir()
             original = b"Write-Output 'official fixture'\n"
             source.write_bytes(original)
+            (repository / '.gitattributes').write_text('*.ps1 text eol=crlf\n')
             git('add', '.')
             git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
                 'commit', '-m', 'Fixture')
@@ -86,8 +87,12 @@ catch { exit 7 }
             self.assertEqual(run(), 0)
             self.assertEqual((root / 'official-installer.ps1').read_bytes(), original)
             source.write_bytes(b"Write-Output 'changed'\n")
-            self.assertEqual(run(), 7)
+            self.assertEqual(run(), 0)
+            self.assertEqual((root / 'official-installer.ps1').read_bytes(), original)
             source.unlink()
+            self.assertEqual(run(), 0)
+            self.assertEqual((root / 'official-installer.ps1').read_bytes(), original)
+            revision = '0' * 40
             self.assertEqual(run(), 7)
 
     def test_safe_argument_boundary_does_not_use_start_process_argumentlist(self):

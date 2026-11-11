@@ -184,16 +184,27 @@ function Invoke-OfficialScript([string]$Uri, [string[]]$Arguments) {
   Invoke-Native 'pwsh.exe' $all 'pwsh' 'install'
 }
 function Copy-PinnedHermesInstaller([string]$Repository, [string]$Revision) {
-  $source = Join-Path $Repository 'scripts/install.ps1'
-  if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
-    Set-InstallDiagnostic 'install' 'git' $null $null $null 'expected-executable-missing'
-    throw 'the pinned Hermes installer is missing'
-  }
   Invoke-Native 'git.exe' @('-C',$Repository,'rev-parse',($Revision + ':scripts/install.ps1')) 'git' 'install'
   $expected = [IO.File]::ReadAllText($stdoutLog).Trim()
-  # Execute a stable copy: the official installer may update its own checkout.
+  if ($expected -notmatch '^[0-9a-f]{40}$') { throw 'the pinned installer blob is invalid' }
+  # Upstream explicitly checks out PowerShell files as CRLF. Read the Git blob
+  # as bytes, without checkout filters or PowerShell text redirection.
   $destination = Join-Path $tmp 'official-installer.ps1'
-  Copy-Item -LiteralPath $source -Destination $destination -Force
+  $info = [Diagnostics.ProcessStartInfo]::new()
+  $info.FileName = (Get-Command git -ErrorAction Stop).Source
+  $info.UseShellExecute = $false
+  $info.RedirectStandardOutput = $true; $info.RedirectStandardError = $true
+  foreach ($argument in @('-C',$Repository,'cat-file','blob',$expected)) { [void]$info.ArgumentList.Add($argument) }
+  $process = [Diagnostics.Process]::new(); $process.StartInfo = $info
+  $output = [IO.File]::Create($destination)
+  try {
+    if (-not $process.Start()) { throw 'the installer blob reader did not start' }
+    $errors = $process.StandardError.ReadToEndAsync()
+    $process.StandardOutput.BaseStream.CopyTo($output)
+    $process.WaitForExit()
+    if ($process.ExitCode -ne 0) { throw 'the installer blob could not be read' }
+  }
+  finally { $output.Dispose(); $process.Dispose() }
   Invoke-Native 'git.exe' @('-C',$Repository,'hash-object','--no-filters',$destination) 'git' 'install'
   $actual = [IO.File]::ReadAllText($stdoutLog).Trim()
   if ($expected -notmatch '^[0-9a-f]{40}$' -or $actual -cne $expected) {
