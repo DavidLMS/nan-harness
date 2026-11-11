@@ -144,7 +144,7 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
       - name: Prepare neutral X11 fixture dependencies
-        run: sudo apt-get update && sudo apt-get install -y xvfb xauth libxi6 libxtst6
+        run: bash .github/scripts/ubuntu-desktop-packages.sh xvfb xauth libxi6 libxtst6
       - name: Measure owned neutral XI2 motion delivery without an application
         shell: bash
         run: |
@@ -249,14 +249,12 @@ jobs:
         timeout-minutes: 20
         shell: bash
         run: |
-          apt_options=(-o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
-          sudo apt-get "${apt_options[@]}" update
-          sudo apt-get "${apt_options[@]}" install --no-install-recommends -y cmake xvfb openbox x11-utils xclip xdotool zstd dbus-x11 python3-dbus at-spi2-core libx11-dev libxres1 libxtst6 libcairo2 libxkbcommon-dev libxkbcommon-x11-dev libegl1 libvulkan1 mesa-vulkan-drivers libgtk-3-0 libnss3 libasound2t64 libgbm1 libsecret-1-0 libnotify4 adwaita-icon-theme
+          bash .github/scripts/ubuntu-desktop-packages.sh cmake xvfb openbox x11-utils xclip xdotool zstd dbus-x11 python3-dbus at-spi2-core libx11-dev libxres1 libxtst6 libcairo2 libxkbcommon-dev libxkbcommon-x11-dev libegl1 libvulkan1 mesa-vulkan-drivers libgtk-3-0 libnss3 libasound2t64 libgbm1 libsecret-1-0 libnotify4 adwaita-icon-theme
       - name: Verify synthetic Zed tracing before building native binaries
         if: runner.os == 'Linux' && matrix.app == 'zed-desktop' && inputs.platform == 'open-cells' && inputs.experiment == 'deterministic-full'
         shell: bash
         run: |
-          sudo apt-get install -y bpftrace
+          bash .github/scripts/ubuntu-desktop-packages.sh bpftrace
           python3 scripts/desktop-feasibility/zed-geometry-fixture.py
           echo 'NANH_ZED_RETRY_ENTRY_TRACE=1' >> "$GITHUB_ENV"
           echo 'NANH_ZED_HIT_GEOMETRY=1' >> "$GITHUB_ENV"
@@ -276,8 +274,7 @@ jobs:
           set -euo pipefail
           # Official Ubuntu 24.04 prerequisite; preserve the host userns restriction.
           # https://developers.openai.com/codex/concepts/sandboxing#prerequisites
-          apt_options=(-o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
-          sudo apt-get "${apt_options[@]}" install --no-install-recommends -y bubblewrap apparmor-profiles apparmor-utils
+          bash .github/scripts/ubuntu-desktop-packages.sh bubblewrap apparmor-profiles apparmor-utils
           sudo install -m 0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/bwrap-userns-restrict
           sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
           timeout 15 /usr/bin/bwrap --unshare-user --unshare-pid --unshare-net --ro-bind / / --proc /proc --dev /dev /usr/bin/true
@@ -797,9 +794,7 @@ jobs:
         timeout-minutes: 8
         shell: bash
         run: |
-          apt_options=(-o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
-          sudo apt-get "${apt_options[@]}" update
-          sudo apt-get "${apt_options[@]}" install --no-install-recommends -y cmake libx11-dev libxkbcommon-dev expect
+          bash .github/scripts/ubuntu-desktop-packages.sh cmake libx11-dev libxkbcommon-dev expect
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: desktop-integration-quality

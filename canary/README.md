@@ -818,6 +818,12 @@ and live prerequisites, privacy boundaries and cleanup. Synthetic or OCR-backed
 checks do not establish semantic/no-OCR qualification. These workflows do not
 replace the current main CLI daily/release workflows or authorize feed writes.
 
+Linux Desktop preparation uses command-scoped official Noble repositories and
+fresh package lists, preserving Ubuntu archive signature checks and the runner's
+system repository configuration. Metadata acquisition has a five-minute limit
+and `apt-get update --error-on=any`; incomplete indexes never feed an installation.
+The same helper covers the later sandbox and tracing prerequisites.
+
 ### Desktop semantic qualification retries
 
 The hosted `deterministic-full` workflow allows at most three complete ephemeral
