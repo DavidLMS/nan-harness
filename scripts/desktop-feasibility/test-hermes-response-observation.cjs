@@ -33,7 +33,7 @@ function trial(options = {}) {
       return options.noDetails ? [] : options.duplicateDetails ? [details, details] : [details];
     },
   };
-  const content = {
+  const content = { innerText: options.contentText ?? 'PRIVATE_SYNTHETIC_CONTENT',
     closest: () => options.foreignContent ? {} : assistant,
     querySelectorAll(selector) {
       assert.equal(selector, '[role="alert"]');
@@ -90,8 +90,8 @@ for (const option of ['noGroup', 'foreignUser', 'foreignAssistantSlot', 'foreign
   'badSummary', 'nestedLeaf', 'queryFails']) {
   const observed = trial({ [option]: true });
   assert.equal(observed.backendFailure, 'unclassified', option);
-  delete observed.backendFailure;
-  const unchanged = JSON.parse(JSON.stringify(expected)); delete unchanged.backendFailure;
+  delete observed.backendFailure; delete observed.responseState;
+  const unchanged = JSON.parse(JSON.stringify(expected)); delete unchanged.backendFailure; delete unchanged.responseState;
   if (option === 'duplicateUsers') {
     unchanged.responseShape.exactUserCount = 2;
     unchanged.userTurnObserved = false;
@@ -105,3 +105,14 @@ assert.equal(trial({ noDetails: true, visibleText: 'ModuleNotFoundError: ordinar
 assert.equal(trial({ text: 'PRIVATE_CURRENT_UNKNOWN', visibleText: 'ordinary reply' }).backendFailure,
   'unclassified');
 console.log('Hermes current-turn hidden error diagnostics passed');
+
+assert.deepEqual(expected.responseState, {boundAssistantCount:1,contentCount:1,alertCount:1,
+  contentEmpty:false,detailsShape:'valid'});
+assert.deepEqual(trial({noAlert:true,contentText:''}).responseState,
+  {boundAssistantCount:1,contentCount:1,alertCount:0,contentEmpty:true,detailsShape:'absent'});
+assert.equal(trial({duplicateAssistants:true}).responseState.boundAssistantCount,2);
+assert.equal(trial({duplicateContents:true}).responseState.contentCount,2);
+assert.equal(trial({duplicateAlerts:true}).responseState.alertCount,2);
+assert.equal(trial({nestedLeaf:true}).responseState.detailsShape,'invalid');
+assert.equal(trial({noDetails:true}).responseState.detailsShape,'absent');
+assert.equal(trial({foreignPair:true}).responseState.boundAssistantCount,0);

@@ -3051,12 +3051,22 @@ def semantic_observations(directory, app, platform=None):
                 raise ValueError('invalid Hermes policy preparation stage')
             record.update(diagnosticsOnly=True, stage=value['stage'])
         elif mechanism == 'hermes-backend-failure':
-            if set(value) - {'responseShape'} != set('schemaVersion mechanism diagnosticsOnly category assistantTurnCount'.split()) or app != 'hermes-desktop' or value['diagnosticsOnly'] is not True:
+            if set(value) - {'responseShape', 'responseState'} != set('schemaVersion mechanism diagnosticsOnly category assistantTurnCount'.split()) or app != 'hermes-desktop' or value['diagnosticsOnly'] is not True:
                 raise ValueError('invalid Hermes backend failure identity')
             allowed = {'python-import-failure', 'provider-unconfigured', 'backend-unavailable', 'invalid-model', 'permission-denied', 'connection-failed', 'multiple', 'unclassified'}
             if type(value['category']) is not str or value['category'] not in allowed or type(value['assistantTurnCount']) is not int or not 0 <= value['assistantTurnCount'] <= 4096:
                 raise ValueError('invalid Hermes backend failure facts')
             record.update(diagnosticsOnly=True, category=value['category'], assistantTurnCount=value['assistantTurnCount'])
+            if 'responseState' in value:
+                state = value['responseState']
+                counts = {'boundAssistantCount', 'contentCount', 'alertCount'}
+                if (type(state) is not dict or set(state) != counts | {'contentEmpty', 'detailsShape'}
+                        or any(type(state[key]) is not int or not 0 <= state[key] <= 2 for key in counts)
+                        or state['contentEmpty'] is not None and type(state['contentEmpty']) is not bool
+                        or type(state['detailsShape']) is not str
+                        or state['detailsShape'] not in {'unmeasured', 'absent', 'valid', 'invalid'}):
+                    raise ValueError('invalid Hermes bound response state')
+                record['responseState'] = state
             if 'responseShape' in value:
                 shape = value['responseShape']
                 keys = {'exactUserCount', 'markerAssistantCount', 'boundMarkerAssistantCount'}
@@ -3828,6 +3838,15 @@ def semantic_observations(directory, app, platform=None):
                 closed['resultCount'] = count
                 record['toolResult'] = closed
         elif mechanism == 'hermes-renderer-qualification':
+            if 'providerBoundary' in value:
+                boundary = value['providerBoundary']
+                counts = {'requestsSeen', 'chatArrivals', 'authRejected', 'modelsEntered', 'chatEntered'}
+                if (type(boundary) is not dict or set(boundary) != counts | {'lastChatStatus'}
+                        or any(type(boundary[key]) is not int or not 0 <= boundary[key] <= 4096 for key in counts)
+                        or boundary['lastChatStatus'] is not None and (type(boundary['lastChatStatus']) is not int
+                            or not 100 <= boundary['lastChatStatus'] <= 599)):
+                    raise ValueError('invalid closed provider boundary')
+                record['providerBoundary'] = boundary
             if 'firstRunPreparation' in value:
                 preparation = value['firstRunPreparation']
                 if (type(preparation) is not str or preparation not in {'absent', 'dismissed', 'blocked', 'uncertain'}

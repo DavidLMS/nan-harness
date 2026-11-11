@@ -64,7 +64,37 @@ impl FixtureOracle {
     }
 }
 
+/// Closed per-session counters; never retain credentials, paths or payloads.
+#[derive(Clone, Copy, Default, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ProviderBoundary {
+    requests_seen: u16,
+    chat_arrivals: u16,
+    auth_rejected: u16,
+    models_entered: u16,
+    chat_entered: u16,
+    last_chat_status: Option<u16>,
+}
+
+impl ProviderBoundary {
+    pub(crate) fn valid(&self) -> bool {
+        [
+            self.requests_seen,
+            self.chat_arrivals,
+            self.auth_rejected,
+            self.models_entered,
+            self.chat_entered,
+        ]
+        .into_iter()
+        .all(|count| count <= 4096)
+            && self
+                .last_chat_status
+                .is_none_or(|status| (100..=599).contains(&status))
+    }
+}
+
 struct GateState {
+    boundary: Mutex<ProviderBoundary>,
     client: reqwest::Client,
     upstream: Mutex<String>,
     key: Zeroizing<String>,
@@ -83,6 +113,17 @@ struct GateState {
     response_verified: AtomicBool,
     fixture_oracle: Mutex<FixtureOracle>,
     expected_failure_status: AtomicU16,
+}
+
+impl GateState {
+    fn record_boundary(&self, record: impl FnOnce(&mut ProviderBoundary)) {
+        record(
+            &mut self
+                .boundary
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -110,6 +151,7 @@ impl ProviderGate {
             .build()
             .map_err(|_| ())?;
         let state = Arc::new(GateState {
+            boundary: Mutex::new(ProviderBoundary::default()),
             client,
             upstream: Mutex::new(upstream.trim_end_matches('/').into()),
             key,
@@ -154,6 +196,14 @@ impl ProviderGate {
             shutdown: Some(shutdown),
             task,
         })
+    }
+
+    pub(crate) fn boundary(&self) -> ProviderBoundary {
+        *self
+            .state
+            .boundary
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     pub(crate) fn use_upstream(&self, url: &str) {
@@ -329,6 +379,14 @@ async fn authenticate(
     request: Request,
     next: Next,
 ) -> Response {
+    let chat_request = request.method() == axum::http::Method::POST
+        && request.uri().path() == "/v1/chat/completions";
+    state.record_boundary(|boundary| {
+        boundary.requests_seen = boundary.requests_seen.saturating_add(1).min(4096);
+        if chat_request {
+            boundary.chat_arrivals = boundary.chat_arrivals.saturating_add(1).min(4096);
+        }
+    });
     let mut values = request.headers().get_all(AUTHORIZATION).iter();
     let credential = values
         .next()
@@ -341,9 +399,21 @@ async fn authenticate(
                 && bool::from(token.as_bytes().ct_eq(state.session_token.as_bytes()))
         });
     if !authorized {
+        state.record_boundary(|boundary| {
+            boundary.auth_rejected = boundary.auth_rejected.saturating_add(1).min(4096);
+            if chat_request {
+                boundary.last_chat_status = Some(401);
+            }
+        });
         return closed_error(StatusCode::UNAUTHORIZED, "NAN_CHECK_UNAUTHORIZED");
     }
-    next.run(request).await
+    let response = next.run(request).await;
+    if chat_request {
+        state.record_boundary(|boundary| {
+            boundary.last_chat_status = Some(response.status().as_u16())
+        });
+    }
+    response
 }
 
 impl Drop for ProviderGate {
@@ -356,10 +426,16 @@ impl Drop for ProviderGate {
 }
 
 async fn models(State(state): State<Arc<GateState>>) -> Response {
+    state.record_boundary(|boundary| {
+        boundary.models_entered = boundary.models_entered.saturating_add(1).min(4096)
+    });
     forward(&state, None).await
 }
 
 async fn chat(State(state): State<Arc<GateState>>, Json(mut body): Json<Value>) -> Response {
+    state.record_boundary(|boundary| {
+        boundary.chat_entered = boundary.chat_entered.saturating_add(1).min(4096)
+    });
     #[cfg(any(target_os = "macos", test))]
     let inject_failure = {
         let mut authority = state
@@ -676,6 +752,90 @@ fn closed_error(status: StatusCode, code: &'static str) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn boundary_distinguishes_auth_json_and_handler_without_payloads() {
+        let gate = ProviderGate::start(
+            "http://127.0.0.1:1/v1",
+            Zeroizing::new("private-key".into()),
+            false,
+            "marker",
+        )
+        .await
+        .unwrap();
+        let client = reqwest::Client::new();
+        let url = format!("{}/chat/completions", gate.base_url);
+        assert_eq!(
+            client
+                .post(&url)
+                .body("PRIVATE")
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+        let boundary = gate.boundary();
+        assert_eq!(
+            (
+                boundary.requests_seen,
+                boundary.chat_arrivals,
+                boundary.auth_rejected,
+                boundary.chat_entered
+            ),
+            (1, 1, 1, 0)
+        );
+        assert_eq!(boundary.last_chat_status, Some(401));
+        assert_eq!(
+            client
+                .post(&url)
+                .bearer_auth(gate.session_token())
+                .header("content-type", "application/json")
+                .body("PRIVATE invalid JSON")
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+        let boundary = gate.boundary();
+        assert_eq!(
+            (
+                boundary.chat_arrivals,
+                boundary.auth_rejected,
+                boundary.chat_entered
+            ),
+            (2, 1, 0)
+        );
+        assert_eq!(boundary.last_chat_status, Some(400));
+        gate.fail_next_scenario(true);
+        assert_eq!(
+            client
+                .post(&url)
+                .bearer_auth(gate.session_token())
+                .json(&json!({}))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+        let boundary = gate.boundary();
+        assert_eq!(
+            (
+                boundary.chat_arrivals,
+                boundary.chat_entered,
+                gate.generation_count()
+            ),
+            (3, 1, 0)
+        );
+        assert!(boundary.valid());
+        assert!(
+            !serde_json::to_string(&boundary)
+                .unwrap()
+                .contains("PRIVATE")
+        );
+    }
 
     #[test]
     fn prompt_or_assistant_claim_is_not_tool_evidence() {

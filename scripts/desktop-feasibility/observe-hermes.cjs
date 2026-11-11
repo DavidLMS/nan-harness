@@ -669,7 +669,7 @@ async function driveDom() {
       if (qualify && facts.userTurnObserved && observation.backendFailure) {
         const failure = { schemaVersion: 1, mechanism: 'hermes-backend-failure', diagnosticsOnly: true,
           category: observation.backendFailure, assistantTurnCount: facts.assistantTurnCount,
-          responseShape: observation.responseShape };
+          responseShape: observation.responseShape, responseState: observation.responseState };
         fs.writeFileSync(`${output}.backend.tmp`, JSON.stringify(failure) + '\n', { mode: 0o600 });
         fs.renameSync(`${output}.backend.tmp`, `${output}.backend.json`);
       }

@@ -16,7 +16,42 @@ exports.observe = ({ prompt, marker, bindTurn }) => {
     return pairUsers.length === 1 && pairUsers[0].innerText.trim() === prompt
       && pairUsers[0].closest('[data-slot="aui_turn-pair"]') === pair;
   })());
+  const responseState = {boundAssistantCount: 0, contentCount: 0, alertCount: 0,
+    contentEmpty: null, detailsShape: 'unmeasured'};
+  // Diagnostic shape only: neither content nor error strings leave this callback.
+  try {
+    const user = exactUsers.length === 1 ? exactUsers[0] : null;
+    const pair = user?.closest('[data-slot="aui_turn-pair"]');
+    const pairUsers = pair ? [...pair.querySelectorAll('[data-role="user"]')] : [];
+    if (pair?.closest('[data-slot="aui_message-group"]') && pairUsers.length === 1 && pairUsers[0] === user) {
+      const bound = assistants.filter(e => e.getAttribute('data-slot') === 'aui_assistant-message-root'
+        && e.closest('[data-slot="aui_turn-pair"]') === pair);
+      responseState.boundAssistantCount = Math.min(2, bound.length);
+      if (bound.length === 1) {
+        const contents = [...bound[0].querySelectorAll('[data-slot="aui_assistant-message-content"]')]
+          .filter(e => e.closest('[data-slot="aui_assistant-message-root"]') === bound[0]);
+        responseState.contentCount = Math.min(2, contents.length);
+        if (contents.length === 1) {
+          const content = contents[0];
+          responseState.contentEmpty = typeof content.innerText === 'string' ? content.innerText.trim() === '' : null;
+          const alerts = [...content.querySelectorAll('[role="alert"]')]
+            .filter(e => e.closest('[data-slot="aui_assistant-message-content"]') === content);
+          responseState.alertCount = Math.min(2, alerts.length);
+          if (alerts.length === 0) responseState.detailsShape = 'absent';
+          else if (alerts.length === 1) {
+            const details = [...alerts[0].querySelectorAll(':scope > div > div > details')];
+            const children = details.length === 1 ? [...details[0].children] : [];
+            responseState.detailsShape = details.length === 0 ? 'absent'
+              : details.length === 1 && details[0].closest('[role="alert"]') === alerts[0]
+                && children.length === 2 && children[0].tagName === 'SUMMARY' && children[1].tagName === 'DIV'
+                && children[1].childElementCount === 0 ? 'valid' : 'invalid';
+          }
+        }
+      }
+    }
+  } catch { /* Partial bounded shape is advisory and cannot certify a response. */ }
   return {
+    responseState,
     responseShape: {exactUserCount: Math.min(4096, exactUsers.length),
       markerAssistantCount: Math.min(4096, markerAssistants.length),
       boundMarkerAssistantCount: Math.min(4096, boundAssistants.length)},

@@ -1279,6 +1279,28 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(Path(root), 'hermes-desktop')
 
+    def test_hermes_closed_response_and_provider_diagnostics(self):
+        state = dict(boundAssistantCount=1, contentCount=1, alertCount=0,
+                     contentEmpty=True, detailsShape='absent')
+        boundary = dict(requestsSeen=1, chatArrivals=1, authRejected=0,
+                        modelsEntered=0, chatEntered=0, lastChatStatus=400)
+        cases = [
+            (dict(schemaVersion=1, mechanism='hermes-backend-failure', diagnosticsOnly=True,
+                  category='unclassified', assistantTurnCount=1), 'responseState', state,
+             [dict(contentEmpty='PRIVATE'), dict(detailsShape='PRIVATE'), dict(alertCount=True), dict(contentCount=3)]),
+            (dict(schemaVersion=1, mechanism='hermes-renderer-qualification'), 'providerBoundary', boundary,
+             [dict(lastChatStatus=True), dict(lastChatStatus=600), dict(chatEntered=True), dict(requestsSeen=4097)])]
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'diagnostic.json'
+            for base, key, valid, changes in cases:
+                value = {**base, key: valid}
+                path.write_text(json.dumps(value))
+                self.assertEqual(q.semantic_observations(root, 'hermes-desktop')[0][key], valid)
+                for changed in [None, {**valid, 'text': 'PRIVATE'}, *({**valid, **change} for change in changes)]:
+                    path.write_text(json.dumps({**base, key: changed}))
+                    with self.assertRaises(ValueError):
+                        q.semantic_observations(root, 'hermes-desktop')
+
     def test_baseline_is_diagnostic_and_cannot_claim_renderer_instrumentation(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'baseline.json'

@@ -68,7 +68,7 @@ print(json.dumps([[dict(tag_name='v0.1.30')]]))
         self.assertIn('persist-credentials: false', workflow)
         self.assertIn('release_manifest_sha256: ${{ needs.prepare.outputs.manifest_sha256 }}', workflow)
         self.assertIn("app: ${{ inputs.cell == 'zed-linux' && 'zed-desktop' || 'hermes-desktop' }}", workflow)
-        self.assertIn("platform: ${{ inputs.cell == 'hermes-windows' && 'windows' || 'linux' }}", workflow)
+        self.assertIn("platform: ${{ inputs.cell == 'hermes-windows' && 'windows' || inputs.cell == 'hermes-macos' && 'macos' || 'linux' }}", workflow)
         self.assertIn('experiment: deterministic-full', workflow)
         self.assertNotIn('release-publication', workflow)
         self.assertNotIn('run-id:', workflow)
@@ -102,11 +102,12 @@ print(json.dumps([[dict(tag_name='v0.1.30')]]))
                     release.clear(); release.update(previous)
                 self.assertEqual(len(calls), 1)
                 import shutil
-                for cell in ('zed-linux', 'hermes-linux'):
+                for cell, target in (('zed-linux', ('linux', 'x86_64')), ('hermes-linux', ('linux', 'x86_64')),
+                                     ('hermes-macos', ('macos', 'aarch64'))):
                     shutil.rmtree(root / 'desktop-release-assets')
                     with patch.dict(os.environ, REGRESSION_CELL=cell):
                         exec(compile(source, '<workflow fixture>', 'exec'), {})
-                    self.assertEqual(calls[-1][3:], ('linux', 'x86_64'))
+                    self.assertEqual(calls[-1][3:], target)
                 with patch.dict(os.environ, REGRESSION_CELL='unsupported'):
                     with self.assertRaises(SystemExit):
                         exec(compile(source, '<workflow fixture>', 'exec'), {})
@@ -114,7 +115,7 @@ print(json.dumps([[dict(tag_name='v0.1.30')]]))
                 lookup.side_effect = subprocess.CalledProcessError(1, ['gh', 'release', 'view'])
                 with self.assertRaises(subprocess.CalledProcessError):
                     exec(compile(source, '<workflow fixture>', 'exec'), {})
-                self.assertEqual(len(calls), 3)
+                self.assertEqual(len(calls), 4)
 
 
     def test_release_selection_cannot_be_partial_or_malformed(self):

@@ -1,7 +1,7 @@
 //! Hosted renderer experiment with one input owner and no OCR fallback.
 
 use super::{ComposerFailure, Gui};
-use crate::provider::ProviderGate;
+use crate::provider::{ProviderBoundary, ProviderGate};
 use crate::report::{CheckStep, ProbeResult, Reason};
 use nan_harness_private_fs::{open_private_new, open_private_read};
 use serde::{Deserialize, Serialize};
@@ -613,6 +613,8 @@ enum FirstRunPreparation {
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Facts {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    provider_boundary: Option<ProviderBoundary>,
     schema_version: u8,
     mechanism: String,
     #[serde(flatten)]
@@ -694,6 +696,7 @@ const DOM_QUALIFICATION_KEYS: &[&str] = &[
 ];
 
 const DOM_OPTIONAL_SCOPE_KEYS: &[&str] = &[
+    "providerBoundary",
     "retryScopeFailure",
     "retryScopeObservation",
     "retrySubtreeSettlement",
@@ -721,9 +724,13 @@ fn valid_fact_keys(
                 !["absent", "dismissed", "blocked", "uncertain"].contains(&value)
             })
         })
-        || ["retryScopeObservation", "retrySubtreeSettlement"]
-            .iter()
-            .any(|key| object.get(*key).is_some_and(serde_json::Value::is_null))
+        || [
+            "retryScopeObservation",
+            "retrySubtreeSettlement",
+            "providerBoundary",
+        ]
+        .iter()
+        .any(|key| object.get(*key).is_some_and(serde_json::Value::is_null))
         || object
             .get("retryScopeObservation")
             .and_then(|value| value.get("sessionBoundaryVerified"))
@@ -771,6 +778,10 @@ fn read_facts(path: &Path, qualification: bool) -> Result<Facts, Reason> {
         })
     };
     if facts.schema_version != 1
+        || facts
+            .provider_boundary
+            .as_ref()
+            .is_some_and(|boundary| !boundary.valid())
         || matches!(
             facts.first_run_preparation,
             Some(FirstRunPreparation::Blocked | FirstRunPreparation::Uncertain)
@@ -1116,6 +1127,7 @@ impl<'a> RendererSession<'a> {
             Ok(facts) => facts,
             Err(reason) => return Err(outcome.err().unwrap_or(reason)),
         };
+        facts.provider_boundary = Some(provider.boundary());
         facts.response.provider_response_verified = provider.fixture_response_verified();
         facts.response.provider_generation_count =
             Some(provider.generation_count()).filter(|count| *count <= 4096);
@@ -1701,6 +1713,31 @@ mod tests {
             .write_all(&serde_json::to_vec(value).unwrap())
             .unwrap();
         read_facts(&path, qualification)
+    }
+
+    #[test]
+    fn provider_boundary_is_optional_bounded_and_closed() {
+        let mut value: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../canary/tests/fixtures/hermes-retry-scope.json"
+        ))
+        .unwrap();
+        assert!(read(&value, true).is_ok());
+        let boundary = json!({"requestsSeen": 1, "chatArrivals": 1, "authRejected": 0,
+            "modelsEntered": 0, "chatEntered": 0, "lastChatStatus": 400});
+        value["providerBoundary"] = boundary.clone();
+        assert!(read(&value, true).is_ok());
+        for (key, invalid) in [
+            ("requestsSeen", json!(4097)),
+            ("chatEntered", json!(true)),
+            ("lastChatStatus", json!(600)),
+            ("text", json!("PRIVATE")),
+        ] {
+            let mut changed = value.clone();
+            changed["providerBoundary"][key] = invalid;
+            assert!(read(&changed, true).is_err());
+        }
+        value["providerBoundary"] = json!(null);
+        assert!(read(&value, true).is_err());
     }
 
     fn focus_facts(value: &mut serde_json::Value) {
