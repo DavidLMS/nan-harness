@@ -34,17 +34,67 @@ pub(super) fn restore_runtime_environment(mut command: TerminalCommand) -> Termi
     command
 }
 
+// Fixed observations only: never expose a matched line, exception message or path.
+const ERROR_SIGNALS: &[(&str, &str)] = &[
+    ("not-found", "enoent"),
+    ("permission", "eacces"),
+    ("operation-permission", "eperm"),
+    ("bad-descriptor", "ebadf"),
+    ("invalid-argument", "einval"),
+    ("broken-pipe", "epipe"),
+    ("connection-refused", "econnrefused"),
+    ("timeout", "etimedout"),
+    ("type-error", "typeerror"),
+    ("syntax-error", "syntaxerror"),
+    ("reference-error", "referenceerror"),
+    ("range-error", "rangeerror"),
+    ("permission-denied", "permission denied"),
+    ("access-denied", "access is denied"),
+    ("missing-file", "no such file"),
+    ("win32-missing", "os error 2"),
+    ("win32-denied", "os error 5"),
+    ("database-locked", "database is locked"),
+    ("sqlite", "sqlite"),
+    ("configuration", "config"),
+    ("rust-panic", "panicked at"),
+    ("assertion", "assertion failed"),
+    ("unsupported", "not supported"),
+    ("unknown-option", "unknown option"),
+    ("certificate", "certificate"),
+    ("stdin", "stdin"),
+    ("stdout", "stdout"),
+    ("stderr", "stderr"),
+    ("console", "console"),
+    ("terminal", "terminal"),
+    ("mcp", "mcp"),
+    ("shell", "shell"),
+    ("utf8", "utf-8"),
+    ("json", "json"),
+    ("toml", "toml"),
+    ("spawn", "spawn"),
+    ("bun", "bun"),
+];
+
+fn error_signals(output: &str) -> Vec<&'static str> {
+    let text = output.to_ascii_lowercase();
+    ERROR_SIGNALS
+        .iter()
+        .filter_map(|(code, needle)| text.contains(needle).then_some(*code))
+        .collect()
+}
+
 fn capture(output: Option<&TerminalOutput>) -> Value {
     output.map_or_else(
         || json!({"status": "process-error"}),
         |output| {
             json!({
-                "status": if output.status.success() { "passed" } else { "nonzero-exit" },
-                "exitCode": output.status.code(),
-                "stdoutBytes": output.stdout.len(),
-                "stderrBytes": output.stderr.len(),
-                "marker": output.stdout.contains(SENTINEL_MARKER),
-            })
+                    "status": if output.status.success() { "passed" } else { "nonzero-exit" },
+                    "exitCode": output.status.code(),
+                    "stdoutBytes": output.stdout.len(),
+                    "stderrBytes": output.stderr.len(),
+            "errorSignals": error_signals(&output.stderr),
+                    "marker": output.stdout.contains(SENTINEL_MARKER),
+                })
         },
     )
 }
@@ -184,4 +234,15 @@ fn terminal_errors_stop_the_comparison_even_when_files_can_be_removed() {
     assert!(clean_process(
         &json!({"process": {"status": "nonzero-exit"}})
     ));
+}
+
+#[test]
+fn error_signals_export_only_fixed_codes() {
+    let signals = error_signals("TypeError: private-secret at C:\\private\\config.toml");
+    assert_eq!(signals, vec!["type-error", "configuration", "toml"]);
+    assert!(
+        !serde_json::to_string(&signals)
+            .expect("codes serialize")
+            .contains("private")
+    );
 }

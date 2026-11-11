@@ -33,7 +33,7 @@ class StartupDiagnosticTests(unittest.TestCase):
             Path(env['NAN_KIMI_STARTUP_OUTPUT']).write_text(json.dumps({
                 'schemaVersion': 1, 'diagnosticsOnly': True, 'expectedVersion': '2.5.3',
                 'records': [{'case': case, 'process': {'status': 'nonzero-exit', 'exitCode': 1,
-                        'stdoutBytes': 0, 'stderrBytes': 0, 'marker': False},
+                        'stdoutBytes': 0, 'stderrBytes': 0, 'marker': False, 'errorSignals': []},
                     **({'versionVerified': False} if index < 2 else {'provider': {
                         'requestCount': 0, 'completed': False, 'bounded': True, 'shutdown': True}})}
                     for index, case in enumerate(module.CASES)],
@@ -67,6 +67,11 @@ class StartupDiagnosticTests(unittest.TestCase):
         invalid = {**base, 'records': [{'case': 'fresh-version', 'versionVerified': False,
                    'process': {'status': 'process-error', 'output': 'private-secret'}}]}
         self.assertIsNone(module.closed_observation(invalid, False))
+        process = {'status': 'nonzero-exit', 'exitCode': 1, 'marker': False,
+                   'stdoutBytes': 0, 'stderrBytes': 42, 'errorSignals': ['private-secret']}
+        self.assertFalse(module.safe_process(process))
+        process['errorSignals'] = ['type-error']
+        self.assertTrue(module.safe_process(process))
         self.assertFalse(module.safe_process({'status': 'passed', 'exitCode': 0, 'marker': True,
                                              'stdoutBytes': True, 'stderrBytes': 0}))
 

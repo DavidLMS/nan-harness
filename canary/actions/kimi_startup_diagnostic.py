@@ -16,6 +16,15 @@ TEST = 'conformance::runner::kimi_startup_diagnostic::native_kimi_startup_bounda
 CASES = ['fresh-version', 'fresh-help'] + [
     'sentinel-cleared-environment', 'sentinel-runtime-environment'] * 2
 
+ERROR_SIGNALS = frozenset((
+    'not-found', 'permission', 'operation-permission', 'bad-descriptor', 'invalid-argument',
+    'broken-pipe', 'connection-refused', 'timeout', 'type-error', 'syntax-error', 'reference-error',
+    'range-error', 'permission-denied', 'access-denied', 'missing-file', 'win32-missing', 'win32-denied',
+    'database-locked', 'sqlite', 'configuration', 'rust-panic', 'assertion', 'unsupported',
+    'unknown-option', 'certificate', 'stdin', 'stdout', 'stderr', 'console', 'terminal', 'mcp',
+    'shell', 'utf8', 'json', 'toml', 'spawn', 'bun',
+))
+
 
 def bounded_integer(value, minimum=0, maximum=2**31):
     return type(value) is int and minimum <= value <= maximum
@@ -26,11 +35,13 @@ def safe_process(value):
         return False
     if value == {'status': 'process-error'}:
         return True
-    return (set(value) == {'status', 'exitCode', 'stdoutBytes', 'stderrBytes', 'marker'}
+    return (set(value) == {'status', 'exitCode', 'stdoutBytes', 'stderrBytes', 'marker', 'errorSignals'}
             and value['status'] in ('passed', 'nonzero-exit')
             and (value['exitCode'] is None or bounded_integer(value['exitCode'], -2**31, 2**32 - 1))
             and all(bounded_integer(value[key]) for key in ('stdoutBytes', 'stderrBytes'))
-            and type(value['marker']) is bool)
+            and type(value['marker']) is bool
+            and isinstance(value['errorSignals'], list) and len(value['errorSignals']) <= len(ERROR_SIGNALS)
+            and all(isinstance(code, str) and code in ERROR_SIGNALS for code in value['errorSignals']))
 
 
 def closed_observation(value, completed):
