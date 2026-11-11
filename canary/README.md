@@ -145,6 +145,13 @@ workflow reports failure after publishing independent successes when any work
 remains pending. Reports and the per-harness summary are retained for 30 days;
 raw child output and credentials are never uploaded.
 
+Before conformance and live probes, each cell stages the exact selected release
+binary privately as `nan-harness` (`nan-harness.exe` on Windows) and places it
+first on `PATH`. This matches the installer command used by native MCP clients.
+The helper's SHA-256 must match the selected binary at every stage; stale helpers
+and linked destinations fail before launching a probe. No host installation is
+used as a substitute.
+
 Failed deterministic checks retain closed source, process, report or scenario
 diagnostics and the actual attempt count. These observations remain retryable
 infrastructure blocks until a typed compatibility mismatch is proved; matching

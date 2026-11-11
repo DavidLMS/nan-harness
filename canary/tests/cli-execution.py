@@ -46,6 +46,62 @@ cli_suite = load("cli-suite")
 
 
 class CliExecutionTests(unittest.TestCase):
+    def test_canonical_helper_preserves_selected_bytes_and_rejects_stale_or_linked_files(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            binary = root / "target-qualified-release"
+            binary.write_bytes(b"exact selected release")
+            helper_dir = cell.stage_selected_helper(root, binary)
+            name = "nan-harness.exe" if os.name == "nt" else "nan-harness"
+            helper = helper_dir / name
+            self.assertEqual(cell.digest(helper), cell.digest(binary))
+            self.assertEqual(cell.stage_selected_helper(root, binary), helper_dir)
+            self.assertEqual(cell.shutil.which(name, path=str(helper_dir)), str(helper))
+            helper.write_bytes(b"stale selected release")
+            with self.assertRaisesRegex(RuntimeError, "differs"):
+                cell.stage_selected_helper(root, binary)
+            self.assertEqual(binary.read_bytes(), b"exact selected release")
+            helper.unlink()
+            try:
+                helper.symlink_to(binary)
+            except OSError:
+                self.skipTest("native symlink creation unavailable")
+            with self.assertRaisesRegex(RuntimeError, "regular file"):
+                cell.stage_selected_helper(root, binary)
+            self.assertEqual(binary.read_bytes(), b"exact selected release")
+
+    def test_canonical_helper_precedes_host_path_after_cell_filtering(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            binary = root / "release"
+            binary.write_bytes(b"selected")
+            helper = cell.stage_selected_helper(root, binary)
+            with patch.object(cell.subprocess, "run", return_value=SimpleNamespace(stdout="24.22.1")):
+                environment = cell.cell_environment(root)
+            self.assertEqual(environment["PATH"].split(os.pathsep)[0], str(helper))
+
+    def test_conformance_and_live_require_matching_helper_before_launch(self):
+        for stage, prior_count in (("conformance", 1), ("live", 2)):
+            with self.subTest(stage=stage), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                binary = root / "release"
+                binary.write_bytes(b"selected")
+                args = SimpleNamespace(directory=root, binary=binary, harness="kimi-code", stage=stage)
+                state = {"nanHarness": {"sha256": cell.digest(binary)}, "harness": {"id": "kimi-code"},
+                         "checks": [{}] * prior_count, "durationMilliseconds": 0}
+                (root / "state.json").write_text(json.dumps(state))
+                with patch.object(cell, stage, return_value=1) as launch:
+                    cell.run(args)
+                    launch.assert_called_once()
+                helper = next((root / "nan-helper").iterdir())
+                self.assertEqual(helper.read_bytes(), b"selected")
+                helper.write_bytes(b"stale")
+                (root / "state.json").write_text(json.dumps(state))
+                with patch.object(cell, stage, return_value=1) as launch:
+                    with self.assertRaisesRegex(RuntimeError, "differs"):
+                        cell.run(args)
+                    launch.assert_not_called()
+
     def test_cleanup_diagnostic_distinguishes_kill_and_wait_without_private_text(self):
         for operation, cause in [
             ("terminate-process-group", PermissionError(1, "PRIVATE process")),

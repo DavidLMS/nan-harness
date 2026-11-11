@@ -6,7 +6,7 @@ import time
 import uuid
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from cell import CODEX_REASONING_EVIDENCE, CODEX_REASONING_DETAILS, HERMES_INSTALL_STAGES, WindowsJob, finish_stage, protect_private
+from cell import CODEX_REASONING_EVIDENCE, CODEX_REASONING_DETAILS, HERMES_INSTALL_STAGES, WindowsJob, finish_stage, protect_private, stage_selected_helper
 from selection import WINDOWS_UNAVAILABLE, WINDOWS_SKIP_REASON
 
 HARNESSES = ("claude-code", "codex", "mimo-code", "zcode", "opencode", "hermes", "pi", "omp", "prime-agent",
@@ -1045,6 +1045,8 @@ def collect(args, harnesses, output):
             mark_dependents(phases, ("version-doctor", "deterministic-contract", "live-tool"), "build-failed", cause)
             any_failure = True
             reports.append({"harness": harness, "phases": phases}); checkpoint(); active["harness"] = None; active["phases"] = {}; active["phase"] = None; continue
+        helper_directory = stage_selected_helper(cell, args.binary)
+        env["PATH"] = str(helper_directory) + os.pathsep + env["PATH"]
         probe_env = dict(env); probe_env["NAN_CANARY_PROBE_RESULT"] = str(cell / "probe-result.json")
         for name, stage in (("version-doctor", "version-doctor"), ("deterministic-contract", "deterministic-contract")):
             active["phase"] = name; checkpoint()

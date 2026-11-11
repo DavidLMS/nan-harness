@@ -15,6 +15,7 @@ from pathlib import Path
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -559,6 +560,27 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def stage_selected_helper(directory, binary):
+    """Expose the selected bytes under the installer's canonical MCP command."""
+    helper_directory = directory / "nan-helper"
+    if helper_directory.exists() and getattr(helper_directory.lstat(), "st_file_attributes", 0) & 0x400:
+        raise RuntimeError("canonical helper directory cannot be a reparse point")
+    ensure_private_directory(helper_directory, reusable=True)
+    helper = helper_directory / ("nan-harness.exe" if os.name == "nt" else "nan-harness")
+    if helper.exists() or helper.is_symlink():
+        metadata = helper.lstat()
+        if (not stat.S_ISREG(metadata.st_mode)
+                or getattr(metadata, "st_file_attributes", 0) & 0x400):
+            raise RuntimeError("canonical helper must be an owned regular file")
+    else:
+        with helper.open("xb") as destination, binary.open("rb") as source:
+            shutil.copyfileobj(source, destination)
+        helper.chmod(0o700)
+    if digest(helper) != digest(binary):
+        raise RuntimeError("canonical helper differs from the selected binary")
+    return helper_directory
+
+
 def write_json(path, value):
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     protect_private(path.parent)
@@ -752,6 +774,8 @@ def cell_environment(directory):
                 home / "AppData/Roaming/npm"] + bins
     env.update({key: str(value) for key, value in locations.items()})
     retained = [str(path) for path in bins]
+    if (directory / "nan-helper").is_dir():
+        retained.insert(0, str(directory / "nan-helper"))
     if trusted_runtime_bin is not None and str(trusted_runtime_bin) not in inherited:
         retained.append(str(trusted_runtime_bin))
     env["PATH"] = os.pathsep.join(retained + inherited)
@@ -1530,6 +1554,8 @@ def run(args):
     index = ["install", "conformance", "live"].index(args.stage)
     if len(state["checks"]) != index:
         raise RuntimeError("cell stages must execute once in order")
+    if args.stage in {"conformance", "live"}:
+        stage_selected_helper(args.directory, args.binary)
     started = time.monotonic()
     result = execute(args, state) or 1
     attempts = result.attempts if isinstance(result, CheckResult) else result
