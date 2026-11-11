@@ -28,8 +28,9 @@ function captureInitialScope(alert,input) {
   if(!users[0].isConnected||!input.button.isConnected)return {state:'pending'};
   if(input.button.closest('[role="alert"]')!==alert
     ||input.button.closest('[data-slot="aui_turn-pair"]')!==pair)return {state:'invalid'};
-  let anchors=null;
-  if(input.subtreePolicy)try {
+  // Read-only session evidence is portable; subtree adoption remains policy-gated.
+  let sessionAnchors=null;
+  try {
     const url=new URL(location.href),path=url.hash.slice(1).split(/[?#]/,1)[0];
     const reserved=['/','/new','/settings','/command-center','/session-import','/capabilities','/messaging',
       '/webhooks','/artifacts','/cron','/profiles','/agents','/starmap'];
@@ -41,10 +42,10 @@ function captureInitialScope(alert,input) {
       &&surface.getAttribute('data-session-anchor')==='workspace'
       &&surface.getAttribute('data-composer-target')==='main'
       &&viewport.closest('[data-chat-surface]')===surface&&viewport.contains(parent))
-      anchors={surface,parent,viewport,group,href:location.href,hash:location.hash};
+      sessionAnchors={surface,parent,viewport,group,href:location.href,hash:location.hash};
   } catch { /* Missing public session/root proof leaves legacy admission unchanged. */ }
   return {state:'ready',alert,pair,group,user:users[0],document,button:input.button,
-    anchors,prompt:input.prompt};
+    anchors:input.subtreePolicy?sessionAnchors:null,sessionAnchors,prompt:input.prompt};
 }
 // Inspect only the retained root. No application store, callback or RPC is read.
 function inspectSubtree(held) {
@@ -100,7 +101,7 @@ function observeScopeRefusal(alert, held) {
   // This matrix describes the same refusal snapshot. It grants no input
   // and an unavailable advisory observation must not change the verdict.
   if (reason !== null) try {
-    const a = held.anchors, group = pair?.closest('[data-slot="aui_message-group"]');
+    const a = held.sessionAnchors ?? held.anchors, group = pair?.closest('[data-slot="aui_message-group"]');
       const boundary = a ? { sessionBoundaryVerified: Boolean(
         held.document === document && location.href === a.href && location.hash === a.hash
         && [a.parent, a.viewport, a.surface].every(e => e.isConnected && e.ownerDocument === document)

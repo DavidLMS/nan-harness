@@ -8,7 +8,7 @@ assert.equal(helper.policy('win32',env,true,'retry'),true);
 for(const key of Object.keys(env))assert.equal(helper.policy('win32',{...env,[key]:'wrong'},true,'retry'),false);
 for(const values of [['linux',env,true,'retry'],['win32',env,false,'retry'],['win32',env,true,'submit']])
   assert.equal(helper.policy(...values),false);
-function fixture(route={}) {
+function fixture(route={},subtreePolicy=true) {
   let clock=0,owned=true,tickets=0,proofs=0,queries=0,disposed=0,attempts=0,afterPause=()=>{};
   const doc={},location={href:'file:///synthetic/index.html#/PRIVATE-session',hash:'#/PRIVATE-session',...route};
   const node=(slot,parent=null,attrs={})=>({slot,parentElement:parent,isConnected:true,ownerDocument:doc,
@@ -45,7 +45,7 @@ function fixture(route={}) {
   const handle=value=>({value,async evaluate(callback,arg){return callback(value,arg?.value??arg);},
     async getProperty(key){return {asElement:()=>value[key]};},async dispose(){disposed++;}});
   const scope=handle(source.captureInitialScope(original.alert,{prompt:'PRIVATE-prompt',
-    originalDocument:doc,button:original.button,subtreePolicy:true}));
+    originalDocument:doc,button:original.button,subtreePolicy}));
   assert.equal(scope.value.state,'ready');
   const statuses=[];
   const page={async evaluateHandle(callback,arg){queries++;return handle(callback(arg.value));}};
@@ -71,7 +71,7 @@ function fixture(route={}) {
   // boundary retained. Only the closed refusal may classify a fresh session.
   for (const [name, alter, expected] of [
     ['retained', () => {}, true],
-    ['missing anchors', x => { x.scope.value.anchors = null; }, undefined],
+    ['missing anchors', x => { x.scope.value.anchors = null; x.scope.value.sessionAnchors = null; }, undefined],
     ['route', x => { x.location.href += '/changed'; }, false],
     ['document', x => { x.scope.value.document = {}; }, false],
     ['parent', x => { x.parent.isConnected = false; }, false],
@@ -89,6 +89,13 @@ function fixture(route={}) {
     assert.equal(x.tickets(), 0, name);
     assert.ok(!JSON.stringify(refusal).includes('PRIVATE'), name);
   }
+  const readonly = fixture({}, false), next = readonly.replace();
+  const nextGroup = readonly.node('aui_message-group', readonly.parent);
+  next.pair.parentElement = nextGroup; readonly.group.isConnected = false;
+  assert.equal(readonly.scope.value.anchors, null, 'portable observation cannot enable adoption');
+  assert.equal(readonly.source.observeScopeRefusal(next.alert, readonly.scope.value).observation.sessionBoundaryVerified, true);
+  assert.equal((await readonly.capability.ensure()).state, 'unchanged');
+  assert.equal(readonly.tickets(), 0);
   for(const hash of ['','#/','#/new','#/settings','#/one/two','#/%ZZ']) {
     const x=fixture({hash,href:'file:///synthetic/index.html'+hash});x.replace();
     assert.equal((await x.capability.ensure()).state,'unchanged','no source session '+hash);

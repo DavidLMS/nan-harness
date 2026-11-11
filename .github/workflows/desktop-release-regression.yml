@@ -6,7 +6,7 @@ on:
       cell:
         description: Exact native regression cell
         type: choice
-        options: [hermes-windows, zed-linux]
+        options: [hermes-windows, hermes-linux, zed-linux]
         default: hermes-windows
       tag:
         description: Exact draft release tag
@@ -79,9 +79,9 @@ jobs:
               raise SystemExit('The selected release is not the exact draft.')
           directory = Path(os.environ['RUNNER_TEMP']) / 'desktop-release-assets'
           selected = os.environ.get('REGRESSION_CELL', 'hermes-windows')
-          if selected not in {'hermes-windows', 'zed-linux'}:
+          if selected not in {'hermes-windows', 'hermes-linux', 'zed-linux'}:
               raise SystemExit('Unsupported regression cell.')
-          system = 'linux' if selected == 'zed-linux' else 'windows'
+          system = 'windows' if selected == 'hermes-windows' else 'linux'
           stage(store, tag, commit, system, 'x86_64', directory)
           with Path(os.environ['GITHUB_OUTPUT']).open('a') as output:
               output.write('manifest_sha256=' + digest(directory / 'SHA256SUMS') + '\n')
@@ -105,6 +105,6 @@ jobs:
       release_commit: ${{ inputs.tag_commit }}
       release_manifest_sha256: ${{ needs.prepare.outputs.manifest_sha256 }}
       app: ${{ inputs.cell == 'zed-linux' && 'zed-desktop' || 'hermes-desktop' }}
-      platform: ${{ inputs.cell == 'zed-linux' && 'linux' || 'windows' }}
+      platform: ${{ inputs.cell == 'hermes-windows' && 'windows' || 'linux' }}
       native_only: true
       experiment: deterministic-full

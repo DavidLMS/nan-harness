@@ -1167,7 +1167,7 @@ fn submission_result(facts: &Facts, action: DomAction, purpose: DomPurpose) -> R
         && sample.scope_failure == Some(RetryScopeFailure::PairChanged)
         && matches!(
             sample.subtree_settlement,
-            Some(RetrySubtreeSettlement::Rejected)
+            None | Some(RetrySubtreeSettlement::Rejected)
         )
         && sample
             .scope_observation
@@ -1829,6 +1829,9 @@ mod tests {
             |facts: &Facts| submission_result(facts, DomAction::Retry, DomPurpose::Response);
         let facts = read(&value, true).unwrap();
         assert_eq!(classify(&facts), Err(Reason::SelectorNotMatched));
+        let mut without_adoption = read(&value, true).unwrap();
+        without_adoption.qualification.sample.subtree_settlement = None;
+        assert_eq!(classify(&without_adoption), Err(Reason::SelectorNotMatched));
         for (key, invalid) in [
             ("sessionBoundaryVerified", json!(false)),
             ("sessionBoundaryVerified", json!(null)),
@@ -1873,7 +1876,9 @@ mod tests {
             |f: &mut Facts| f.endpoint.attached = false,
             |f: &mut Facts| f.input.input_submitted = true,
             |f: &mut Facts| f.error_category = Some(DriverError::StaleResponse),
-            |f: &mut Facts| f.qualification.sample.subtree_settlement = None,
+            |f: &mut Facts| {
+                f.qualification.sample.subtree_settlement = Some(RetrySubtreeSettlement::Completed);
+            },
         ] {
             let mut facts = read(&value, true).unwrap();
             mutate(&mut facts);

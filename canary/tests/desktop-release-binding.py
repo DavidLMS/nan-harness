@@ -58,7 +58,7 @@ print(json.dumps([[dict(tag_name='v0.1.30')]]))
                     self.assertEqual(result.returncode == 0, accepted, result.stderr)
                     self.assertEqual(called.exists(), accepted)
 
-    def test_isolated_regression_stages_attested_same_run_windows_assets(self):
+    def test_isolated_regression_stages_attested_same_run_native_assets(self):
         workflow = (Path(__file__).resolve().parents[2] /
                     '.github/workflows/desktop-release-regression.yml').read_text()
         self.assertEqual(re.findall(r'^  ([a-z-]+):$', workflow.split('jobs:', 1)[1], re.M),
@@ -68,7 +68,7 @@ print(json.dumps([[dict(tag_name='v0.1.30')]]))
         self.assertIn('persist-credentials: false', workflow)
         self.assertIn('release_manifest_sha256: ${{ needs.prepare.outputs.manifest_sha256 }}', workflow)
         self.assertIn("app: ${{ inputs.cell == 'zed-linux' && 'zed-desktop' || 'hermes-desktop' }}", workflow)
-        self.assertIn("platform: ${{ inputs.cell == 'zed-linux' && 'linux' || 'windows' }}", workflow)
+        self.assertIn("platform: ${{ inputs.cell == 'hermes-windows' && 'windows' || 'linux' }}", workflow)
         self.assertIn('experiment: deterministic-full', workflow)
         self.assertNotIn('release-publication', workflow)
         self.assertNotIn('run-id:', workflow)
@@ -102,10 +102,11 @@ print(json.dumps([[dict(tag_name='v0.1.30')]]))
                     release.clear(); release.update(previous)
                 self.assertEqual(len(calls), 1)
                 import shutil
-                shutil.rmtree(root / 'desktop-release-assets')
-                with patch.dict(os.environ, REGRESSION_CELL='zed-linux'):
-                    exec(compile(source, '<workflow fixture>', 'exec'), {})
-                self.assertEqual(calls[-1][3:], ('linux', 'x86_64'))
+                for cell in ('zed-linux', 'hermes-linux'):
+                    shutil.rmtree(root / 'desktop-release-assets')
+                    with patch.dict(os.environ, REGRESSION_CELL=cell):
+                        exec(compile(source, '<workflow fixture>', 'exec'), {})
+                    self.assertEqual(calls[-1][3:], ('linux', 'x86_64'))
                 with patch.dict(os.environ, REGRESSION_CELL='unsupported'):
                     with self.assertRaises(SystemExit):
                         exec(compile(source, '<workflow fixture>', 'exec'), {})
@@ -113,7 +114,7 @@ print(json.dumps([[dict(tag_name='v0.1.30')]]))
                 lookup.side_effect = subprocess.CalledProcessError(1, ['gh', 'release', 'view'])
                 with self.assertRaises(subprocess.CalledProcessError):
                     exec(compile(source, '<workflow fixture>', 'exec'), {})
-                self.assertEqual(len(calls), 2)
+                self.assertEqual(len(calls), 3)
 
 
     def test_release_selection_cannot_be_partial_or_malformed(self):
