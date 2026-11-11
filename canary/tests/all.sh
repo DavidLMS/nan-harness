@@ -52,6 +52,7 @@ for test_script in \
   release-publish-integration.py \
   windows-installer.py \
   windows-diagnostic.py \
+  kimi-startup-diagnostic.py \
   windows-summary.py \
   windows-release-assets.py \
   mimo-inventory-diagnostic.py mimo-inventory-workflow.py \

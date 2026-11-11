@@ -1,0 +1,44 @@
+name: Kimi Windows startup boundary diagnostic
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  observe:
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: windows-2025
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: '3.12'
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Build source-bound diagnostic without credentials
+        run: |
+          if ((git rev-parse HEAD) -cne $env:GITHUB_SHA) { throw 'source identity differs' }
+          cargo build --locked -p nan-harness-cli --bin nanh
+          if ($LASTEXITCODE -ne 0) { throw 'CLI build failed' }
+          cargo test --locked -p nan-harness-test-support --lib --no-run --message-format=json > (Join-Path $env:RUNNER_TEMP 'kimi-startup-test-build.jsonl')
+          if ($LASTEXITCODE -ne 0) { throw 'diagnostic test build failed' }
+      - name: Compare pinned fresh-profile startup boundaries
+        run: |
+          python canary/actions/kimi_startup_diagnostic.py
+          if ($LASTEXITCODE -ne 0) { throw 'closed startup experiment failed' }
+      - name: Retain only closed diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kimi-startup-diagnostic
+          path: ${{ runner.temp }}/kimi-startup-report.json
+          if-no-files-found: error
+          retention-days: 7

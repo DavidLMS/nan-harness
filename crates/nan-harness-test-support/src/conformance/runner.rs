@@ -24,6 +24,8 @@ use thiserror::Error;
 
 #[cfg(test)]
 mod inventory_diagnostic;
+#[cfg(test)]
+mod kimi_startup_diagnostic;
 mod scenarios;
 use super::environment;
 
@@ -46,6 +48,8 @@ pub struct PublishedConformanceRunner {
     hermes_stream_json: bool,
     #[cfg(test)]
     mimo_inventory_format: Option<inventory_diagnostic::MimoFormat>,
+    #[cfg(test)]
+    kimi_runtime_environment: bool,
 }
 
 impl PublishedConformanceRunner {
@@ -64,6 +68,8 @@ impl PublishedConformanceRunner {
             hermes_stream_json: false,
             #[cfg(test)]
             mimo_inventory_format: None,
+            #[cfg(test)]
+            kimi_runtime_environment: false,
         }
     }
 
@@ -271,6 +277,10 @@ impl PublishedConformanceRunner {
             for (name, value) in OPENCLAW_MEDIA_CREDENTIALS_CLEARED {
                 command = command.env(*name, *value);
             }
+        }
+        #[cfg(test)]
+        if self.kimi_runtime_environment && registration.kind == HarnessKind::KimiCode {
+            command = kimi_startup_diagnostic::restore_runtime_environment(command);
         }
         command.run().await.map_err(|error| {
             use crate::terminal::TerminalError;
