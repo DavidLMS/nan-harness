@@ -1,0 +1,42 @@
+name: Ubuntu package network diagnostic
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  observe:
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Compare bounded resolution and HTTPS across APT identities
+        shell: python
+        run: |
+          import json
+          import subprocess
+
+          def observe(command):
+              try:
+                  result = subprocess.run(command, capture_output=True, timeout=12)
+                  return result.returncode, result.stdout
+              except subprocess.TimeoutExpired:
+                  return 124, b''
+
+          # Fixed public endpoints only; no environment, addresses or raw errors.
+          for identity, prefix in [('runner', []), ('root', ['sudo']), ('apt', ['sudo', '-u', '_apt'])]:
+              status, _ = observe(prefix + ['test', '-r', '/etc/resolv.conf'])
+              print(json.dumps({'identity': identity, 'resolverReadable': status == 0}))
+              for host in ['archive.ubuntu.com', 'security.ubuntu.com', 'azure.archive.ubuntu.com', 'github.com']:
+                  for family in ['ahostsv4', 'ahostsv6']:
+                      status, output = observe(prefix + ['getent', family, host])
+                      print(json.dumps({'identity': identity, 'host': host, 'family': family,
+                                        'status': status, 'records': len(output.splitlines())}))
+                  status, output = observe(prefix + ['curl', '--disable', '--silent', '--head',
+                      '--output', '/dev/null', '--write-out', '%{http_code}',
+                      '--connect-timeout', '3', '--max-time', '8', 'https://' + host + '/'])
+                  code = output.decode('ascii', errors='ignore')
+                  print(json.dumps({'identity': identity, 'host': host, 'httpsStatus': status,
+                                    'httpCode': code if len(code) == 3 and code.isdigit() else None}))
