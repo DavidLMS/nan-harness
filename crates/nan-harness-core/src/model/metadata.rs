@@ -15,7 +15,7 @@ pub const KNOWN_NON_CODING_MODELS: [&str; 7] = [
     "qwen-image-2.1",
     "minimax-h3",
 ];
-pub const KNOWN_CODING_MODELS: [CodingModelMetadata; 12] = [
+pub const KNOWN_CODING_MODELS: [CodingModelMetadata; 14] = [
     CodingModelMetadata {
         id: "qwen3.6",
         display_name: "NaN · Qwen 3.6",
@@ -151,6 +151,27 @@ pub const KNOWN_CODING_MODELS: [CodingModelMetadata; 12] = [
         context_window: 1_000_000,
         max_output_tokens: 65_536,
         image_input: true,
+        reasoning: ReasoningPolicy::Unknown,
+    },
+    // NaN /v1/models (2026-11-16) advertises these chat models and exact limits.
+    // Modalities and reasoning controls are not documented yet; do not infer
+    // either from another model in the same family.
+    CodingModelMetadata {
+        id: "hy4-flash",
+        display_name: "NaN · Hy4 Flash",
+        description: "Text model · 1M context · capabilities pending verification",
+        context_window: 1_000_000,
+        max_output_tokens: 64_000,
+        image_input: false,
+        reasoning: ReasoningPolicy::Unknown,
+    },
+    CodingModelMetadata {
+        id: "qwen4-max",
+        display_name: "NaN · Qwen4 Max",
+        description: "Text model · 1M context · capabilities pending verification",
+        context_window: 1_000_000,
+        max_output_tokens: 131_000,
+        image_input: false,
         reasoning: ReasoningPolicy::Unknown,
     },
 ];

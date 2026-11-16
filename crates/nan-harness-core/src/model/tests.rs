@@ -324,6 +324,8 @@ fn external_models_receive_bundled_profiles_without_invented_reasoning_controls(
         ("qwen3.8-max", 131_072, true),
         ("deepseek-v4-pro", 393_216, false),
         ("hy4", 65_536, true),
+        ("hy4-flash", 64_000, false),
+        ("qwen4-max", 131_000, false),
     ] {
         let models = coding_models_from_provider_ids([id.to_owned()]);
         assert_eq!(models.len(), 1);
@@ -345,4 +347,19 @@ fn external_models_receive_bundled_profiles_without_invented_reasoning_controls(
                 .accepts(ReasoningSelection::Effort(ReasoningEffort::High))
         );
     }
+}
+
+#[test]
+fn new_chat_profiles_do_not_advertise_models_missing_from_discovery() {
+    assert!(coding_models_from_provider_ids(Vec::<String>::new()).is_empty());
+    let models = coding_models_from_provider_ids([
+        "hy4-flash".to_owned(),
+        "hy4-flash".to_owned(),
+        "unprofiled-chat".to_owned(),
+    ]);
+    assert_eq!(models.len(), 2);
+    assert_eq!(models[0].id, "hy4-flash");
+    assert_eq!(models[0].source, ProfileSource::Bundled);
+    assert_eq!(models[1].source, ProfileSource::Generic);
+    assert!(models.iter().all(|model| model.id != "qwen4-max"));
 }

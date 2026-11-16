@@ -7,6 +7,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Add explicit Hy4 Flash and Qwen4 Max profiles with the context and output
+  limits advertised by NaN's model API. Keep unverified vision and reasoning
+  controls conservative and preserve credential-scoped model discovery.
+
 ### Fixed
 
 - Let transient pre-click Zed Linux accessibility queries settle within their
