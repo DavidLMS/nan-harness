@@ -63,7 +63,7 @@ class LiveDiagnosticTests(unittest.TestCase):
             if outcome == "cleanup": raise diagnostic.cell.ProbeCleanupError("PRIVATE cleanup payload")
             if outcome == "timeout": raise diagnostic.cell.StageTimeout("PRIVATE timeout payload")
             if outcome == "failed": raise diagnostic.cell.ProbeFailure("tool-evidence", 1)
-            return 1
+            return diagnostic.cell.CheckResult(1, "synthetic native evidence") if outcome == "native" else 1
         with patch.multiple(diagnostic, CLI_SHA=cli_sha, CANARY_SHA=canary_sha), \
                 patch.dict(os.environ, {"GITHUB_SHA": args.source_sha, "GITHUB_REF": "refs/heads/main",
                     "RUNNER_TEMP": str(args.directory.parent), "NAN_API_KEY": "PRIVATE_PROVIDER_KEY", "GITHUB_TOKEN": "PRIVATE_READ_TOKEN"}), \
@@ -91,6 +91,14 @@ class LiveDiagnosticTests(unittest.TestCase):
         self.assertEqual(report["observation"], observation())
         self.assertFalse(report["qualification"])
         self.assertTrue(report["diagnosticsOnly"])
+
+    def test_native_session_success_remains_one_observed_probe(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report, calls = self.collect(self.inputs(Path(tmp)), observation("usage-summary"), outcome="native")
+        self.assertEqual(calls, ["install", "live", "after-observer"])
+        self.assertEqual(report["originalLiveStatus"], "passed")
+        self.assertEqual(report["status"], "observed")
+        self.assertFalse(report["qualification"])
 
     def test_passed_original_probe_does_not_become_qualification(self):
         with tempfile.TemporaryDirectory() as tmp:

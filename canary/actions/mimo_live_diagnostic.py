@@ -111,7 +111,8 @@ def collect(args):
         try:
             try:
                 completed = cell.live(command, state, observe=observe)
-                if completed != 1:
+                attempts = completed.attempts if isinstance(completed, cell.CheckResult) else completed
+                if attempts != 1:
                     raise ValueError("live probe did not complete once")
                 report.update(originalLiveStatus="passed", originalLiveStage="complete", originalLiveExitCode=0)
             except cell.ProbeFailure as failure:

@@ -149,16 +149,21 @@ case "$harness" in
     "$nan_command" mimo --model "$model" -- \
       run --pure --format json --dangerously-skip-permissions "$prompt" >"$output" 2>"$stderr_output"
     probe_stage='tool-evidence'
-    if [ "${NAN_CANARY_MIMO_SESSION_EVIDENCE:-}" = 0.1.16 ] \
+    if { [ "${NAN_CANARY_MIMO_SESSION_EVIDENCE:-}" = 0.1.16 ] \
+      || [ "${NAN_CANARY_MIMO_SESSION_EVIDENCE:-}" = 0.1.17 ]; } \
       && ! grep -q '[^[:space:]]' "$output"; then
+      probe_diagnostic='mimo-native-session-unverified'
       NAN_CANARY_MIMO_EXPECTED_PROMPT="$prompt" python3 "$probe_scripts/../actions/mimo_live_evidence.py" \
         "$workspace" "$marker" >/dev/null 2>/dev/null
-      probe_evidence='mimo-0.1.16-native-session-empty-stdout'
+      probe_diagnostic=''
+      probe_evidence="mimo-${NAN_CANARY_MIMO_SESSION_EVIDENCE}-native-session-empty-stdout"
       verify_read_marker=false
       verify_completion_marker=false
     else
+      probe_diagnostic='mimo-console-tool-evidence-missing'
       grep -F '"tool":"read"' "$output" "$stderr_output" >/dev/null \
         || grep -F '"read"' "$output" "$stderr_output" >/dev/null
+      probe_diagnostic=''
     fi
     ;;
   opencode)

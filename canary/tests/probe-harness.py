@@ -243,7 +243,8 @@ class ProbeHarnessTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"NAN_CANARY_MIMO_OBSERVATION": str(destination)}):
             result, marker = self.run_probe("mimo-code", mode="toolfailure")
         self.assertEqual(result.returncode, 1)
-        self.assertEqual(CELL.probe_result(marker), {"schemaVersion": 1, "stage": "tool-evidence", "status": "failed"})
+        self.assertEqual(CELL.probe_result(marker), {"schemaVersion": 1, "stage": "tool-evidence", "status": "failed",
+                                                   "diagnostic": "mimo-console-tool-evidence-missing"})
         value = json.loads(destination.read_text())
         self.assertEqual(value["stage"], "tool-evidence")
         self.assertEqual(value["stdout"]["status"], "empty")
@@ -313,22 +314,27 @@ class ProbeHarnessTests(unittest.TestCase):
         self.assertFalse(list(cell_root.rglob("harness-output.txt")))
 
     def test_mimo_native_evidence_qualifies_empty_stdout_and_retains_the_limitation(self):
-        cell_root = self.root / 'mimo-cell'
-        cell_root.mkdir()
-        args = type('Args', (), {'directory': cell_root, 'binary': self.bin / 'nanh',
-                                 'harness': 'mimo-code', 'model': 'qwen3.6', 'harness_version': '0.1.16'})()
-        with mock.patch.dict(os.environ, {'NAN_API_KEY': 'synthetic-key', 'NAN_CANARY_FAKE_MODE': 'mimopersisted',
-                                         'NAN_CANARY_MODEL_LOG': str(self.root / 'models.log'),
-                                         'MIMOCODE_DB': '', 'MIMOCODE_DISABLE_CHANNEL_DB': ''}):
-            result = CELL.live(args, {})
-        self.assertEqual(result, CELL.CheckResult(1, CELL.MIMO_SESSION_DETAIL))
-        self.assertIn('stdout was empty', result.detail)
-        self.assertFalse((cell_root / 'probe-result.json').exists())
-        self.assertEqual((self.root / 'models.log').read_text().splitlines(), ['qwen3.6'])
+        for index, version in enumerate(('0.1.16', '0.1.17')):
+            cell_root = self.root / ('mimo-cell-' + version)
+            cell_root.mkdir()
+            args = type('Args', (), {'directory': cell_root, 'binary': self.bin / 'nanh',
+                                     'harness': 'mimo-code', 'model': 'qwen3.6', 'harness_version': version})()
+            with mock.patch.dict(os.environ, {'NAN_API_KEY': 'synthetic-key', 'NAN_CANARY_FAKE_MODE': 'mimopersisted',
+                                             'NAN_CANARY_MODEL_LOG': str(self.root / 'models.log'),
+                                             'MIMOCODE_DB': '', 'MIMOCODE_DISABLE_CHANNEL_DB': ''}):
+                observed = []
+                result = CELL.live(args, {}, observe=observed.append)
+            self.assertEqual(len(observed), 1)
+            self.assertEqual(observed[0]["trajectory"]["status"], "observed")
+            self.assertEqual(result, CELL.CheckResult(1, CELL.MIMO_DETAIL_BY_EVIDENCE[CELL.MIMO_EVIDENCE_BY_VERSION[version]]))
+            self.assertIn('stdout was empty', result.detail)
+            self.assertFalse((cell_root / 'probe-result.json').exists())
+            self.assertEqual((self.root / 'models.log').read_text().splitlines(), ['qwen3.6'] * (index + 1))
 
     def test_mimo_native_evidence_never_uses_other_versions_or_unbound_prompts(self):
-        for version, mode in (('0.1.15', 'mimopersisted'), ('0.1.17', 'mimopersisted'),
+        for version, mode in (('0.1.15', 'mimopersisted'), ('0.1.18', 'mimopersisted'),
                               ('0.1.16', 'mimopersistedbare'), ('0.1.16', 'toolfailure'),
+                              ('0.1.17', 'mimopersistedbare'), ('0.1.17', 'toolfailure'),
                               ('', 'mimopersisted')):
             with self.subTest(version=version, mode=mode):
                 cell_root = self.root / 'mimo-cell'
@@ -339,8 +345,26 @@ class ProbeHarnessTests(unittest.TestCase):
                                                  'NAN_CANARY_MODEL_LOG': str(self.root / 'models.log'),
                                                  'NAN_CANARY_MIMO_SESSION_EVIDENCE': '0.1.16',
                                                  'MIMOCODE_DB': '', 'MIMOCODE_DISABLE_CHANNEL_DB': ''}):
-                    with self.assertRaises(CELL.ProbeFailure):
+                    with self.assertRaises(CELL.ProbeFailure) as failure:
                         CELL.live(args, {})
+                expected = ("mimo-native-session-unverified" if version in CELL.MIMO_EVIDENCE_BY_VERSION
+                            else "mimo-console-tool-evidence-missing")
+                self.assertEqual(failure.exception.diagnostic, expected)
+
+    def test_native_session_receipt_must_match_the_installed_version(self):
+        cell_root = self.root / 'mimo-cell'
+        cell_root.mkdir()
+        args = type('Args', (), {'directory': cell_root, 'binary': self.bin / 'nanh',
+                                 'harness': 'mimo-code', 'model': 'qwen3.6', 'harness_version': '0.1.17'})()
+        def forged_receipt(*_args, **_kwargs):
+            (cell_root / 'probe-result.json').write_text(json.dumps(dict(
+                schemaVersion=1, stage='complete', status='passed', evidence=CELL.MIMO_SESSION_EVIDENCE)))
+            return 0
+        with mock.patch.dict(os.environ, {'NAN_API_KEY': 'synthetic-key'}), \
+                mock.patch.object(CELL, 'private_command', side_effect=forged_receipt):
+            with self.assertRaises(CELL.ProbeFailure) as failure:
+                CELL.live(args, {})
+        self.assertEqual(failure.exception.stage, 'marker-missing')
 
     def test_native_evidence_detail_survives_the_live_stage_report(self):
         directory = self.root / 'report-cell'
@@ -405,7 +429,8 @@ class ProbeHarnessTests(unittest.TestCase):
         valid = tuple(CELL.PROBE_DIAGNOSTICS)
         for diagnostic in valid:
             marker = self.root / (diagnostic + ".json")
-            marker.write_text(json.dumps({"schemaVersion": 1, "stage": "completion-marker",
+            stage = "tool-evidence" if diagnostic in CELL.MIMO_PROBE_DIAGNOSTICS else "completion-marker"
+            marker.write_text(json.dumps({"schemaVersion": 1, "stage": stage,
                                           "status": "failed", "diagnostic": diagnostic}))
             self.assertEqual(CELL.probe_result(marker)["diagnostic"], diagnostic)
         malformed = self.root / "malformed.json"
@@ -622,7 +647,7 @@ class ProbeHarnessTests(unittest.TestCase):
                 CELL.failed_report(args, CELL.ProbeFailure("harness-run", 1, "private-provider-key"))
             self.assertNotIn("private-provider-key", args.output.read_text())
 
-    def test_failed_report_maps_all_aider_output_categories_without_reflection(self):
+    def test_failed_report_maps_closed_probe_categories_without_reflection(self):
         categories = tuple(CELL.PROBE_DIAGNOSTICS)
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -639,7 +664,10 @@ class ProbeHarnessTests(unittest.TestCase):
                                           "stage": "live", "trigger": "manual", "model": "qwen3.6",
                                           "harness": "aider", "canary": root / "canary"})()
                 with mock.patch.object(CELL, "private_command", return_value=0):
-                    CELL.failed_report(args, CELL.ProbeFailure("completion-marker", 1, diagnostic))
+                    stage = "completion-marker"
+                    if diagnostic in CELL.MIMO_PROBE_DIAGNOSTICS:
+                        args.harness, stage = "mimo-code", "tool-evidence"
+                    CELL.failed_report(args, CELL.ProbeFailure(stage, 1, diagnostic))
                 report = json.loads(args.output.read_text())
                 self.assertEqual(report["failure"]["code"], f"live-{diagnostic}-exit-1")
                 self.assertNotIn("secret", args.output.read_text())

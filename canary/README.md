@@ -185,7 +185,7 @@ private local logs when explicitly requested.
 ### MiMo live evidence observation
 
 Hosted live qualification on Linux/macOS accepts a narrowly versioned alternative
-for official MiMo 0.1.16 when its stdout is whitespace-only. The unchanged
+for official MiMo 0.1.16 and 0.1.17 when its stdout is whitespace-only. The unchanged
 `nanh mimo ... run --format json` command must exit successfully once. Before
 cleanup, a read-only snapshot must bind the fresh owned profile's sole principal
 user to the exact submitted prompt. Every principal assistant and tool must be
@@ -194,7 +194,8 @@ contain its private marker, and the final `stop` answer must contain both the
 read marker and completion marker. Foreign/ambiguous sessions, incomplete turns,
 failed tools, bridge sentinels and missing or invalid stores fail closed. Usage,
 stderr summary and workspace cleanup remain mandatory. There are no additional
-provider requests, replay or timeout changes.
+provider requests, replay or timeout changes. Missing console tool evidence and
+unverified native sessions produce separate closed failure codes.
 
 This qualifies NaN routing and task execution, not MiMo's headless output delivery.
 The existing report's `live-tool.detail` retains the fixed limitation and the job
@@ -204,12 +205,13 @@ MiMo installation, binary or source is modified. Old failed receipts remain
 failed; the changed policy requires a fresh complete release gate run.
 
 The manual `mimo-live-diagnostic.yml` workflow isolates the Linux ARM64 MiMo
-live probe against the exact attested v0.1.27 binaries. It requires one upstream
+live probe against the exact attested v0.1.31 draft binaries. It requires one upstream
 live approval and uses the separate main-only workers environment. It preserves
 the canonical install, live command, timeout, single attempt and assertions.
-An opt-in observer projects bounded JSON event counts, marker predicates and
+The observer uses the same version-bound acceptance policy as the release gate;
+enabling observation cannot change the verdict. It projects bounded JSON event counts, marker predicates and
 usage status before ephemeral capture cleanup. It also reads only the fresh
-owned session database, binding its sole principal user turn to MiMo 0.1.16's
+owned session database, binding its sole principal user turn to MiMo 0.1.17's
 exact quoting and empty non-TTY stdin representation of the private prompt.
 Other persisted input remains unbound. Bounded principal-turn, tool-state and error-family counts plus
 final-answer marker predicates distinguish persisted execution from event

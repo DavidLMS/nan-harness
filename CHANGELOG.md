@@ -9,6 +9,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Verify MiMo 0.1.17 live tasks from the exact native session when headless
+  stdout is empty, preserving strict tool, completion, usage and cleanup checks.
+  Distinguish missing console evidence from an unverified native session.
 - Reuse the installed Hermes package-manager runtime in managed profiles so
   native startup does not trigger a dependency update that fences chat sessions.
   Keep runtime selection private and retain the upstream update-fence diagnostic.

@@ -64,7 +64,9 @@ from selection import CLI_HARNESSES, PLATFORMS as HOSTED_PLATFORMS, resolve_mode
 from gentle_diagnostics import CODES as GENTLE_FAILURE_CODES
 from hermes_diagnostics import DIAGNOSTIC_CODES, safe_frames
 from mimo_live_observation import read_observation
-from mimo_live_evidence import EVIDENCE as MIMO_SESSION_EVIDENCE, DETAIL as MIMO_SESSION_DETAIL
+from mimo_live_evidence import (EVIDENCE as MIMO_SESSION_EVIDENCE, DETAIL as MIMO_SESSION_DETAIL,
+                                EVIDENCE_BY_VERSION as MIMO_EVIDENCE_BY_VERSION,
+                                DETAIL_BY_EVIDENCE as MIMO_DETAIL_BY_EVIDENCE)
 
 
 class CheckResult(NamedTuple):
@@ -473,7 +475,10 @@ PROBE_STAGES = frozenset({"setup", "harness-run", "tool-evidence", "read-marker"
                           "codex-qwen38", "codex-deepseek-v4",
                           "bridge-sentinel", "usage-evidence", "usage-summary", "media-capabilities", "media-plan", "media-tts", "media-stt", "media-image",
                           "cleanup", "complete"})
-PROBE_DIAGNOSTICS = frozenset({
+MIMO_PROBE_DIAGNOSTICS = frozenset({
+    "mimo-native-session-unverified", "mimo-console-tool-evidence-missing",
+})
+PROBE_DIAGNOSTICS = MIMO_PROBE_DIAGNOSTICS | frozenset({
     "aider-completion-marker-stdout-empty-stderr-empty",
     "aider-completion-marker-stdout-empty-stderr-nonempty",
     "aider-completion-marker-stdout-nonempty-stderr-empty",
@@ -1385,9 +1390,10 @@ def probe_result(path):
             or (value["status"] == "passed") != (value["stage"] == "complete")
             or ("diagnostic" in value and
                 (not isinstance(value["diagnostic"], str) or
-                 value["status"] != "failed" or value["stage"] != "completion-marker" or
+                 value["status"] != "failed" or
+                 value["stage"] != ("tool-evidence" if value["diagnostic"] in MIMO_PROBE_DIAGNOSTICS else "completion-marker") or
                  value["diagnostic"] not in PROBE_DIAGNOSTICS))
-            or ("evidence" in value and (value['status'] != 'passed' or not isinstance(value['evidence'], str) or value['evidence'] not in (MIMO_SESSION_EVIDENCE, *CODEX_REASONING_DETAILS)))):
+            or ("evidence" in value and (value['status'] != 'passed' or not isinstance(value['evidence'], str) or value['evidence'] not in (*MIMO_DETAIL_BY_EVIDENCE, *CODEX_REASONING_DETAILS)))):
         return None
     return value
 
@@ -1423,11 +1429,11 @@ def live(args, _state, observe=None):
     environment.pop("NAN_CANARY_MIMO_OBSERVATION", None)
     environment.pop("NAN_CANARY_MIMO_EXPECTED_PROMPT", None)
     environment.pop("NAN_CANARY_MIMO_SESSION_EVIDENCE", None)
-    # The historical directed observer retains its stdout-only diagnostic contract.
-    native_mimo = (observe is None and os.name != 'nt' and args.harness == 'mimo-code'
-                   and getattr(args, 'harness_version', '') == '0.1.16')
+    # Observing a probe must not change its acceptance policy.
+    native_mimo = (os.name != 'nt' and args.harness == 'mimo-code'
+                   and getattr(args, 'harness_version', '') in MIMO_EVIDENCE_BY_VERSION)
     if native_mimo:
-        environment['NAN_CANARY_MIMO_SESSION_EVIDENCE'] = '0.1.16'
+        environment['NAN_CANARY_MIMO_SESSION_EVIDENCE'] = args.harness_version
     if args.harness == "hermes" and hermes_machine_frontend(getattr(args, "harness_version", "")):
         environment["NAN_CANARY_HERMES_STREAM_JSON"] = "1"
     environment["NAN_CANARY_NAN_COMMAND"] = str(args.binary)
@@ -1470,10 +1476,11 @@ def live(args, _state, observe=None):
                 raise ProbeFailure("marker-missing", status)
             return CheckResult(1, CODEX_REASONING_DETAILS[result["evidence"]])
         if result.get('evidence') is not None:
-            if not native_mimo:
+            if not native_mimo or result['evidence'] != MIMO_EVIDENCE_BY_VERSION[args.harness_version]:
                 raise ProbeFailure('marker-missing', status)
-            print('::warning::' + MIMO_SESSION_DETAIL)
-            return CheckResult(1, MIMO_SESSION_DETAIL)
+            detail = MIMO_DETAIL_BY_EVIDENCE[result['evidence']]
+            print('::warning::' + detail)
+            return CheckResult(1, detail)
         return 1
     if result is not None and result["stage"] == "cleanup":
         raise ProbeCleanupError("live probe workspace cleanup is unproven")
@@ -1488,6 +1495,7 @@ def live(args, _state, observe=None):
         codes = result.get("diagnostics") or []
         diagnostic = codes[0] if len(codes) == 1 else None
     if diagnostic is not None and args.harness != "aider" and not (
+            args.harness == "mimo-code" and diagnostic in MIMO_PROBE_DIAGNOSTICS) and not (
             windows and diagnostic in WINDOWS_LIVE_DIAGNOSTICS):
         diagnostic = None
     raise ProbeFailure(result["stage"], status, diagnostic)
@@ -1632,7 +1640,9 @@ def failed_report(args, mismatch=None):
                 summary += " Source positions: " + json.dumps(mismatch.frames, separators=(",", ":")) + "."
     if isinstance(mismatch, ProbeFailure):
         code = (PROBE_DIAGNOSTIC_CODES.get(mismatch.diagnostic)
-                if args.harness == "aider" and mismatch.stage == "completion-marker"
+                if ((args.harness == "aider" and mismatch.stage == "completion-marker")
+                    or (args.harness == "mimo-code" and mismatch.stage == "tool-evidence"
+                        and mismatch.diagnostic in MIMO_PROBE_DIAGNOSTICS))
                 and mismatch.status == 1 else None)
         if mismatch.diagnostic in WINDOWS_LIVE_DIAGNOSTICS and mismatch.status == 1:
             code = mismatch.diagnostic + "-exit-1"
