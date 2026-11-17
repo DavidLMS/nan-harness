@@ -6,23 +6,13 @@ base = types.ModuleType("providers.base")
 class ProviderProfile:
     def __init__(self, **kwargs):
         self.__dict__.update(kwargs)
-registry = {}
-def register_provider(provider):
-    for name in (provider.name, *provider.aliases):
-        registry[name] = provider
-providers.register_provider = register_provider
+providers.register_provider = lambda provider: None
 base.ProviderProfile = ProviderProfile
 sys.modules["providers"] = providers
 sys.modules["providers.base"] = base
 scope = {}
 exec(sys.stdin.read(), scope)
 profile = scope["nan"]
-assert registry["nan"] is profile
-assert registry["custom:nan"] is profile
-assert "custom:foreign" not in registry
-assert registry["custom:nan"].build_api_kwargs_extras(
-    model="mimo-v2.6-flash", reasoning_config={"enabled": False}
-) == ({"chat_template_kwargs": {"enable_thinking": False}}, {})
 for model in ("qwen3.6", "gemma4", "glm5.3-flash"):
     for effort in ("low", "medium", "high", "max"):
         assert profile.build_api_kwargs_extras(model=model, reasoning_config={"effort": effort}) == ({}, {"reasoning_effort": effort})

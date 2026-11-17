@@ -360,6 +360,21 @@ class Qualification(unittest.TestCase):
                         "diagnostics": ["NH-HERMES-READINESS", "private synthetic payload"]}, 1)
         self.assertEqual(caught.exception.code, "conformance-hermes-history-create-readiness-exit-nonzero")
 
+    def test_mimo_disabled_reasoning_accepts_equivalent_wire_encodings_only(self):
+        for body in [
+            {"reasoning_effort": "none"},
+            {"chat_template_kwargs": {"enable_thinking": False}},
+            {"reasoning_effort": "none", "chat_template_kwargs": {"enable_thinking": False}},
+        ]:
+            self.assertTrue(native.thinking_disabled(body))
+        for body in [{}, {"reasoning_effort": None}, {"reasoning_effort": "low"},
+                     {"chat_template_kwargs": {}}, {"chat_template_kwargs": None},
+                     {"chat_template_kwargs": {"enable_thinking": 0}},
+                     {"reasoning_effort": "none", "chat_template_kwargs": {"enable_thinking": True}},
+                     {"reasoning_effort": "high", "chat_template_kwargs": {"enable_thinking": False}}]:
+            with self.subTest(body=body):
+                self.assertFalse(native.thinking_disabled(body))
+
     def test_reasoning_mismatch_receipts_retain_closed_cause(self):
         for suffix in ("MISMATCH", "REQUEST-ABSENT"):
             diagnostic = "NH-HERMES-REASONING-" + suffix

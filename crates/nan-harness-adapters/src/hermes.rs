@@ -91,9 +91,6 @@ class NanProviderProfile(ProviderProfile):
 
 nan = NanProviderProfile(
     name="nan",
-    # Hermes persists configured providers as custom:<key>; retain the same
-    # model-aware wire policy after native route canonicalization.
-    aliases=("custom:nan",),
     display_name="NaN",
     description="NaN model access",
     env_vars=("NAN_API_KEY",),

@@ -102,6 +102,24 @@ def session_ids(config):
         return [row[0] for row in database.execute("SELECT id FROM sessions WHERE title=?", ("nanh history proof",))]
 
 
+def thinking_disabled(body):
+    """Accept the two NaN wire encodings, never an absent or conflicting control.
+
+    Hermes 0.23.2 resolves configured routes through its generic custom provider,
+    which emits reasoning_effort instead of our legacy plugin's template toggle.
+    NaN documents reasoning_effort=none and enable_thinking=false as equivalent.
+    """
+    template = body.get("chat_template_kwargs", {})
+    if not isinstance(template, dict):
+        return False
+    effort, toggle = body.get("reasoning_effort"), template.get("enable_thinking")
+    if "reasoning_effort" in body and effort != "none":
+        return False
+    if "enable_thinking" in template and toggle is not False:
+        return False
+    return effort == "none" or toggle is False
+
+
 def run(args):
     root = Path(tempfile.mkdtemp(prefix="nanh-hermes-", dir=args.output.parent))
     protect_private(root)
@@ -207,7 +225,7 @@ def run(args):
         for name, model, level, predicate in [
             ("reasoning-effort", "qwen3.6", "high", lambda body: body.get("reasoning_effort") == "high"),
             ("reasoning-disabled", "qwen3.6", "none", lambda body: body.get("reasoning_effort") == "none"),
-            ("reasoning-toggle", "mimo-v2.6-flash", "none", lambda body: (body.get("chat_template_kwargs") or {}).get("enable_thinking") is False),
+            ("reasoning-toggle", "mimo-v2.6-flash", "none", thinking_disabled),
         ]:
             phase = name
             start = len(servers[1].requests)
