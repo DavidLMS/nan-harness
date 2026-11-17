@@ -12,7 +12,7 @@ use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
 
@@ -42,16 +42,26 @@ pub const UNSET_IN_CHILDREN: [&str; 5] = [
 pub type Response = (u16, Vec<u8>);
 pub type Route = (String, Response);
 
+// These cases test independent release flows, not simultaneous updates. A child
+// from another case can inherit a briefly open copy destination and leave Linux
+// reporting ETXTBSY after fs::copy returns. Keep each copied-binary fixture's
+// construction, child launches and teardown inside one ownership interval.
+static FIXTURE_PROCESS_ISOLATION: Mutex<()> = Mutex::new(());
+
 pub struct Fixture {
     directory: tempfile::TempDir,
     executable: PathBuf,
     base_url: String,
     requests: Arc<Mutex<Vec<String>>>,
     server: Option<Server>,
+    _process_isolation: MutexGuard<'static, ()>,
 }
 
 impl Fixture {
     pub fn new(routes: Vec<Route>) -> Self {
+        let process_isolation = FIXTURE_PROCESS_ISOLATION
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let directory = tempfile::tempdir().expect("temporary directory should exist");
         let executable = copied_executable(directory.path());
         let server = Server::start(routes);
@@ -63,6 +73,7 @@ impl Fixture {
             base_url,
             requests,
             server: Some(server),
+            _process_isolation: process_isolation,
         }
     }
 
