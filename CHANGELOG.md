@@ -17,6 +17,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Preserve Hermes model-specific reasoning controls when native provider routing
+  canonicalizes `nan` to `custom:nan`, and retain closed diagnostics when the
+  reasoning conformance request is absent or mismatched.
+
 - Let transient pre-click Zed Linux accessibility queries settle within their
   existing deadline and retain the same native Retry identity across layout movement.
 

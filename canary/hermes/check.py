@@ -212,7 +212,10 @@ def run(args):
             phase = name
             start = len(servers[1].requests)
             launch(servers[1], "NANH_REASONING_FIXTURE", model=model, reasoning=level)
-            if not any(predicate(body) for body in servers[1].requests[start:]):
+            observed = servers[1].requests[start:]
+            if not any(predicate(body) for body in observed):
+                diagnostics.append("NH-HERMES-REASONING-MISMATCH" if observed
+                                   else "NH-HERMES-REASONING-REQUEST-ABSENT")
                 raise RuntimeError()
             checks.append(name)
         phase = "native-state"

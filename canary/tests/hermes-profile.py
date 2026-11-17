@@ -360,6 +360,16 @@ class Qualification(unittest.TestCase):
                         "diagnostics": ["NH-HERMES-READINESS", "private synthetic payload"]}, 1)
         self.assertEqual(caught.exception.code, "conformance-hermes-history-create-readiness-exit-nonzero")
 
+    def test_reasoning_mismatch_receipts_retain_closed_cause(self):
+        for suffix in ("MISMATCH", "REQUEST-ABSENT"):
+            diagnostic = "NH-HERMES-REASONING-" + suffix
+            with self.assertRaises(cell.HermesConformanceFailure) as caught:
+                self.probe({"schemaVersion": 1, "status": "failed", "phase": "reasoning-toggle",
+                            "cleanup": "proven", "diagnostics": [diagnostic]}, 1)
+            self.assertEqual(caught.exception.diagnostics, (diagnostic,))
+            self.assertEqual(caught.exception.cleanup, "proven")
+            self.assertIn("reasoning-" + suffix.lower(), caught.exception.code)
+
     def test_missing_and_timed_out_probes_cannot_qualify(self):
         for failure, code in [(OSError(), "unavailable"), (cell.StageTimeout(), "timeout")]:
             with self.subTest(code=code), self.assertRaises(cell.ConformanceFailure) as caught:
