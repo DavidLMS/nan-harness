@@ -35,3 +35,9 @@ Native conversations are neither imported nor migrated. Rust owns the native
 foreground gateway and keeps the NaN bridge alive until the gateway drains;
 launch configuration is removed only after successful cleanup. History remains
 available to subsequent managed launches.
+
+Managed profiles copy the installed PM runtime selection and borrow its committed
+runtime generations alongside application dependencies. Missing PM state must not
+be confused with stale application dependencies: that starts an update during
+chat startup. A native `update_paused` refusal is retained as the closed
+`NH-HERMES-FRONTEND-UPDATE-PAUSED` diagnostic.

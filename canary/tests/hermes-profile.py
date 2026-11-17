@@ -34,6 +34,12 @@ spec.loader.exec_module(frame_diagnostics)
 
 
 class Qualification(unittest.TestCase):
+    def test_dependency_update_fence_has_a_closed_diagnostic(self):
+        from hermes_diagnostics import closed_frontend_diagnostics
+        codes = closed_frontend_diagnostics("Error: Gateway draining: update_paused\nprivate fixture payload")
+        self.assertEqual(codes, ["NH-HERMES-FRONTEND-UPDATE-PAUSED"])
+        self.assertIn(codes[0], cell.HERMES_PROFILE_DIAGNOSTICS)
+
     def test_fixture_removal_failure_still_writes_a_closed_failure_receipt(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "receipt.json"

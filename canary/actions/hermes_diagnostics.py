@@ -33,6 +33,7 @@ SIGNATURES = {
     "CONNECTION": ("Gateway connection failed; no local fallback", "Gateway connection/read failed; no local fallback"),
     "PROTOCOL": ("Gateway bootstrap timed out", "Invalid gateway bootstrap response",
                  "Gateway bootstrap identity changed; retry launch", "Gateway protocol mismatch; update/restart required"),
+    "UPDATE-PAUSED": ("Gateway draining: update_paused",),
     "CREDENTIALS": ("Error: credentials or agent init failed",),
     "TURN-FAILED": ("The admitted turn failed.",),
     "WORKER-UNKNOWN": ("Worker execution is unknown.",),

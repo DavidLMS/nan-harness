@@ -62,15 +62,31 @@ pub(super) fn dependencies(source: &Path, target: &Path) -> io::Result<()> {
         let output = target.join(name);
         owned_directory(&output)?;
         copy_private(&input.join("facts.json"), &output.join("facts.json"))?;
-        let environments = input.join("environments");
-        let link = output.join("environments");
-        if environments.is_dir() && !link.try_exists()? {
-            let environments = fs::canonicalize(environments)?;
-            #[cfg(unix)]
-            std::os::unix::fs::symlink(environments, link)?;
-            #[cfg(windows)]
-            std::os::windows::fs::symlink_dir(environments, link)?;
+        link_dependency_directory(&input.join("environments"), &output.join("environments"))?;
+        // Modern Hermes checks application currency through its independent PM
+        // runtime. Without its selection, valid copied facts look stale and each
+        // managed child starts a dependency update that fences the gateway.
+        let runtime = input.join("pm-runtime");
+        if runtime.join("selected.json").is_file() {
+            let staged = output.join("pm-runtime");
+            owned_directory(&staged)?;
+            copy_private(
+                &runtime.join("selected.json"),
+                &staged.join("selected.json"),
+            )?;
+            link_dependency_directory(&runtime.join("generations"), &staged.join("generations"))?;
         }
+    }
+    Ok(())
+}
+
+fn link_dependency_directory(source: &Path, target: &Path) -> io::Result<()> {
+    if source.is_dir() && !target.try_exists()? {
+        let source = fs::canonicalize(source)?;
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(source, target)?;
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(source, target)?;
     }
     Ok(())
 }
@@ -78,6 +94,58 @@ pub(super) fn dependencies(source: &Path, target: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn staged_pm_selection_borrows_generations_without_sharing_mutable_state() {
+        let source = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        let install = Path::new("0123456789abcdef");
+        let runtime = install.join("pm-runtime");
+        let generation = runtime.join("generations/committed");
+        fs::create_dir_all(source.path().join(&generation)).unwrap();
+        fs::write(source.path().join(install).join("facts.json"), "{}").unwrap();
+        let selection = r#"{"generation":"generations/committed","inputs":"synthetic"}"#;
+        fs::write(
+            source.path().join(&runtime).join("selected.json"),
+            selection,
+        )
+        .unwrap();
+        fs::write(
+            source.path().join(&runtime).join(".prepare.lock"),
+            "native lock",
+        )
+        .unwrap();
+        fs::write(
+            source.path().join(&generation).join("pm-runtime.json"),
+            "{}",
+        )
+        .unwrap();
+
+        dependencies(source.path(), target.path()).unwrap();
+        let staged = target.path().join(&runtime);
+        assert_eq!(
+            fs::read_to_string(staged.join("selected.json")).unwrap(),
+            selection
+        );
+        assert_eq!(
+            fs::canonicalize(staged.join("generations")).unwrap(),
+            fs::canonicalize(source.path().join(&runtime).join("generations")).unwrap()
+        );
+        assert!(!staged.join(".prepare.lock").exists());
+        fs::write(staged.join("selected.json"), "private selection").unwrap();
+        assert_eq!(
+            fs::read_to_string(source.path().join(&runtime).join("selected.json")).unwrap(),
+            selection
+        );
+        target.close().unwrap();
+        assert!(
+            source
+                .path()
+                .join(&generation)
+                .join("pm-runtime.json")
+                .is_file()
+        );
+    }
 
     #[test]
     fn staged_profile_copies_only_declared_files_and_private_dependency_facts() {

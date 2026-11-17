@@ -7,6 +7,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Reuse the installed Hermes package-manager runtime in managed profiles so
+  native startup does not trigger a dependency update that fences chat sessions.
+  Keep runtime selection private and retain the upstream update-fence diagnostic.
+
 ## [0.1.31] - 2026-11-17
 
 ### Added
