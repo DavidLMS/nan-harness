@@ -7,6 +7,11 @@ use std::time::Duration;
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
 use tokio::process::{Child, Command};
 
+// Port discovery briefly owns a listening socket. Serialize it with fixture
+// process creation so a concurrent spawn cannot inherit that reservation and
+// keep another test's port alive after the discovering handle closes.
+static PROCESS_SETUP: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 const CHILD_ENVIRONMENT: &str = "NAN_HARNESS_SEARCH_TEST_CHILD";
 // These exercise native process startup, not timeout policy. The second client
 // waits behind a lock held through the first client's host/Python readiness.
@@ -22,7 +27,8 @@ async fn restricted_job_search_host_does_not_inherit_the_client_console() {
     let port = free_port();
     let output = tokio::time::timeout(
         CLIENT_READY_TIMEOUT + Duration::from_secs(15),
-        Command::new("python.exe")
+        spawn_fixture(
+            Command::new("python.exe")
             .arg("-c")
             .arg(include_str!("search_supervisor_process/windows_console.py"))
             .arg(std::env::current_exe().expect("test executable"))
@@ -32,8 +38,12 @@ async fn restricted_job_search_host_does_not_inherit_the_client_console() {
             .env("NAN_HARNESS_SEARCH_TEST_PORT", port.to_string())
             // The probe owns a fresh console; it never sends events to the test runner's console.
             .creation_flags(0x0000_0010) // CREATE_NEW_CONSOLE
-            .kill_on_drop(true)
-            .output(),
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true),
+        )
+        .wait_with_output(),
     )
     .await
     .expect("console isolation probe timeout")
@@ -137,9 +147,12 @@ async fn child_session() {
 }
 
 fn spawn_child(directory: &std::path::Path, port: u16) -> Child {
-    child_command(directory, port)
-        .spawn()
-        .expect("child session should start")
+    spawn_fixture(&mut child_command(directory, port))
+}
+
+fn spawn_fixture(command: &mut Command) -> Child {
+    let _setup = PROCESS_SETUP.lock().expect("fixture setup lock");
+    command.spawn().expect("fixture process should start")
 }
 
 fn child_command(directory: &std::path::Path, port: u16) -> Command {
@@ -163,10 +176,8 @@ fn child_command(directory: &std::path::Path, port: u16) -> Command {
 async fn inherited_single_thread_runner_does_not_block_readiness() {
     let directory = tempfile::tempdir().expect("coordination directory");
     let port = free_port();
-    let mut session = child_command(directory.path(), port)
-        .env("RUST_TEST_THREADS", "1")
-        .spawn()
-        .expect("child session should start");
+    let mut session =
+        spawn_fixture(child_command(directory.path(), port).env("RUST_TEST_THREADS", "1"));
     wait_ready(&mut session).await;
     session
         .stdin
@@ -225,6 +236,7 @@ async fn connect(port: u16) -> bool {
 }
 
 fn free_port() -> u16 {
+    let _setup = PROCESS_SETUP.lock().expect("fixture setup lock");
     let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("free loopback port");
     listener.local_addr().expect("listener address").port()
 }
@@ -269,15 +281,15 @@ async fn abrupt_host_exit_closes_the_backend_lifetime_pipe() {
         serde_json::to_vec(&request).expect("request JSON"),
     )
     .expect("request");
-    let mut host = Command::new(env!("CARGO_BIN_EXE_nan-harness"))
-        .arg("__searxng-host")
-        .arg(&request_path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::inherit())
-        .kill_on_drop(true)
-        .spawn()
-        .expect("host");
+    let mut host = spawn_fixture(
+        Command::new(env!("CARGO_BIN_EXE_nan-harness"))
+            .arg("__searxng-host")
+            .arg(&request_path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit())
+            .kill_on_drop(true),
+    );
     assert_backend_state(port, true).await;
     host.kill().await.expect("kill owned host handle");
     assert_backend_state(port, false).await;
