@@ -6,19 +6,19 @@ on:
       release_tag:
         type: string
         required: true
-        default: v0.1.27
+        default: v0.1.31
       release_commit:
         type: string
         required: true
-        default: 7c74af43c6c2917737ad90859c0d2706d674e75f
+        default: 4c304946dcf96222ae500eff098a352ea6605211
       asset_run_id:
         type: string
         required: true
-        default: '40520278155'
+        default: '44101513342'
       manifest_sha256:
         type: string
         required: true
-        default: 205da655631c75615c33ac2a07520f7663aa3251c712fa9cdb493ba0bb7bf5b8
+        default: b2529e4a503ae55d81c5e2e9ed6a7167da44cb78129400d9d22b1e76e77e006d
 
 permissions:
   contents: read
@@ -98,7 +98,7 @@ jobs:
     if: ${{ !cancelled() && needs.prepare.result == 'success' && github.ref == 'refs/heads/main' }}
     uses: ./.github/workflows/live-check-approval.yml
     with:
-      subject: Run one Linux ARM64 MiMo 0.1.16 live probe with immutable v0.1.27 assets from 7c74af43c6c2917737ad90859c0d2706d674e75f, model qwen3.6 and controller ${{ github.sha }}; diagnostics only, no qualification or publication.
+      subject: Run one Linux ARM64 MiMo 0.1.17 live probe with immutable v0.1.31 assets from 4c304946dcf96222ae500eff098a352ea6605211, model qwen3.6 and controller ${{ github.sha }}; diagnostics only, no qualification or publication.
 
   observe:
     needs: [prepare, approve-live]

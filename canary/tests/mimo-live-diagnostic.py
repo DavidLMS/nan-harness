@@ -26,12 +26,12 @@ class LiveDiagnosticTests(unittest.TestCase):
         binary.write_bytes(b"synthetic immutable CLI")
         canary.write_bytes(b"synthetic immutable canary")
         receipt = dict(schemaVersion=1, controllerSha="a"*40, releaseTag=diagnostic.TAG,
-            releaseCommit=diagnostic.COMMIT, assetRunId=40520278155, assetWorkflowSha=diagnostic.COMMIT,
+            releaseCommit=diagnostic.COMMIT, assetRunId=44101513342, assetWorkflowSha=diagnostic.COMMIT,
             artifactId=1, artifactSha256="b"*64, manifestSha256=diagnostic.MANIFEST,
             nanHarnessSha256=diagnostic.inventory.digest(binary), canarySha256=diagnostic.inventory.digest(canary))
         provenance, manifest = root / "provenance.json", root / "manifest.json"
         provenance.write_text(json.dumps(receipt))
-        manifest.write_text(json.dumps({"harnesses": [dict(harness="mimo-code", version="0.1.16", system="linux",
+        manifest.write_text(json.dumps({"harnesses": [dict(harness="mimo-code", version="0.1.17", system="linux",
             architecture="aarch64", source="github:XiaomiMiMo/MiMo-Code", package="", model="qwen3.6", ref="")]}))
         return SimpleNamespace(binary=binary, canary=canary, provenance=provenance, manifest=manifest,
             source_sha="a"*40, directory=root / "cli-cell", output=root / "public.json")
@@ -44,9 +44,9 @@ class LiveDiagnosticTests(unittest.TestCase):
             self.assertNotIn("NAN_API_KEY", os.environ)
             self.assertNotIn("GITHUB_TOKEN", os.environ)
             self.assertEqual(command.directory, args.directory / "mimo-code")
-            self.assertEqual(command.harness_version, "0.1.16")
+            self.assertEqual(command.harness_version, "0.1.17")
             self.assertEqual(command.model, "qwen3.6")
-            state["harness"]["version"] = "0.1.16"
+            state["harness"]["version"] = "0.1.17"
             if mutate == "install": args.canary.write_bytes(b"changed")
             if mutate == "installer-failed": raise RuntimeError("PRIVATE installer payload")
         def live(command, state, observe=None):
@@ -55,7 +55,7 @@ class LiveDiagnosticTests(unittest.TestCase):
             self.assertNotIn("GITHUB_TOKEN", os.environ)
             self.assertEqual(command.mode, "live")
             self.assertEqual(command.trigger, "release")
-            self.assertEqual(state["harness"]["version"], "0.1.16")
+            self.assertEqual(state["harness"]["version"], "0.1.17")
             observe(value)
             if mutate == "repeat": observe(value)
             calls.append("after-observer")
@@ -124,7 +124,7 @@ class LiveDiagnosticTests(unittest.TestCase):
             self.assertEqual(report["reason"], "provenance-invalid" if phase == "before" else "binding-changed")
 
     def test_manifest_drift_is_rejected_before_install_or_live(self):
-        for key, value in (("version", "0.1.17"), ("architecture", "x86_64"), ("source", "PRIVATE"), ("ref", "a"*40)):
+        for key, value in (("version", "0.1.18"), ("architecture", "x86_64"), ("source", "PRIVATE"), ("ref", "a"*40)):
             with self.subTest(key=key), tempfile.TemporaryDirectory() as tmp:
                 args = self.inputs(Path(tmp)); manifest = json.loads(args.manifest.read_text())
                 manifest["harnesses"][0][key] = value; args.manifest.write_text(json.dumps(manifest))

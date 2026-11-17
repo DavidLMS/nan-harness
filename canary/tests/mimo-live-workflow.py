@@ -46,8 +46,8 @@ class LiveWorkflowTests(unittest.TestCase):
         self.assertEqual(len(re.findall(r'^      [a-z_0-9]+:$', SOURCE.split('permissions:', 1)[0], re.M)), 4)
         program = JOBS['prepare'].split("          python3 -B - <<'PY'\n", 1)[1].split('\n          PY', 1)[0]
         program = "import sys\nsys.path.insert(0, " + repr(str(ROOT)) + ")\n" + textwrap.dedent(program)
-        valid = dict(RELEASE_TAG='v0.1.27', RELEASE_COMMIT='7c74af43c6c2917737ad90859c0d2706d674e75f',
-                     ASSET_RUN_ID='40520278155', MANIFEST_SHA256='205da655631c75615c33ac2a07520f7663aa3251c712fa9cdb493ba0bb7bf5b8')
+        valid = dict(RELEASE_TAG='v0.1.31', RELEASE_COMMIT='4c304946dcf96222ae500eff098a352ea6605211',
+                     ASSET_RUN_ID='44101513342', MANIFEST_SHA256='b2529e4a503ae55d81c5e2e9ed6a7167da44cb78129400d9d22b1e76e77e006d')
         def status(values):
             with tempfile.TemporaryDirectory() as directory:
                 env = {key: value for key, value in os.environ.items() if key not in {*valid, 'NAN_API_KEY', 'GITHUB_TOKEN', 'GH_TOKEN'}}

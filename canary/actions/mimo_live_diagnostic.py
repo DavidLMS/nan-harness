@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Observe one canonical Linux MiMo live probe with immutable v0.1.27 assets."""
+"""Observe one canonical Linux MiMo live probe with immutable v0.1.31 assets."""
 import argparse
 import copy
 import json
@@ -13,11 +13,11 @@ import mimo_conformance_diagnostic as canonical
 import mimo_inventory_diagnostic as inventory
 import mimo_live_observation as observation
 
-TAG = "v0.1.27"
-COMMIT = "7c74af43c6c2917737ad90859c0d2706d674e75f"
-MANIFEST = "205da655631c75615c33ac2a07520f7663aa3251c712fa9cdb493ba0bb7bf5b8"
-CLI_SHA = "f68de8e51ee49b4cb26ae6e83197c6c04fa9e4ccec3ffd7cfa900ebc148ef0fa"
-CANARY_SHA = "fb805d3469f0eb34278076cdb44de6a9778420736f31f1b6bc02340cc83f78fd"
+TAG = "v0.1.31"
+COMMIT = "4c304946dcf96222ae500eff098a352ea6605211"
+MANIFEST = "b2529e4a503ae55d81c5e2e9ed6a7167da44cb78129400d9d22b1e76e77e006d"
+CLI_SHA = "b9a7bad292bee2935a3d0093e1b71052973f9453b8917b62e3f8dc5506eeb946"
+CANARY_SHA = "06fb9b8059b2c55418f61e9f88c7703ce42ef11967835628c5c7f600eb01c70f"
 
 
 def binding(args):
@@ -42,7 +42,7 @@ def frozen_selection(args):
     inventory.read_json(args.manifest)
     suite = inventory.windows.resolver_module()
     items = suite.read_frozen_manifest(args.manifest, ["mimo-code"], "linux", "aarch64", "qwen3.6")
-    if len(items) != 1 or items[0].version != "0.1.16" or items[0].ref or items[0].runtime_version:
+    if len(items) != 1 or items[0].version != "0.1.17" or items[0].ref or items[0].runtime_version:
         raise ValueError("frozen stock version differs")
     return items[0]
 
@@ -57,7 +57,7 @@ def probe_failure(report, failure):
 def collect(args):
     source = args.source_sha if type(args.source_sha) is str and inventory.SOURCE.fullmatch(args.source_sha) else None
     report = dict(schemaVersion=1, diagnosticsOnly=True, qualification=False, observerKind="canonical-live-controller",
-                  observerSourceSha=source, releaseProvenance=None, stockVersion="0.1.16", model="qwen3.6",
+                  observerSourceSha=source, releaseProvenance=None, stockVersion="0.1.17", model="qwen3.6",
                   platform={"system": "linux", "architecture": "aarch64"}, installStatus="not-run",
                   originalLiveStatus="not-run", originalLiveStage=None, originalLiveCode=None,
                   originalLiveExitCode=None, observationStatus="not-run", observation=None,
