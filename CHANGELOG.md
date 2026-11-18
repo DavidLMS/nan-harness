@@ -7,8 +7,13 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.32] - 2026-11-18
+
 ### Fixed
 
+- Classify a verified ChatGPT Desktop retry admission refusal as a native
+  interaction failure so the hosted gate can retry a fully cleaned session.
+  Keep actual response mismatches and uncertain dispatched actions blocking.
 - Verify MiMo 0.1.17 live tasks from the exact native session when headless
   stdout is empty, preserving strict tool, completion, usage and cleanup checks.
   Distinguish missing console evidence from an unverified native session.
@@ -1161,7 +1166,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.31...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.32...HEAD
+[0.1.32]: https://github.com/DavidLMS/nan-harness/compare/v0.1.31...v0.1.32
 [0.1.31]: https://github.com/DavidLMS/nan-harness/compare/v0.1.30...v0.1.31
 [0.1.30]: https://github.com/DavidLMS/nan-harness/compare/v0.1.29...v0.1.30
 [0.1.29]: https://github.com/DavidLMS/nan-harness/compare/v0.1.28...v0.1.29
