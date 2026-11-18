@@ -225,7 +225,7 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
           || !await editor.evaluate((element,held)=>element===held,original)
           || await page.locator('[role="dialog"]:visible, [role="alertdialog"]:visible').count()!==0
           || await locator.count()!==1 || !await locator.isEnabled()) throw new Error('control');
-      const handle=await locator.elementHandle();
+      let handle=await locator.elementHandle();
       const inspect=async()=>{
         if (!guard() || !await additionalProof()) {
           observation.sampleStatus='guard-rejected';return null;
@@ -248,12 +248,23 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
           if(action==='onboarding' && await locator.count()===0
               && await handle.evaluate(element=>!element.isConnected))return false;
           if(action==='onboarding' && controlCount===1) {
-            // Stop this session before dispatch. A replaced choice is a UI
-            // readiness failure only while its original enclosing custody holds.
+            // Picker switches between its key form and provider list as the
+            // asynchronous catalog arrives; both render the same ChooseLaterLink.
+            // Reacquire only before input, inside the original cover/document and
+            // composer. Every new handle must pass the full stable-hit sampling.
             await frame();
             if(await additionalProof() && await roots.count()===1 && await editor.count()===1
                 && await roots.evaluate((element,held)=>element===held,originalRoot)
                 && await editor.evaluate((element,held)=>element===held,original) && guard()) {
+              const acquisitions=facts.onboardingReacquisitions||0;
+              if(acquisitions<3 && await locator.isVisible() && await locator.isEnabled()) {
+                await handle.dispose();
+                handle=await locator.elementHandle();
+                facts.onboardingReacquisitions=acquisitions+1;
+                last=null;previous=null;stableSamples=0;
+                await delay(Math.min(100,Math.max(0,deadline-Date.now())));
+                continue;
+              }
               facts.onboardingCustodyVerified=true;
               facts.errorCategory='onboarding-control-replaced';
             }

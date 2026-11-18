@@ -7,6 +7,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Settle Hermes Desktop's asynchronous Windows onboarding before clicking its
+  provider-skip control. Reacquire only within the original owned surface and
+  deadline, with fresh hit checks and no repeated input after dispatch.
+
 ## [0.1.32] - 2026-11-18
 
 ### Fixed

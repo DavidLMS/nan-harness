@@ -5,7 +5,7 @@ async function trial(scenario) {
  const menuFailure=scenario.startsWith('menu-failure-');
  const deadline=menuFailure||scenario==='frame-request-error'?120000:3000;
  let clock=0,opened=false,owner=true,refreshClicks=0,pillClicks=0,escapes=0,skipClicks=0,rowReads=0;
- let clickCalls=0,snapshotCalls=0;
+ let clickCalls=0,snapshotCalls=0,choiceAcquisitions=0;
  let coverReads=0, actionSamples=0, frameReads=0, pillSamples=0, coverDismissed=false;
  let onboardingPresent=scenario.startsWith('onboarding-') && !scenario.startsWith('onboarding-late-');
  let pageReplacedByOwner=false,choiceReplaced=false;
@@ -88,7 +88,7 @@ async function trial(scenario) {
  }};
  const choice={count:async()=>(scenario.startsWith('onboarding-auto-dismiss')||scenario.startsWith('onboarding-dismiss-before-click'))&&!onboardingPresent?0:scenario==='onboarding-missing-choice'?0:scenario==='onboarding-duplicate-choice'?2:1,
    isVisible:async()=>scenario!=='onboarding-pending-visible' || clock>=300,
-   isEnabled:async()=>scenario!=='onboarding-disabled' && (scenario!=='onboarding-pending-enabled' || clock>=300),elementHandle:async()=>choiceHandle,evaluate:async()=>{if(scenario.startsWith('onboarding-choice-replaced')){choiceReplaced=true;if(scenario.endsWith('owner-loss'))owner=false;return false;}if(scenario.startsWith('onboarding-dismiss-before-click')){onboardingPresent=false;return false;}return true;}};
+   isEnabled:async()=>scenario!=='onboarding-disabled' && (scenario!=='onboarding-pending-enabled' || clock>=300),elementHandle:async()=>{choiceAcquisitions++;return choiceHandle;},evaluate:async()=>{if(scenario==='onboarding-choice-replaced-once'&&choiceReplaced)return true;if(scenario.startsWith('onboarding-choice-replaced')){choiceReplaced=true;if(scenario.endsWith('owner-loss'))owner=false;return false;}if(scenario.startsWith('onboarding-dismiss-before-click')){onboardingPresent=false;return false;}return true;}};
  const cover={count:async()=>{if(scenario==='onboarding-cover-pending'&&++coverReads<3)return 0;if(scenario.startsWith('onboarding-auto-dismiss') && !coverDismissed){onboardingPresent=false;coverDismissed=true;}return onboardingPresent?(scenario==='onboarding-duplicate-cover'?2:1):0;},
    isVisible:async()=>onboardingPresent,getByRole:()=>choice,elementHandle:async()=>heldCover,
    evaluate:async()=>scenario!=='onboarding-replaced' && !(choiceReplaced&&scenario.endsWith('cover-loss'))};
@@ -133,7 +133,7 @@ async function trial(scenario) {
    return owner && !(scenario==='startup-owner-loss' && clock>=200) && !(scenario==='stability-owner-loss' && clock>=100);
  },deadline,'default');
  assert(!JSON.stringify(facts).includes('PRIVATE'));
- return {facts,pillClicks,refreshClicks,escapes,skipClicks,rowReads,clickCalls,snapshotCalls};
+ return {facts,pillClicks,refreshClicks,escapes,skipClicks,rowReads,clickCalls,snapshotCalls,choiceAcquisitions};
 }
 // Execute the serialized browser callback without Node helper bindings.
 function sampled(blocker) {
@@ -312,11 +312,18 @@ for(const element of [modelElement([text('Qwen3.6 27B'),meta]),modelElement([tex
   const rejected=await trial(scenario);assert.notEqual(rejected.facts.stage,'ready');
   assert.equal(rejected.skipClicks,0);assert.equal(rejected.pillClicks,0);
  }
+ const resettled=await trial('onboarding-choice-replaced-once');
+ assert.equal(resettled.facts.stage,'ready');
+ assert.equal(resettled.facts.onboardingReacquisitions,1);
+ assert.equal(resettled.choiceAcquisitions,2);
+ assert.equal(resettled.skipClicks,1);assert.equal(resettled.pillClicks,1);assert.equal(resettled.refreshClicks,1);
  for(const suffix of ['', '-owner-loss', '-cover-loss', '-editor-loss', '-root-loss', '-frame-loss']) {
    const result=await trial('onboarding-choice-replaced'+suffix);
    assert.equal(result.skipClicks,0);assert.equal(result.pillClicks,0);assert.equal(result.refreshClicks,0);
    if(suffix==='') {
      assert.equal(result.facts.errorCategory,'onboarding-control-replaced');
+     assert.equal(result.facts.onboardingReacquisitions,3);
+     assert.equal(result.choiceAcquisitions,4);
      assert.equal(result.facts.onboardingCustodyVerified,true);
      assert.equal(result.facts.actionObservation.sampleStatus,'control-replaced');
    } else {

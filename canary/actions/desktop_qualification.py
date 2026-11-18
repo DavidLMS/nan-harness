@@ -1399,7 +1399,7 @@ def semantic_observations(directory, app, platform=None):
             fields = booleans | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'stage', 'errorCategory'}
             diagnostics = {'composerObservation', 'guardFailure'}
             optional = {'actionObservation', 'onboardingSkipped', 'onboardingObservation', 'queryFailure',
-                        'frameTransitionWaited', 'catalogState', 'clickFailure', 'menuClickRecovered', 'frameRequestRetries', 'onboardingCustodyVerified'}
+                        'frameTransitionWaited', 'catalogState', 'clickFailure', 'menuClickRecovered', 'frameRequestRetries', 'onboardingCustodyVerified', 'onboardingReacquisitions'}
             stages = {'policy', 'onboarding', 'menu', 'refresh', 'catalog', 'dismiss', 'composer', 'ready'}
             errors = {None, 'policy-rejected', 'onboarding-unavailable', 'onboarding-control-replaced', 'menu-unavailable', 'menu-timeout', 'refresh-uncertain',
                       'catalog-unavailable', 'dismiss-uncertain', 'composer-changed', 'composer-unavailable'}
@@ -1521,6 +1521,11 @@ def semantic_observations(directory, app, platform=None):
                 if type(value['onboardingSkipped']) is not bool:
                     raise ValueError('invalid Hermes onboarding observation')
                 record['onboardingSkipped'] = value['onboardingSkipped']
+            if 'onboardingReacquisitions' in value:
+                count = value['onboardingReacquisitions']
+                if type(count) is not int or not 1 <= count <= 3 or 'onboardingObservation' not in value:
+                    raise ValueError('invalid Hermes onboarding reacquisition count')
+                record['onboardingReacquisitions'] = count
             if 'onboardingCustodyVerified' in value or value['errorCategory'] == 'onboarding-control-replaced':
                 if (value.get('onboardingCustodyVerified') is not True
                         or value['errorCategory'] != 'onboarding-control-replaced' or value['stage'] != 'onboarding'

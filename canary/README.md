@@ -856,9 +856,14 @@ retained, and no failed probe is promoted to a pass.
 Hermes Windows also admits a blocked pre-launch retry for two closed cases:
 a model-menu timeout with retained custody, or a replaced onboarding choice
 before dispatch while the original document, cover, root and editor are still
-verified. The replaced choice is never clicked or adopted. Missing ownership
-proof and failed cleanup remain terminal; the replacement observation cannot
-admit multiple unrelated blocked probes.
+verified. Before any onboarding click, the pinned Picker may switch from its key form to
+its asynchronously loaded provider list, replacing the same ChooseLaterLink.
+The readiness controller may reacquire that exact role/name up to three times
+within the original deadline, only while the original document, cover, root and
+editor remain owned. Each new handle must pass fresh stable-hit samples before
+one click. Persistent replacement, missing ownership proof and failed cleanup
+remain terminal; the replacement observation cannot admit multiple unrelated
+blocked probes. A menu click with an uncertain effect is never dispatched again.
 
 During recovery, a whole turn-group replacement remains a refused action. When
 the same observation proves the exact session URL and retained parent, viewport

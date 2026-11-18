@@ -2558,6 +2558,14 @@ class QualificationTests(unittest.TestCase):
                                                     choiceVisible=True, choiceEnabled=True))
             path.write_text(json.dumps(value))
             self.assertEqual(q.semantic_observations(root, 'hermes-desktop'), [value])
+            for count in (1, 3):
+                path.write_text(json.dumps({**value, 'onboardingReacquisitions': count}))
+                self.assertEqual(q.semantic_observations(root, 'hermes-desktop')[0]['onboardingReacquisitions'], count)
+            for count in (0, 4, True, 'PRIVATE', None):
+                path.write_text(json.dumps({**value, 'onboardingReacquisitions': count}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'hermes-desktop')
+            path.write_text(json.dumps(value))
             dom = dict(schemaVersion=1, mechanism='hermes-renderer-qualification',
                        endpointOwned=True, targetVerified=True, attached=True, inputSubmitted=False,
                        errorCategory='readiness-control-changed')
