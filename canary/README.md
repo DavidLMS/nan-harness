@@ -845,6 +845,14 @@ identity failures and semantic mismatches stop immediately. Startup diagnostics
 remain single-attempt. Each retry creates a new checker session and fact directory;
 the frozen installation is reused and its identity rechecked.
 
+ChatGPT Desktop also reports a native interaction failure when the owned renderer
+refuses the Retry admission guard before dispatching any input. The checker
+requires the bound renderer, a valid closed refusal at the admission phase, and
+explicitly unattempted retry and input submission. This permits another complete
+session only after the normal cleanup checks; response mismatches, post-dispatch
+uncertainty and missing ownership remain blocking. The refusal diagnostics are
+retained, and no failed probe is promoted to a pass.
+
 Hermes Windows also admits a blocked pre-launch retry for two closed cases:
 a model-menu timeout with retained custody, or a replaced onboarding choice
 before dispatch while the original document, cover, root and editor are still

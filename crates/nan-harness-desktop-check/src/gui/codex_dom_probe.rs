@@ -171,7 +171,7 @@ struct Facts {
 }
 
 impl Facts {
-    fn owned(&self) -> bool {
+    fn binding_owned(&self) -> bool {
         self.schema_version == 1
             && self.mechanism == "codex-renderer-qualification"
             && self.diagnostics_only.confirmed()
@@ -182,6 +182,10 @@ impl Facts {
             && self.auxiliary_inert.confirmed()
             && self.coding_composer_ready.confirmed()
             && self.assistant_turn_count <= 4096
+    }
+
+    fn owned(&self) -> bool {
+        self.binding_owned()
             && self.error_category.is_none()
             && self.pre_attach_failure.is_none()
             && self.composer_admission_failure.is_none()
@@ -241,6 +245,28 @@ impl Facts {
             }
         }
     }
+    fn failure_reason(&self, turn: DomTurn<'_>) -> Reason {
+        // A refused admission dispatched no retry. A fresh, fully cleaned session
+        // may retry this native interaction without accepting a response mismatch.
+        if matches!(turn.action, DomAction::Retry)
+            && self.binding_owned()
+            && self.diagnostics_valid()
+            && matches!(self.retry_click_phase, Some(RetryClickPhase::Admission))
+            && self
+                .retry_click_refusal
+                .as_ref()
+                .is_some_and(RetryClickRefusal::guard_rejected)
+            && !self.retry_attempted.confirmed()
+            && !self.input_submitted.confirmed()
+            && self.pre_attach_failure.is_none()
+            && self.composer_admission_failure.is_none()
+        {
+            Reason::ActionUnsupported
+        } else {
+            Reason::ResponseMismatch
+        }
+    }
+
     fn accepted(&self, turn: DomTurn<'_>, provider: &ProviderGate) -> bool {
         self.ui_verified(turn)
             && match (turn.action, turn.purpose) {
@@ -411,7 +437,7 @@ fn execute_turn(
     if facts.accepted(turn, provider) {
         Ok(())
     } else {
-        Err(Reason::ResponseMismatch)
+        Err(facts.failure_reason(turn))
     }
 }
 
@@ -555,6 +581,55 @@ mod tests {
             TurnReservation::default().reserve(retry),
             Err(Reason::IsolationUnavailable)
         );
+    }
+
+    #[test]
+    fn only_owned_pre_retry_admission_refusals_are_native_failures() {
+        let value = serde_json::json!({
+            "schemaVersion":1,"mechanism":"codex-renderer-qualification","diagnosticsOnly":true,
+            "endpointOwned":true,"targetVerified":true,"attached":true,"bindingVerified":true,
+            "auxiliaryInert":true,"codingComposerReady":true,"uniqueComposer":true,"inputReadback":false,
+            "inputSubmitted":false,"userTurnObserved":false,"assistantTurnCount":0,"responseVerified":false,
+            "errorObserved":false,"retryControl":true,"retryAttempted":false,"retryCompleted":false,
+            "errorCategory":"action-uncertain","retryClickPhase":"admission",
+            "retryClickRefusal":{"reason":"guard-rejected","remainingMs":35114,
+                                 "first":null,"second":null,"final":null}
+        });
+        let retry = turn(DomAction::Retry, DomPurpose::Response);
+        let facts: Facts = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(facts.failure_reason(retry), Reason::ActionUnsupported);
+        assert!(!facts.ui_verified(retry));
+        assert_eq!(
+            facts.failure_reason(turn(DomAction::Submit, DomPurpose::Response)),
+            Reason::ResponseMismatch
+        );
+        for (key, replacement) in [
+            ("endpointOwned", false.into()),
+            ("bindingVerified", false.into()),
+            ("targetVerified", false.into()),
+            ("attached", false.into()),
+            ("retryAttempted", true.into()),
+            ("inputSubmitted", true.into()),
+            ("retryCompleted", true.into()),
+            ("retryControl", false.into()),
+            ("retryClickPhase", "post-guard".into()),
+            ("retryClickPhase", "complete".into()),
+            ("errorCategory", "ownership-lost".into()),
+            ("retryClickRefusal", serde_json::Value::Null),
+        ] {
+            let mut changed = value.clone();
+            if replacement.is_null() {
+                changed.as_object_mut().unwrap().remove(key);
+            } else {
+                changed[key] = replacement;
+            }
+            let facts: Facts = serde_json::from_value(changed).unwrap();
+            assert_eq!(
+                facts.failure_reason(retry),
+                Reason::ResponseMismatch,
+                "{key}"
+            );
+        }
     }
 
     #[test]
