@@ -64,6 +64,28 @@ class QualificationRetryTests(unittest.TestCase):
             result['probes'][0]['reason'] = reason
             self.assertFalse(runner.retryable_qualification(result))
 
+    def test_window_acquisition_interruption_retries_complete_session(self):
+        interrupted = dict(status='blocked', reason='window-changed', steps=[])
+        pending = dict(status='blocked', reason='not-run', steps=[])
+        result = {**self.result(), 'app': 'claude-desktop', 'platform': 'macos',
+                  'probes': [interrupted, pending, pending]}
+        passed = {**result, 'outcome': 'passed', 'reason': None,
+                  'probes': [dict(status='passed')] * 3}
+        self.assertEqual(self.execute([result, passed], [1, 0])[:2], (0, 2))
+        self.assertEqual(self.execute([result] * 3, [1] * 3)[:2], (1, 3))
+        for change in ({'appCleanup': 'failed'}, {'globalCleanup': 'failed'},
+                       {'semanticObservations': [{'clipboardCleanup': 'failed'}]}):
+            self.assertFalse(runner.retryable_qualification({**result, **change}))
+        for probes in ([pending] * 3,
+                       [pending, interrupted, pending],
+                       [{**interrupted, 'steps': ['launched']}, pending, pending],
+                       [interrupted, dict(status='failed', reason='response-mismatch'), pending],
+                       [interrupted, dict(status='passed'), pending]):
+            self.assertFalse(runner.retryable_qualification({**result, 'probes': probes}))
+        for reason in ('isolation-unavailable', 'identity-mismatch', 'selector-not-matched'):
+            self.assertFalse(runner.retryable_qualification({**result, 'probes': [
+                {**interrupted, 'reason': reason}, pending, pending]}))
+
     def test_blocked_readiness_timeout_needs_typed_hermes_evidence_and_cleanup(self):
         result = self.result()
         result.update(app='hermes-desktop', platform='windows', semanticObservations=[

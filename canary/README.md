@@ -845,6 +845,11 @@ identity failures and semantic mismatches stop immediately. Startup diagnostics
 remain single-attempt. Each retry creates a new checker session and fact directory;
 the frozen installation is reused and its identity rechecked.
 
+A blocked `window-changed` before probe launch also permits a fresh session.
+The checker stops at that window guard, so its trailing blocked `not-run`
+probes are eligible only after that exact interruption. Standalone unstarted
+probes, post-launch blocked changes and cleanup failures remain terminal.
+
 ChatGPT Desktop also reports a native interaction failure when the owned renderer
 refuses the Retry admission guard before dispatching any input. The checker
 requires the bound renderer, a valid closed refusal at the admission phase, and

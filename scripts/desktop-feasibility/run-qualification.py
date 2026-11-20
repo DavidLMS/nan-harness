@@ -670,15 +670,24 @@ def retryable_qualification(result):
     readiness_control_change = (result.get('app') == 'hermes-desktop' and result.get('platform') == 'windows'
                                 and len(control_changes) == 1
                                 and sum(probe.get('status') == 'blocked' for probe in failed) == 1)
+    # The checker stops on a window guard and leaves later probes unstarted.
+    # Retry the whole cleaned session, never resume the changed window.
+    window_interruption = next((index for index, probe in enumerate(probes)
+                                if probe == dict(status='blocked', reason='window-changed', steps=[])), None)
+    interrupted_tail = (window_interruption is not None
+                        and all(probe == dict(status='blocked', reason='not-run', steps=[])
+                                for probe in probes[window_interruption + 1:]))
     return (result.get('reason') == 'incomplete-acceptance'
             and result.get('appCleanup') == 'passed'
             and result.get('globalCleanup') == 'passed'
             and len(probes) == 3 and bool(failed)
-            and all((probe.get('status') == 'failed' and probe.get('reason') in RETRYABLE_REASONS)
+            and all(probe.get('status') == 'passed'
+                    or (probe.get('status') == 'failed' and probe.get('reason') in RETRYABLE_REASONS)
+                    or (interrupted_tail and index >= window_interruption)
                     or (readiness_timeout and probe.get('status') == 'blocked'
                         and probe.get('reason') == 'timeout' and probe.get('steps') == [])
                     or (readiness_control_change and probe.get('status') == 'blocked'
-                        and probe.get('reason') == 'selector-not-matched' and probe.get('steps') == []) for probe in failed)
+                        and probe.get('reason') == 'selector-not-matched' and probe.get('steps') == []) for index, probe in enumerate(probes))
             and all(item.get('clipboardCleanup', 'passed') == 'passed' for item in observations)
             and all(item.get('restored') is True for item in observations
                     if item.get('mechanism') == 'windows-foreground-session'))

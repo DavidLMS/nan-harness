@@ -9,6 +9,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Retry a fully cleaned Desktop qualification session after a pre-launch window
+  change, including the probes the checker left unstarted after that guard.
+
 - Settle Hermes Desktop's asynchronous Windows onboarding before clicking its
   provider-skip control. Reacquire only within the original owned surface and
   deadline, with fresh hit checks and no repeated input after dispatch.
