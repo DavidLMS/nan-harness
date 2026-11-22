@@ -9,6 +9,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Authenticate daily Desktop GitHub metadata reads separately from the
+  credential-free checker and installers, preserving per-publisher failures.
+
 - Retry a fully cleaned Desktop qualification session after a pre-launch window
   change, including the probes the checker left unstarted after that guard.
 

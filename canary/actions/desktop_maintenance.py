@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plan credential-free desktop maintenance; source qualification is not release evidence."""
+"""Plan isolated desktop maintenance; source qualification is not release evidence."""
 import argparse
 import hashlib
 import io
@@ -19,6 +19,8 @@ from desktop_qualification import matrix
 from desktop_suite import read_frozen_manifest
 
 APPS = ('zed-desktop', 'chatgpt-desktop', 'claude-desktop', 'hermes-desktop')
+GITHUB_APPS = ('zed-desktop', 'hermes-desktop')
+RESOLVER_APPS = tuple(app for app in APPS if app not in GITHUB_APPS)
 TARGETS = {'linux': ('x86_64', 'linux-x64'), 'macos': ('aarch64', 'macos-arm64'),
            'windows': ('x86_64', 'windows-x64')}
 SHA = re.compile(r'[a-f0-9]{40}\Z')
@@ -159,12 +161,30 @@ def previous(repository, branch, source_sha, fetch=api, download=read_artifact):
     return records
 
 
+def resolve_github(platform, directory, diagnostics):
+    """Authenticate only the metadata reader, never the checker or installers."""
+    entries = {}
+    for app in GITHUB_APPS:
+        manifest = directory / f'{platform}-{app}.json'
+        argv = [sys.executable, str(ROOT / 'scripts/desktop-feasibility/freeze-official.py'),
+                '--app', app, '--platform', platform, '--output', str(manifest)]
+        environment = {k: v for k, v in os.environ.items() if k != 'NAN_API_KEY'}
+        try:
+            subprocess.run(argv, env=environment, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, check=True, timeout=180)
+            frozen = read_frozen_manifest(manifest, [app], platform, TARGETS[platform][0], 'qwen3.6')
+            entries[app] = frozen['apps'][0]
+        except (ValueError, OSError, subprocess.SubprocessError):
+            diagnostics[app] = {'errorCategory': 'resolution-failed'}
+    return entries
+
+
 def resolve(checker, platform, directory, diagnostics):
     architecture, target = TARGETS[platform]
     manifest = directory / (platform + '.json')
     argv = [str(checker), 'resolve', '--target', target, '--model', 'qwen3.6',
             '--artifacts', str(directory / (platform + '-artifacts')), '--output', str(manifest)]
-    for app in APPS:
+    for app in RESOLVER_APPS:
         argv += ['--app', app]
     # No GitHub or provider credentials enter the resolver or staged vendor bytes.
     env = {k: v for k, v in os.environ.items() if k not in {'GH_TOKEN', 'GITHUB_TOKEN', 'NAN_API_KEY'}}
@@ -180,7 +200,7 @@ def resolve(checker, platform, directory, diagnostics):
                 if event['kind'] == 'prepare' and record['stage'] == 'frozen-resolution':
                     diagnostics[record['app']] = {key: record[key] for key in
                         ('errorCategory', 'transportCategory', 'operation', 'httpStatus') if key in record}
-    return read_frozen_manifest(manifest, APPS, platform, architecture, 'qwen3.6')['apps']
+    return read_frozen_manifest(manifest, RESOLVER_APPS, platform, architecture, 'qwen3.6')['apps']
 
 
 def main():
@@ -202,10 +222,11 @@ def main():
         for platform in TARGETS:
             expected = baseline(platform)
             diagnostics = {}
+            entries = resolve_github(platform, Path(temporary), diagnostics)
             try:
-                entries = {item['app']: item for item in resolve(args.checker, platform, Path(temporary), diagnostics)}
+                entries.update({item['app']: item for item in resolve(args.checker, platform, Path(temporary), diagnostics)})
             except (ValueError, OSError, subprocess.SubprocessError):
-                entries = {}
+                pass  # Preserve independently resolved GitHub metadata.
             cells.extend(plan_cell(entries.get(app), expected[app], platform, source_sha,
                                    receipts.get((app, platform)), args.force, diagnostics.get(app)) for app in APPS)
     selected = [c['app'] + '/' + c['platform'] for c in cells if c['state'] == 'qualification-pending']

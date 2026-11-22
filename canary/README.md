@@ -90,7 +90,12 @@ Desktop has its own [daily planner and weekly qualification](desktop-check.md).
 The daily workflow runs at 06:23 Europe/Madrid, selects only supported current
 versions lacking valid evidence, and marks unknown upstream bytes for adapter
 review. Monday's full qualification rechecks the twelve pinned cells. Pen is
-excluded. Neither workflow publishes the compatibility feed.
+excluded. Neither workflow publishes the compatibility feed. The daily planner
+reads Zed and Hermes GitHub metadata through the authenticated metadata-only
+freezer, avoiding anonymous runner API limits. The checker and vendor installers
+never receive GitHub or provider credentials. Failure to resolve one publisher
+preserves independently resolved entries; new upstream versions still require
+adapter review and cannot replace pinned release inputs.
 
 The release gate additionally qualifies the exact attested release binaries in
 all twelve Desktop cells. Test hooks ship in the binary but require explicit

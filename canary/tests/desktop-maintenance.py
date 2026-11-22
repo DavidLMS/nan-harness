@@ -3,6 +3,7 @@
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import sys
 import subprocess
@@ -53,6 +54,27 @@ class MaintenanceTests(unittest.TestCase):
                         dict(probes=[dict(status='passed', steps=['launched'])] * 3)]:
             self.assertEqual(state(EXPECTED, {**receipt(), **changed}), 'qualification-pending')
 
+    def test_github_metadata_is_authenticated_without_exposing_token_to_checker(self):
+        entries = {app: dict(status='frozen', app=app) for app in d.GITHUB_APPS}
+        calls = []
+        def execute(argv, **kwargs):
+            app = argv[argv.index('--app') + 1]
+            self.assertTrue(argv[1].endswith('/freeze-official.py'))
+            self.assertEqual(kwargs['env']['GH_TOKEN'], 'synthetic-github-token')
+            self.assertNotIn('NAN_API_KEY', kwargs['env'])
+            calls.append(app)
+            if app == 'zed-desktop':
+                raise subprocess.CalledProcessError(1, argv, stderr=b'private error')
+        diagnostics = {}
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {
+                'GH_TOKEN': 'synthetic-github-token', 'NAN_API_KEY': 'synthetic-provider-key'}), \
+                patch.object(d.subprocess, 'run', side_effect=execute), \
+                patch.object(d, 'read_frozen_manifest', return_value={'apps': [entries['hermes-desktop']]}):
+            result = d.resolve_github('macos', Path(tmp), diagnostics)
+        self.assertEqual(calls, list(d.GITHUB_APPS))
+        self.assertEqual(result, {'hermes-desktop': entries['hermes-desktop']})
+        self.assertEqual(diagnostics, {'zed-desktop': {'errorCategory': 'resolution-failed'}})
+
     def test_resolution_keeps_only_valid_closed_per_app_diagnostics(self):
         event = dict(schemaVersion=1, app='chatgpt-desktop', stage='frozen-resolution',
                      errorCategory='artifact-selection', reason='version-unknown')
@@ -64,6 +86,8 @@ class MaintenanceTests(unittest.TestCase):
             b'DESKTOP_PREPARE_DIAGNOSTIC:' + json.dumps(record).encode() + b'\n' for record in records)
         def execute(argv, **kwargs):
             self.assertFalse({'GH_TOKEN', 'GITHUB_TOKEN', 'NAN_API_KEY'} & kwargs['env'].keys())
+            self.assertNotIn('zed-desktop', argv)
+            self.assertNotIn('hermes-desktop', argv)
             kwargs['stderr'].write(raw)
             return subprocess.CompletedProcess(argv, 0)
         diagnostics = {}
