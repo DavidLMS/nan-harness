@@ -7,6 +7,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Bound Windows Desktop MSIX inventory to the expected package names and allow
+  the AppX service to start before registration, while refusing uncertain inventory.
+
 ## [0.1.33] - 2026-11-22
 
 ### Fixed

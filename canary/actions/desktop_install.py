@@ -453,13 +453,16 @@ def _install_windows(release, package, workspace):
             _emit_diagnostic("installer_identity", "check_existing_msix", "identity_failure")
             raise ValueError("unknown MSIX identity")
         quoted_names = ",".join("'" + name + "'" for name in names)
+        # Query only the bound identities. A cold AppX service on hosted Windows
+        # can exceed 30 seconds; this read must finish before any registration.
+        inventory = "$n=@(" + quoted_names + "); $p=@(foreach ($name in $n) { Get-AppxPackage -Name $name }); "
         if _run_output(("powershell", "-NoProfile", "-NonInteractive", "-Command",
-                        "$ErrorActionPreference='Stop'; $n=@(" + quoted_names + "); if (@(Get-AppxPackage | Where-Object { $n -contains $_.Name }).Count -ne 0) { exit 1 }"),
-                       cwd=workspace, timeout=30, stage="installer_identity", operation="check_existing_msix") is None:
+                        "$ErrorActionPreference='Stop'; " + inventory + "if ($p.Count -ne 0) { exit 1 }"),
+                       cwd=workspace, timeout=120, stage="installer_identity", operation="check_existing_msix") is None:
             raise RuntimeError("an existing MSIX installation was left unchanged")
         # Registration verifies the signature; the query binds the installed identity.
         command = ("$ErrorActionPreference='Stop'; Add-AppxPackage -Path '" + str(package).replace("'", "''") + "'; "
-                   "$n=@(" + quoted_names + "); $p=@(Get-AppxPackage | Where-Object { $n -contains $_.Name }); "
+                   + inventory +
                    "if ($p.Count -ne 1) { exit 1 }")
         if not _run(("powershell", "-NoProfile", "-NonInteractive", "-Command", command), timeout=600,
                     stage="installer", operation="register_msix"):

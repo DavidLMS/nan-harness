@@ -445,14 +445,17 @@ class DesktopInstallTests(unittest.TestCase):
             self.assertIn("/DIR=" + str(Path(directory) / "Programs" / "Zed"), zed_args)
 
     def test_msix_binds_signature_and_package_name_without_three_part_version_compare(self):
-        with tempfile.TemporaryDirectory() as directory, patch.object(INSTALL, "_run_output", return_value=""), \
+        with tempfile.TemporaryDirectory() as directory, patch.object(INSTALL, "_run_output", return_value="") as inventory, \
                 patch.object(INSTALL, "_run", return_value=True) as run:
             workspace = Path(directory)
             package = workspace / "package.msix"
             package.write_bytes(b"package")
             INSTALL._install_windows({"app": "chatgpt-desktop", "format": "msix", "version": "1.2.3"}, package, workspace)
             command = run.call_args.args[0][-1]
-            self.assertIn("Get-AppxPackage", command)
+            self.assertIn("Get-AppxPackage -Name $name", command)
+            self.assertIn("Get-AppxPackage -Name $name", inventory.call_args.args[0][-1])
+            self.assertNotIn("Get-AppxPackage |", inventory.call_args.args[0][-1])
+            self.assertEqual(inventory.call_args.kwargs['timeout'], 120)
             self.assertIn("OpenAI.Codex", command)
             self.assertIn("OpenAI.ChatGPT-Desktop", command)
             self.assertNotIn("1.2.3", command)
