@@ -9,6 +9,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Read Hermes 0.23.3 session ownership through its read-only persistence
+  interface, preserving legacy history support and profile/provider checks.
+
 - Authenticate daily Desktop GitHub metadata reads separately from the
   credential-free checker and installers, preserving per-publisher failures.
 

@@ -74,19 +74,34 @@ def ready(home, pid):
     raise ReadinessFailure(reason)
 
 
-def require_owned_session(home, session_id):
-    from hermes_state import SessionDB
-    from hermes_state_local import local_receipt
-    reader = SessionDB(home / "state.db", read_only=True)
+def session_receipt(home, session_id):
+    # Hermes 0.23.3 moved receipts behind its read-only storage interface.
+    # Only an absent interface selects the legacy API; broken stores still fail.
     try:
-        import json
-        receipt = local_receipt(reader, session_id)
-        config = json.loads(receipt["policy"]["config_json"])
-        if (Path(receipt["profile_id"]).resolve() != home
-                or (config.get("model") or {}).get("provider") not in {"nan", "custom:nan"}):
-            raise RuntimeError("history_owner")
-    finally:
-        reader.close()
+        from persistence_assembly import open_persistence_reader
+    except ModuleNotFoundError as error:
+        if error.name != "persistence_assembly":
+            raise
+        from hermes_state import SessionDB
+        from hermes_state_local import local_receipt
+        reader = SessionDB(home / "state.db", read_only=True)
+        try:
+            receipt = local_receipt(reader, session_id)
+            return receipt["profile_id"], receipt["policy"]
+        finally:
+            reader.close()
+    with open_persistence_reader(home) as reader:
+        receipt = reader.bindings.receipt(session_id)
+        return receipt.profile_id, receipt.policy
+
+
+def require_owned_session(home, session_id):
+    import json
+    profile_id, policy = session_receipt(home, session_id)
+    config = json.loads(policy["config_json"])
+    if (Path(profile_id).resolve() != home
+            or (config.get("model") or {}).get("provider") not in {"nan", "custom:nan"}):
+        raise RuntimeError("history_owner")
 
 
 def native_arguments(arguments):

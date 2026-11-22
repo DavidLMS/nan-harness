@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Closed qualification receipts and the managed-profile file boundary."""
 import importlib.util
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -31,6 +32,68 @@ spec.loader.exec_module(native)
 spec = importlib.util.spec_from_file_location("hermes_frame_diagnostics", ROOT / "crates/nan-harness-runtime/src/prepared/hermes/frame_diagnostics.py")
 frame_diagnostics = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(frame_diagnostics)
+
+
+class SessionReceipts(unittest.TestCase):
+    def test_current_storage_reads_owned_receipt_and_always_closes(self):
+        home = Path('/synthetic/profile').resolve()
+        for provider, owner, accepted in [('nan', home, True), ('custom:nan', home, True),
+                                          ('foreign', home, False), ('nan', home.parent, False)]:
+            events = []
+            receipt = SimpleNamespace(profile_id=str(owner),
+                policy={'config_json': json.dumps({'model': {'provider': provider}})})
+            def read(session_id):
+                events.append(session_id)
+                return receipt
+            @contextmanager
+            def open_reader(target):
+                self.assertEqual(target, home)
+                try:
+                    yield SimpleNamespace(bindings=SimpleNamespace(receipt=read))
+                finally:
+                    events.append('closed')
+            with patch.dict(sys.modules, {'persistence_assembly': SimpleNamespace(open_persistence_reader=open_reader)}):
+                if accepted:
+                    runtime.require_owned_session(home, 'owned-session')
+                else:
+                    with self.assertRaisesRegex(RuntimeError, 'history_owner'):
+                        runtime.require_owned_session(home, 'owned-session')
+            self.assertEqual(events, ['owned-session', 'closed'])
+
+    def test_legacy_storage_remains_read_only_and_closes_after_errors(self):
+        home = Path('/synthetic/profile').resolve()
+        for fails in [False, True]:
+            events = []
+            def database(path, *, read_only):
+                self.assertEqual(path, home / 'state.db')
+                self.assertTrue(read_only)
+                return SimpleNamespace(close=lambda: events.append('closed'))
+            def read(reader, session_id):
+                self.assertEqual(session_id, 'owned-session')
+                if fails:
+                    raise ValueError('invalid-receipt')
+                return {'profile_id': str(home), 'policy': {'config_json': '{"model":{"provider":"nan"}}'}}
+            with patch.dict(sys.modules, {'persistence_assembly': None,
+                    'hermes_state': SimpleNamespace(SessionDB=database),
+                    'hermes_state_local': SimpleNamespace(local_receipt=read)}):
+                if fails:
+                    with self.assertRaises(ValueError):
+                        runtime.require_owned_session(home, 'owned-session')
+                else:
+                    runtime.require_owned_session(home, 'owned-session')
+            self.assertEqual(events, ['closed'])
+
+    def test_current_storage_failure_never_falls_back_to_legacy(self):
+        from unittest.mock import Mock
+        legacy = Mock()
+        failure = ModuleNotFoundError('missing-backend', name='storage_backend')
+        current = Mock(side_effect=failure)
+        with patch.dict(sys.modules, {
+                'persistence_assembly': SimpleNamespace(open_persistence_reader=current),
+                'hermes_state': SimpleNamespace(SessionDB=legacy)}):
+            with self.assertRaises(ModuleNotFoundError):
+                runtime.require_owned_session(Path('/synthetic'), 'owned-session')
+        legacy.assert_not_called()
 
 
 class Qualification(unittest.TestCase):
