@@ -7,6 +7,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.33] - 2026-11-22
+
 ### Fixed
 
 - Upgrade `url` to 2.5.9 to fix RUSTSEC-2026-0592, preventing stack exhaustion
@@ -1184,7 +1186,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.32...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.33...HEAD
+[0.1.33]: https://github.com/DavidLMS/nan-harness/compare/v0.1.32...v0.1.33
 [0.1.32]: https://github.com/DavidLMS/nan-harness/compare/v0.1.31...v0.1.32
 [0.1.31]: https://github.com/DavidLMS/nan-harness/compare/v0.1.30...v0.1.31
 [0.1.30]: https://github.com/DavidLMS/nan-harness/compare/v0.1.29...v0.1.30
