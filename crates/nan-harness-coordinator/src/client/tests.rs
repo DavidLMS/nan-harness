@@ -26,6 +26,22 @@ fn scope_fingerprint_is_stable_and_origin_scoped() {
 }
 
 #[test]
+fn scope_origin_handles_nested_blob_urls_without_recursion() {
+    for prefixes in [2, 10_000] {
+        let nested = format!("{}https://api.example.com/v1", "blob:".repeat(prefixes));
+        assert_eq!(canonical_origin(&nested), Some("null".to_owned()));
+    }
+    assert_eq!(
+        canonical_origin("blob:ws://api.example.com"),
+        Some("null".to_owned())
+    );
+    assert_eq!(
+        canonical_origin("https://api.example.com:443/v1"),
+        Some("https://api.example.com".to_owned())
+    );
+}
+
+#[test]
 fn scope_salt_waits_for_a_concurrent_creator_to_finish_writing() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let path = temporary.path().join("scope.salt");

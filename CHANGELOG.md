@@ -9,6 +9,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Upgrade `url` to 2.5.9 to fix RUSTSEC-2026-0592, preventing stack exhaustion
+  when resolving the origin of nested `blob:` URLs.
+
 - Read Hermes 0.23.3 session ownership through its read-only persistence
   interface, preserving legacy history support and profile/provider checks.
 

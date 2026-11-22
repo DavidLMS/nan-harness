@@ -58,7 +58,7 @@ tokio = { version = "1.53.1", features = ["io-util", "macros", "net", "process",
 tokio-util = { version = "0.7.19", features = ["rt"] }
 toml = "1.1.4"
 toml_edit = { version = "0.25.13", features = ["serde"] }
-url = { version = "2.5.8", features = ["serde"] }
+url = { version = "2.5.9", features = ["serde"] }
 yaml_serde = "0.10.7"
 zeroize = "1.9.0"
 
