@@ -1805,7 +1805,7 @@ mod tests {
         assert_eq!(child.kill_count.load(Ordering::SeqCst), 1);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn grace_period_does_not_stop_an_interested_process() {
         let root = tempfile::tempdir().expect("temporary directory");
         let factory = FakeFactory::new();
@@ -1817,7 +1817,15 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert_eq!(child.kill_count.load(Ordering::SeqCst), 0);
         drop(second);
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        tokio::time::sleep(Duration::from_millis(15)).await;
+        assert_eq!(child.kill_count.load(Ordering::SeqCst), 0);
+        tokio::time::timeout(Duration::from_millis(500), async {
+            while child.kill_count.load(Ordering::SeqCst) == 0 {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("last interest should stop the process after its grace");
         assert_eq!(child.kill_count.load(Ordering::SeqCst), 1);
     }
 
