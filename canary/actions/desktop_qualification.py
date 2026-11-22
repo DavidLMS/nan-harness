@@ -3156,7 +3156,7 @@ def semantic_observations(directory, app, platform=None):
             flags = set('endpointOwned targetVerified attached bindingVerified auxiliaryInert codingComposerReady uniqueComposer inputReadback inputSubmitted userTurnObserved responseVerified errorObserved retryControl retryAttempted retryCompleted providerResponseVerified'.split())
             fields = flags | set('schemaVersion mechanism diagnosticsOnly assistantTurnCount providerGenerationCount errorCategory'.split())
             errors = {None, 'ownership-lost', 'composer-unavailable', 'stale-turn', 'input-mismatch', 'action-uncertain', 'retry-unavailable', 'response-timeout', 'query-failed', 'invalid-request'}
-            optional = {'preAttachFailure', 'composerAdmissionFailure', 'composerReadinessObservation',
+            optional = {'preAttachFailure', 'attachmentFailure', 'composerAdmissionFailure', 'composerReadinessObservation',
                         'retryClickPhase', 'retryClickRefusal', 'retryGuardSpotlight', 'retryViewportReveal'}
             if (app != 'chatgpt-desktop' or set(value) - optional != fields or value['diagnosticsOnly'] is not True
                     or any(type(value[key]) is not bool for key in flags)
@@ -3185,6 +3185,12 @@ def semantic_observations(directory, app, platform=None):
                     raise ValueError('unexpected Codex Retry guard observation')
                 spotlight_auxiliary(value['retryGuardSpotlight'], platform)
                 record['retryGuardSpotlight'] = value['retryGuardSpotlight']
+            if 'attachmentFailure' in value:
+                if (value['errorCategory'] != 'ownership-lost'
+                        or any(value[key] for key in ('attached', 'inputSubmitted', 'retryAttempted'))):
+                    raise ValueError('unexpected Codex attachment failure')
+                enum(record, value, 'attachmentFailure', {'native-owner', 'cdp-connect', 'main-query',
+                     'page-count', 'main-identity', 'identity', 'deadline', 'main-focus', 'initial-scope'})
             if 'preAttachFailure' in value:
                 if value['errorCategory'] != 'invalid-request' or value['attached']:
                     raise ValueError('unexpected Codex preattach failure')

@@ -54,6 +54,20 @@ enum PreAttachFailure {
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
+enum AttachmentFailure {
+    NativeOwner,
+    CdpConnect,
+    MainQuery,
+    PageCount,
+    MainIdentity,
+    Identity,
+    Deadline,
+    MainFocus,
+    InitialScope,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
 enum ComposerAdmissionFailure {
     ScopeNotReady,
     NonuniqueEditor,
@@ -161,6 +175,8 @@ struct Facts {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pre_attach_failure: Option<PreAttachFailure>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    attachment_failure: Option<AttachmentFailure>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     composer_admission_failure: Option<ComposerAdmissionFailure>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     composer_readiness_observation: Option<ComposerReadinessObservation>,
@@ -188,6 +204,7 @@ impl Facts {
         self.binding_owned()
             && self.error_category.is_none()
             && self.pre_attach_failure.is_none()
+            && self.attachment_failure.is_none()
             && self.composer_admission_failure.is_none()
             && self.composer_readiness_observation.is_none()
             && self.retry_click_refusal.is_none()
@@ -676,6 +693,26 @@ mod tests {
             assert!(!decoded.ui_verified(response));
             assert_eq!(
                 serde_json::to_value(decoded).unwrap()["preAttachFailure"],
+                failure
+            );
+        }
+        for failure in [
+            "native-owner",
+            "cdp-connect",
+            "main-query",
+            "page-count",
+            "main-identity",
+            "identity",
+            "deadline",
+            "main-focus",
+            "initial-scope",
+        ] {
+            let mut receipt = value.clone();
+            receipt["attachmentFailure"] = failure.into();
+            let decoded: Facts = serde_json::from_value(receipt).unwrap();
+            assert!(!decoded.ui_verified(response));
+            assert_eq!(
+                serde_json::to_value(decoded).unwrap()["attachmentFailure"],
                 failure
             );
         }

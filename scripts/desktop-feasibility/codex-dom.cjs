@@ -426,17 +426,17 @@ function auxiliaryScope() {
   const controls=[...document.querySelectorAll('textarea,[contenteditable="true"],input:not([type="hidden"]),[role="dialog"],[aria-modal="true"],[role="alertdialog"],[role="menu"]')].filter(visible);
   return !document.hasFocus()&&controls.length===0;
 }
-async function bindRecordedMain(browser,binding,owner,deadline,identity=pageIdentity,directCDP=false,spotlight=null) {
+async function bindRecordedMain(browser,binding,owner,deadline,identity=pageIdentity,directCDP=false,spotlight=null,observe=()=>{}) {
   try {
   if(spotlight?.failed())return null;
-  const reject=reason=>{spotlight?.fail(reason);return null;};
+  const reject=(reason,detail=reason)=>{observe(detail);spotlight?.fail(reason);return null;};
   if(Date.now()>=deadline||!owner())return reject(Date.now()>=deadline?'deadline':'ownership');
   const pages=browser.contexts().flatMap(context=>context.pages());
-  if(pages.length!==1+(binding.auxiliary?1:0))return reject('identity');
+  if(pages.length!==1+(binding.auxiliary?1:0))return reject('identity','page-count');
   const identities=await Promise.all(pages.map(page=>identity(page,deadline)));
   if(Date.now()>=deadline||!owner())return reject(Date.now()>=deadline?'deadline':'ownership');
   const mainMatches=identities.map((value,index)=>sameIdentity(binding.main,value)?index:-1).filter(index=>index>=0);
-  if(mainMatches.length!==1)return reject('identity');
+  if(mainMatches.length!==1)return reject('identity','main-identity');
   const main=pages[mainMatches[0]];
   const auxiliary=pages.find(page=>page!==main);
   if(auxiliary) {
@@ -547,18 +547,24 @@ async function main() {
     preAttachFailure='binding-schema';
     if(!validBinding(binding,request,connection))throw Error('binding');
     facts.errorCategory='ownership-lost';
+    facts.attachmentFailure='native-owner';
     const rootProof=require('./endpoint-ownership.cjs').proof(String(request.ownerPid),String(connection.port));
     const endpoint=require('./endpoint-ownership.cjs').proof(String(connection.launcherPid),String(connection.port));
     const owner=()=>rootProof.descendant(connection.launcherPid)&&endpoint.ownedEndpoint();
     if(!owner())throw Error('owner');
     const {chromium}=require('../../.github/web-check/node_modules/playwright');
     const deadline=Date.now()+request.timeoutMs;
+    facts.attachmentFailure='cdp-connect';
     browser=await chromium.connectOverCDP(`http://127.0.0.1:${connection.port}`,{timeout:2000,noDefaults:true});
     const directCDP=directCDPPolicy();
     if(directCDP&&require('./codex-spotlight.cjs').policy()&&binding.auxiliary
       &&require('./codex-spotlight.cjs').route(binding.auxiliary.url))
       spotlight=require('./codex-spotlight.cjs').create({deadline});
-    const page=await bindRecordedMain(browser,binding,owner,deadline,pageIdentity,directCDP,spotlight);
+    facts.attachmentFailure='main-query';
+    const page=await bindRecordedMain(browser,binding,owner,deadline,pageIdentity,directCDP,spotlight,reason=>{
+      facts.attachmentFailure=({'page-count':'page-count','main-identity':'main-identity','identity':'identity',
+        'ownership':'native-owner','deadline':'deadline','main-focus':'main-focus','initial-scope':'initial-scope'})[reason]??'main-query';
+    });
     if(!page)throw Error('main');
     facts=await runTurn(page,async until=>await bindRecordedMain(browser,binding,owner,until,pageIdentity,directCDP,spotlight)===page,request,deadline,(until,guard)=>require('./codex-recovery-barrier.cjs').release(process.argv[3],until,guard),()=>spotlight?.receipt()??null);
   } catch {

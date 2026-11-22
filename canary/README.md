@@ -839,6 +839,11 @@ bounded resolution and HTTPS results for fixed public endpoints under the
 runner, root and `_apt` identities. It retains only statuses/counts, without
 changing DNS settings, dumping configuration or bypassing package verification.
 
+Desktop Codex attachment failures retain a closed acquisition phase separately
+from request validation and response verification. Native ownership, CDP connection,
+recorded document identity and focus refusals remain failures; the diagnostic does
+not authorize a retry or expose renderer content.
+
 ### Desktop semantic qualification retries
 
 The hosted `deterministic-full` workflow allows at most three complete ephemeral

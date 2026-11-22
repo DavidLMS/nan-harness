@@ -5,7 +5,7 @@ const begin=source.indexOf('async function main()'),end=source.indexOf('exports.
 (async()=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'codex-driver-request-'));
  try {
-  for(const scenario of ['request-json','request-policy','connection-read','binding-read','connection-schema','binding-schema','factory-throw','valid']) {
+  for(const scenario of ['request-json','request-policy','connection-read','binding-read','connection-schema','binding-schema','factory-throw','valid','cdp-connect','main-focus']) {
    const dir=path.join(root,scenario);fs.mkdirSync(dir,{mode:0o700});
    const connectionPath=path.join(dir,'connection-9.json'),mainBindingPath=path.join(dir,'main-binding-9.private');
    const request={connectionPath,mainBindingPath,ownerPid:9,prompt:'Check this connection',expectedMarker:'synthetic-nonce',timeoutMs:45000,action:'submit',purpose:'response'};
@@ -17,14 +17,17 @@ const begin=source.indexOf('async function main()'),end=source.indexOf('exports.
    if(scenario==='request-policy')request.action='unknown';
    const input=path.join(dir,'request.private'),output=path.join(dir,'facts.json');
    fs.writeFileSync(input,scenario==='request-json'?'{':JSON.stringify(request),{mode:0o600});
-   let ownershipQueries=0;
+   let ownershipQueries=0;const admitted=['cdp-connect','main-focus'].includes(scenario);
+   const expectedAttachment=admitted?scenario:['valid','factory-throw'].includes(scenario)?'native-owner':undefined;
    const process={argv:['synthetic-node','synthetic-driver','--qualify',input,output],env:{GITHUB_ACTIONS:'true',RUNNER_ENVIRONMENT:'github-hosted',NANH_DESKTOP_RENDERER_APP:'chatgpt-desktop'}};
-   const entry=vm.runInNewContext(source.slice(begin,end)+';main',{validRequest,validBinding,readPrivate,process,
-    require:name=>name==='./endpoint-ownership.cjs'?{proof:()=>{if(scenario==='factory-throw')throw Error('PRIVATE factory error');return {descendant:()=>{ownershipQueries++;return false;},ownedEndpoint:()=>{ownershipQueries++;return false;}};}}:require(name)});
+   const entry=vm.runInNewContext(source.slice(begin,end)+';main',{validRequest,validBinding,readPrivate,process,pageIdentity:()=>{},directCDPPolicy:()=>false,
+    bindRecordedMain:async (...args)=>{args[7]('main-focus');return null;},
+    require:name=>name==='./endpoint-ownership.cjs'?{proof:()=>{if(scenario==='factory-throw')throw Error('PRIVATE factory error');return {descendant:()=>{ownershipQueries++;return admitted;},ownedEndpoint:()=>{ownershipQueries++;return admitted;}};}}:name.includes('playwright')?{chromium:{connectOverCDP:async()=>{if(scenario==='cdp-connect')throw Error('PRIVATE connection');return {close:async()=>{}};}}}:require(name)});
    await entry();const facts=JSON.parse(fs.readFileSync(output,'utf8'));
-   assert.equal(facts.errorCategory,['valid','factory-throw'].includes(scenario)?'ownership-lost':'invalid-request',scenario);
-   assert.equal(facts.preAttachFailure,['valid','factory-throw'].includes(scenario)?undefined:scenario,scenario);
-   assert.equal(ownershipQueries,scenario==='valid'?1:0,scenario);
+   assert.equal(facts.errorCategory,expectedAttachment?'ownership-lost':'invalid-request',scenario);
+   assert.equal(facts.preAttachFailure,expectedAttachment?undefined:scenario,scenario);
+   assert.equal(ownershipQueries,admitted?2:scenario==='valid'?1:0,scenario);
+   assert.equal(facts.attachmentFailure,expectedAttachment,scenario);
    assert.equal(facts.attached,false);assert.equal(facts.inputSubmitted,false);
    assert(!JSON.stringify(facts).includes(root));
   }

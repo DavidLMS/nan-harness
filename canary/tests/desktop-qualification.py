@@ -961,6 +961,16 @@ class CodexDriverFactsTests(unittest.TestCase):
                     path.write_text(json.dumps({**receipt, **change}))
                     with self.assertRaises(ValueError):
                         q.semantic_observations(tmp, 'chatgpt-desktop')
+            for failure in ('native-owner', 'cdp-connect', 'main-query', 'page-count',
+                            'main-identity', 'identity', 'deadline', 'main-focus', 'initial-scope'):
+                receipt = {**value, 'errorCategory': 'ownership-lost', 'attachmentFailure': failure}
+                path.write_text(json.dumps(receipt))
+                self.assertEqual(q.semantic_observations(tmp, 'chatgpt-desktop'), [receipt])
+                for change in ({'attachmentFailure': 'PRIVATE'}, {'attached': True},
+                               {'inputSubmitted': True}, {'retryAttempted': True}, {'errorCategory': None}):
+                    path.write_text(json.dumps({**receipt, **change}))
+                    with self.assertRaises(ValueError):
+                        q.semantic_observations(tmp, 'chatgpt-desktop')
             observed = dict(overflow=False, homeComposerCount=0, pendingTextareaCount=0,
                             proseMirrorEditableCount=0, workspaceControlCount=0, editableCount=1,
                             codexThreadCount=0, classicChatGPTCount=1)
