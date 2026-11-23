@@ -9,6 +9,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Retry a fully cleaned Desktop qualification session after a pre-launch focus
+  change, without replaying input or accepting incomplete probes.
+
 - Bound Windows Desktop MSIX inventory to the expected package names and allow
   the AppX service to start before registration, while refusing uncertain inventory.
 

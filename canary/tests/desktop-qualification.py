@@ -86,6 +86,22 @@ class QualificationRetryTests(unittest.TestCase):
             self.assertFalse(runner.retryable_qualification({**result, 'probes': [
                 {**interrupted, 'reason': reason}, pending, pending]}))
 
+    def test_focus_interruption_retries_only_a_clean_unstarted_tail(self):
+        interrupted = dict(status='blocked', reason='focus-changed', steps=[])
+        pending = dict(status='blocked', reason='not-run', steps=[])
+        for index in range(3):
+            result = {**self.result(), 'app': 'claude-desktop', 'platform': 'macos',
+                      'probes': [dict(status='passed')] * index + [interrupted]
+                                + [pending] * (2 - index)}
+            self.assertEqual(self.execute([result] * 3, [1] * 3)[:2], (1, 3))
+            for cleanup in ('appCleanup', 'globalCleanup'):
+                self.assertFalse(runner.retryable_qualification({**result, cleanup: 'failed'}))
+        for probes in ([pending, interrupted, pending],
+                       [{**interrupted, 'steps': ['launched']}, pending, pending],
+                       [interrupted, dict(status='failed', reason='response-mismatch'), pending],
+                       [interrupted, dict(status='passed'), pending]):
+            self.assertFalse(runner.retryable_qualification({**result, 'probes': probes}))
+
     def test_blocked_readiness_timeout_needs_typed_hermes_evidence_and_cleanup(self):
         result = self.result()
         result.update(app='hermes-desktop', platform='windows', semanticObservations=[

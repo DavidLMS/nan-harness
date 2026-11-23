@@ -673,7 +673,8 @@ def retryable_qualification(result):
     # The checker stops on a window guard and leaves later probes unstarted.
     # Retry the whole cleaned session, never resume the changed window.
     window_interruption = next((index for index, probe in enumerate(probes)
-                                if probe == dict(status='blocked', reason='window-changed', steps=[])), None)
+                                if probe in [dict(status='blocked', reason=reason, steps=[])
+                                             for reason in ('window-changed', 'focus-changed')]), None)
     interrupted_tail = (window_interruption is not None
                         and all(probe == dict(status='blocked', reason='not-run', steps=[])
                                 for probe in probes[window_interruption + 1:]))
