@@ -37,6 +37,10 @@ async function trial(scenario) {
  const editorHandle={},rootHandle={evaluate:async(callback,control)=>{
    snapshotCalls++;assert.equal(control,handle);
    if(scenario==='menu-failure-observer-throw')throw new Error('PRIVATE');
+   if(scenario==='menu-failure-delayed-open' && snapshotCalls===2){opened=true;pillClicks++;}
+   if(scenario==='menu-failure-settle-owner-loss' && snapshotCalls===2)owner=false;
+   if(scenario==='menu-failure-settle-document-loss' && snapshotCalls===2){root.ownerDocument={};clicked.ownerDocument={};}
+   if(scenario==='menu-failure-settle-control-loss' && snapshotCalls===2)clicked.isConnected=false;
    if(scenario==='menu-failure-root-loss'){root.isConnected=false;clicked.isConnected=false;}
    if(scenario==='menu-failure-control-loss')clicked.isConnected=false;
    if(scenario==='menu-failure-foreign-document'){root.ownerDocument={};clicked.ownerDocument={};}
@@ -203,6 +207,34 @@ for(const element of [modelElement([text('Qwen3.6 27B'),meta]),modelElement([tex
  assert.notEqual(noEffect.facts.stage,'ready');assert.equal(noEffect.clickCalls,1);
  assert.equal(noEffect.refreshClicks,0);assert.equal(noEffect.escapes,0);
  assert.equal(noEffect.facts.clickFailure,undefined,'returned click still needs native menu effect');
+ const delayedMenu=await trial('menu-failure-delayed-open');
+ assert.equal(delayedMenu.facts.stage,'ready');
+ assert.equal(delayedMenu.facts.menuOpened,true);
+ assert.equal(delayedMenu.facts.menuClickRecovered,true);
+ assert.equal(delayedMenu.clickCalls,2);
+ assert.equal(delayedMenu.pillClicks,1);
+ assert.equal(delayedMenu.refreshClicks,1);
+ assert.equal(delayedMenu.escapes,1);
+ assert.equal(delayedMenu.facts.clickFailure.postFailure.menuCount,1);
+ for(const [scenario,guardFailure,post] of [
+   ['menu-failure-settle-owner-loss','ownership-lost',{documentSame:true,rootConnected:true,rootSame:true,controlConnected:true,controlSame:true}],
+   ['menu-failure-settle-document-loss',null,{documentSame:false,rootConnected:true,rootSame:false,controlConnected:true,controlSame:false}],
+   ['menu-failure-settle-control-loss',null,{documentSame:true,rootConnected:true,rootSame:true,controlConnected:false,controlSame:false}],
+ ]) {
+   const result=await trial(scenario),failure=result.facts.clickFailure;
+   assert.equal(result.facts.stage,'menu',scenario);
+   assert.equal(result.facts.errorCategory,'menu-unavailable',scenario);
+   assert.equal(result.facts.guardFailure,guardFailure,scenario);
+   assert.equal(result.facts.menuClickRecovered,undefined,scenario);
+   assert.equal(result.facts.menuOpened,false,scenario);
+   assert.equal(result.clickCalls,1,scenario);
+   assert.equal(result.refreshClicks,0,scenario);assert.equal(result.escapes,0,scenario);
+   assert.equal(result.snapshotCalls,2,scenario);
+   assert.equal(failure.errorFamily,'timeout',scenario);
+   assert.equal(failure.postFailure.status,'observed',scenario);
+   assert.equal(failure.postFailure.menuCount,0,scenario);
+   for(const [key,value] of Object.entries(post))assert.equal(failure.postFailure[key],value,`${scenario}:${key}`);
+ }
  let menuFailureFixture;
  for(const [scenario,family,postStatus] of [
   ['menu-failure-before-open','timeout','observed'],
@@ -218,14 +250,15 @@ for(const element of [modelElement([text('Qwen3.6 27B'),meta]),modelElement([tex
   assert.equal(result.facts.errorCategory,scenario==='menu-failure-before-open'?'menu-timeout':'menu-unavailable',scenario);
   assert.equal(result.facts.actionObservation.sampleStatus,'click-failed',scenario);
   assert.equal(result.facts.guardFailure,null,'post-failure observer preserves original guard facts');
-  assert.equal(result.clickCalls,1,scenario);assert.equal(result.refreshClicks,0);assert.equal(result.escapes,0);
+  assert.equal(result.clickCalls,1,scenario);
+  assert.equal(result.refreshClicks,0);assert.equal(result.escapes,0);
   assert.equal(result.facts.menuOpened,false);assert.equal(result.facts.catalogVerified,false);
   assert.equal(failure.errorFamily,family,scenario);assert.equal(failure.postFailure.status,postStatus,scenario);
   assert.equal(failure.budgetMs,Math.min(15000,Math.max(1,failure.remainingBeforeMs)),scenario);
   assert.equal(failure.elapsedMs,failure.budgetMs,scenario);
   for(const key of ['remainingBeforeMs','remainingAfterMs','elapsedMs'])
    assert(Number.isInteger(failure[key])&&failure[key]>=0&&failure[key]<=120000,scenario);
-  assert(result.snapshotCalls<=1,scenario);
+  assert(result.snapshotCalls<=(scenario==='menu-failure-before-open'?11:1),scenario);
   if(postStatus==='observed') {
    assert.equal(failure.postFailure.documentSame,scenario!=='menu-failure-foreign-document');
    assert.equal(failure.postFailure.menuCount,scenario==='menu-failure-after-open'?1:0);

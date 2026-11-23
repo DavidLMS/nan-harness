@@ -308,18 +308,39 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
           facts.clickFailure=failure;
           const prior={guardFailure:facts.guardFailure,queryFailure:facts.queryFailure,
             frameTransitionWaited:facts.frameTransitionWaited};
-          let timer;
+          const observePost=async observationDeadline=>{
+            let timer;
+            try {
+              const post=await Promise.race([originalRoot.evaluate(menuFailureSnapshot,handle),
+                new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('observation deadline')),
+                  Math.max(1,observationDeadline-Date.now()));})]);
+              if(!guard(deadline))throw new Error('guard');
+              return post;
+            } finally { clearTimeout(timer); }
+          };
           try {
             await frame(deadline);
             if(!guard(deadline))throw new Error('guard');
-            const post=await Promise.race([originalRoot.evaluate(menuFailureSnapshot,handle),
-              new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('observation deadline')),
-                Math.max(1,deadline-Date.now()));})]);
-            if(!guard(deadline))throw new Error('guard');
-            failure.postFailure=post;
+            failure.postFailure=await observePost(deadline);
+            const sameTarget=post=>post?.status==='observed'
+              && ['documentSame','rootConnected','rootSame','controlConnected','controlSame']
+                .every(key=>post[key]===true);
+            // A native click can complete after Playwright reports its
+            // timeout. Passively settle the already-proven target so a late
+            // menu open is observed without replaying an uncertain action.
+            if(failure.errorFamily==='timeout' && sameTarget(failure.postFailure)
+                && failure.postFailure.menuCount===0) {
+              const settleDeadline=Math.min(deadline,Date.now()+1000);
+              while(Date.now()<settleDeadline && guard(deadline)) {
+                await delay(Math.min(100,Math.max(0,settleDeadline-Date.now())));
+                if(Date.now()>=settleDeadline || !guard(deadline))break;
+                try { failure.postFailure=await observePost(settleDeadline); }
+                catch { break; }
+                if(!sameTarget(failure.postFailure) || failure.postFailure.menuCount!==0)break;
+              }
+            }
           } catch { /* Unavailable diagnostics never change the failed input verdict. */ }
           finally {
-            clearTimeout(timer);
             for(const [key,value] of Object.entries(prior)) {
               if(value===undefined)delete facts[key];else facts[key]=value;
             }

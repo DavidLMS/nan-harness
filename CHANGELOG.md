@@ -9,6 +9,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Observe delayed Hermes Windows menu opening after a click timeout without
+  replaying the action or relaxing document and control ownership checks.
+
 - Retry a fully cleaned Desktop qualification session after a pre-launch focus
   change, without replaying input or accepting incomplete probes.
 
