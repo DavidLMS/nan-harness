@@ -1486,6 +1486,55 @@ class QualificationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 q.semantic_observations(facts, args.app)
 
+    def test_runner_phase_context_is_closed_and_preserves_original_exception_boundary(self):
+        with tempfile.TemporaryDirectory() as root:
+            directory = Path(root).resolve()
+            args = argparse.Namespace(directory=directory, app='claude-desktop',
+                                      platform='windows', source_sha='a' * 40)
+            output = directory / 'qualification.json'
+            output.write_text(json.dumps(q.envelope(args.app, args.platform, 'x86_64', args.source_sha)))
+            env = {'GITHUB_ACTIONS': 'true', 'RUNNER_ENVIRONMENT': 'github-hosted'}
+            error = PermissionError(5, 'PRIVATE_PATH')
+            with patch.dict(runner.os.environ, env, clear=True):
+                with self.assertRaises(PermissionError):
+                    def fail_archive():
+                        raise error
+                    runner.phase_call('archive-report', fail_archive)
+                runner.publish_runner_failure(args, 'execution-failed',
+                                              phase='archive-report', error=error)
+            observed = json.loads(output.read_text())
+            fact = observed['semanticObservations'][0]
+            self.assertEqual(fact['phase'], 'archive-report')
+            self.assertEqual(fact['errorType'], 'os-error')
+            self.assertEqual(fact['errno'], 5)
+            self.assertNotIn('PRIVATE_PATH', output.read_text())
+            facts = directory / 'facts'
+            facts.mkdir()
+            path = facts / 'runner.json'
+            path.write_text(json.dumps(fact))
+            self.assertEqual(q.semantic_observations(facts, args.app), [fact])
+            invalid = [
+                {**fact, 'phase': 'PRIVATE'}, {**fact, 'errorType': 'PRIVATE'},
+                {**fact, 'errno': True},
+                {key: value for key, value in fact.items() if key != 'errno'},
+                {**fact, 'errno': 256},
+            ]
+            for value in invalid:
+                path.write_text(json.dumps(value))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(facts, args.app)
+
+    def test_runner_phase_context_preserves_innermost_phase(self):
+        error = PermissionError(5, 'PRIVATE_PATH')
+
+        def fail_checker():
+            raise error
+
+        with self.assertRaises(PermissionError):
+            runner.phase_call('foreground-setup',
+                              lambda: runner.phase_call('checker-execution', fail_checker))
+        self.assertEqual(error._nanh_runner_phase, 'checker-execution')
+
     def test_preparation_failure_is_closed_and_cannot_qualify_an_app(self):
         for apps, expected in [([], 'receipt-shape'), ({}, 'receipt-shape'),
                               ([None], 'receipt-shape'),

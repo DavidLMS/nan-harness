@@ -9,6 +9,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Classify Claude Windows pre-submit deadline receipts as timeouts, and retain
+  bounded runner failure phases without exposing private exception messages.
+
 - Observe delayed Hermes Windows menu opening after a click timeout without
   replaying the action or relaxing document and control ownership checks.
 

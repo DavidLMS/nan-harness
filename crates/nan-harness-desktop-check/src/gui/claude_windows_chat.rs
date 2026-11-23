@@ -158,6 +158,30 @@ fn verified_clipboard_clear(
         Err(Reason::CleanupFailed)
     }
 }
+
+fn input_stage_result(stage: WindowsChatStage) -> Result<(), Reason> {
+    match stage {
+        WindowsChatStage::Sent => Ok(()),
+        WindowsChatStage::InputClipboardMismatch | WindowsChatStage::InputValueMismatch => {
+            Err(Reason::InputMismatch)
+        }
+        // The native helper emits this receipt when the bounded send phase
+        // expires before Invoke. It is safe to retry in a fresh session, but
+        // it never proves that the prompt was submitted.
+        WindowsChatStage::Deadline => Err(Reason::Timeout),
+        _ => Err(Reason::ActionUnsupported),
+    }
+}
+
+fn apply_input_stage(facts: &mut Facts, stage: WindowsChatStage) -> Result<(), Reason> {
+    let result = input_stage_result(stage);
+    if result.is_ok() {
+        facts.input_verified_turns += 1;
+        facts.submitted_turns += 1;
+    }
+    result
+}
+
 impl Gui {
     pub(crate) fn claude_windows_chat_session<'a>(
         &'a self,
@@ -306,15 +330,7 @@ impl ClaudeWindowsChatSession<'_> {
         // read-only Send readiness. Never replay a partially written draft.
         let result = self.action("input-replace-owned", "", Instant::now() + action_budget);
         match result {
-            Ok(WindowsChatStage::Sent) => {
-                self.facts.input_verified_turns += 1;
-                self.facts.submitted_turns += 1;
-                Ok(())
-            }
-            Ok(WindowsChatStage::InputClipboardMismatch | WindowsChatStage::InputValueMismatch) => {
-                Err(Reason::InputMismatch)
-            }
-            Ok(_) => Err(Reason::ActionUnsupported),
+            Ok(stage) => apply_input_stage(&mut self.facts, stage),
             Err(reason) => {
                 self.facts.stage = WindowsChatStage::ActionUncertain;
                 Err(reason)
@@ -583,5 +599,39 @@ mod tests {
             assert_eq!(value["copiedResponses"], 2);
             assert_eq!(value["retryAttempted"], false);
         }
+    }
+
+    #[test]
+    fn deadline_input_receipt_is_a_retryable_timeout() {
+        let mut facts = Facts {
+            submitted_turns: 2,
+            input_verified_turns: 2,
+            copied_responses: 2,
+            ..Facts::default()
+        };
+        assert_eq!(
+            apply_input_stage(&mut facts, WindowsChatStage::Deadline),
+            Err(Reason::Timeout)
+        );
+        assert_eq!(facts.submitted_turns, 2);
+        assert_eq!(facts.input_verified_turns, 2);
+        assert_eq!(facts.copied_responses, 2);
+        assert_eq!(
+            apply_input_stage(&mut facts, WindowsChatStage::InputClipboardMismatch),
+            Err(Reason::InputMismatch)
+        );
+        assert_eq!(facts.submitted_turns, 2);
+        assert_eq!(facts.input_verified_turns, 2);
+        assert_eq!(
+            apply_input_stage(&mut facts, WindowsChatStage::Control),
+            Err(Reason::ActionUnsupported)
+        );
+        assert_eq!(
+            apply_input_stage(&mut facts, WindowsChatStage::Sent),
+            Ok(())
+        );
+        assert_eq!(facts.submitted_turns, 3);
+        assert_eq!(facts.input_verified_turns, 3);
+        assert_eq!(facts.copied_responses, 2);
     }
 }

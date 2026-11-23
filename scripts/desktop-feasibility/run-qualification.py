@@ -19,7 +19,8 @@ from desktop_diagnostics import Capture
 from zed_retry_trace import Capture as ZedRetryTrace
 from windows_foreground_session import prepare as prepare_windows_foreground
 from codex_release import CODEX_PROJECT_RELEASES, CODEX_PROJECT_VERSIONS
-from desktop_qualification import APPS, PREPARATION_FAILURES, bounded_json, cell, digest, envelope, reduce_report
+from desktop_qualification import (APPS, PREPARATION_FAILURES, RUNNER_PHASES, bounded_json, cell,
+                                   digest, envelope, reduce_report)
 from desktop_suite import read_frozen_manifest
 
 # Start from a session allowlist, rather than attempting to enumerate every
@@ -497,9 +498,9 @@ def run(args):
         raise ValueError('prepared executable identity is missing')
     if digest(executable) != apps[0]['executable'].get('sha256'):
         raise ValueError('prepared executable changed')
-    ensure_private_directory(args.directory, reusable=True)
+    phase_call('preparation-directory', lambda: ensure_private_directory(args.directory, reusable=True))
     facts = args.directory.resolve() / 'qualification-facts'
-    ensure_private_directory(facts)
+    phase_call('preparation-directory', lambda: ensure_private_directory(facts))
     report = args.directory.resolve() / 'report.json'
     if report.exists() or report.is_symlink():
         raise ValueError('report destination already exists')
@@ -567,30 +568,35 @@ def run(args):
                '--session', 'github-hosted', '--verification', 'semantic-only',
                '--prepared', str(args.prepared), '--output', str(report)]
     try:
-        trace = (ZedRetryTrace(executable, facts)
-                 if args.app == 'zed-desktop' and args.platform == 'linux'
-                 and os.environ.get('NANH_ZED_RETRY_ENTRY_TRACE') == '1' else nullcontext())
-        foreground = (prepare_windows_foreground(facts)
-                      if args.app == 'claude-desktop' and args.platform == 'windows'
-                      else nullcontext())
-        with foreground, trace:
-            if isinstance(trace, ZedRetryTrace) and trace.receipt['status'] == 'attached':
-                environment['NANH_ZED_RETRY_TRACE_MARKERS'] = str(trace.markers)
-            status = execute_with_diagnostics(command, args.directory, facts, args.platform,
-                                              args.source_sha, environment)
+        def execute_session():
+            trace = (ZedRetryTrace(executable, facts)
+                     if args.app == 'zed-desktop' and args.platform == 'linux'
+                     and os.environ.get('NANH_ZED_RETRY_ENTRY_TRACE') == '1' else nullcontext())
+            foreground = (prepare_windows_foreground(facts)
+                          if args.app == 'claude-desktop' and args.platform == 'windows'
+                          else nullcontext())
+            with foreground, trace:
+                if isinstance(trace, ZedRetryTrace) and trace.receipt['status'] == 'attached':
+                    environment['NANH_ZED_RETRY_TRACE_MARKERS'] = str(trace.markers)
+                return phase_call('checker-execution', lambda: execute_with_diagnostics(
+                    command, args.directory, facts, args.platform, args.source_sha, environment))
+        setup_phase = (args.app == 'claude-desktop' and args.platform == 'windows')
+        status = phase_call('foreground-setup', execute_session) if setup_phase else execute_session()
         if report.exists():
-            report_hash = digest(report)
-            subprocess.run([str(args.checker), 'validate-report', str(report)], env=environment,
-                           timeout=30, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-            if digest(report) != report_hash:
-                raise ValueError('report changed during validation')
-            checked = bounded_json(report, 65536)
-            if (checked.get('schemaVersion') != 3 or checked.get('platform') != args.platform
-                    or checked.get('architecture') != architecture
-                    or (checked.get('nanHarness') or {}).get('sha256') != digest(launcher)
-                    or len(checked.get('results', [])) != 1
-                    or checked['results'][0].get('app') != args.app):
-                raise ValueError('validated report identity differs')
+            def validate_report():
+                report_hash = digest(report)
+                subprocess.run([str(args.checker), 'validate-report', str(report)], env=environment,
+                               timeout=30, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+                if digest(report) != report_hash:
+                    raise ValueError('report changed during validation')
+                checked = bounded_json(report, 65536)
+                if (checked.get('schemaVersion') != 3 or checked.get('platform') != args.platform
+                        or checked.get('architecture') != architecture
+                        or (checked.get('nanHarness') or {}).get('sha256') != digest(launcher)
+                        or len(checked.get('results', [])) != 1
+                        or checked['results'][0].get('app') != args.app):
+                    raise ValueError('validated report identity differs')
+            phase_call('report-validation', validate_report)
         else:
             raise ValueError('qualification report is absent')
         return 0 if status == 0 else 1
@@ -619,7 +625,7 @@ def execute_with_diagnostics(command, directory, facts, platform, source_sha, en
                 raise
 
 
-def publish_runner_failure(args, category, preparation_reason=None):
+def publish_runner_failure(args, category, preparation_reason=None, *, phase=None, error=None):
     """Replace only the same-commit pending envelope with a closed failure fact."""
     if (os.environ.get('GITHUB_ACTIONS') != 'true'
             or os.environ.get('RUNNER_ENVIRONMENT') != 'github-hosted'):
@@ -644,6 +650,10 @@ def publish_runner_failure(args, category, preparation_reason=None):
                     or preparation_reason not in PREPARATION_FAILURES):
                 return
             fact['preparationReason'] = preparation_reason
+        if phase is not None:
+            if phase not in RUNNER_PHASES or error is None:
+                return
+            fact.update(phase=phase, errorType=closed_exception_type(error), errno=closed_errno(error))
         pending['semanticObservations'] = [fact]
         write_json(output, pending)
     except (OSError, ValueError, TypeError, RuntimeError):
@@ -654,6 +664,37 @@ def publish_runner_failure(args, category, preparation_reason=None):
 # Only native interaction failures may get another complete ephemeral session.
 RETRYABLE_REASONS = {'timeout', 'focus-changed', 'window-changed', 'window-occluded',
                      'application-exited', 'selector-not-matched', 'action-unsupported'}
+
+
+def closed_exception_type(error):
+    if isinstance(error, OSError):
+        return 'os-error'
+    if isinstance(error, subprocess.SubprocessError):
+        return 'subprocess-error'
+    if isinstance(error, RuntimeError):
+        return 'runtime-error'
+    if isinstance(error, ValueError):
+        return 'value-error'
+    return 'unknown'
+
+
+def closed_errno(error):
+    value = getattr(error, 'errno', None)
+    return value if type(value) is int and 0 < value < 256 else None
+
+
+def phase_call(phase, operation):
+    try:
+        return operation()
+    except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+        # Preserve the original exception class and cleanup boundary for callers;
+        # only the closed phase label is attached for the outer publisher.
+        try:
+            if getattr(error, '_nanh_runner_phase', None) not in RUNNER_PHASES:
+                error._nanh_runner_phase = phase
+        except Exception:
+            pass
+        raise
 
 
 def retryable_qualification(result):
@@ -696,22 +737,22 @@ def retryable_qualification(result):
 
 def run_attempts(args):
     if args.attempts == 1:
-        return run(args)
+        return phase_call('run', lambda: run(args))
     history = args.directory / 'attempts'
-    ensure_private_directory(history)
+    phase_call('history-directory', lambda: ensure_private_directory(history))
     launcher = args.real_nanh if args.app == 'zed-desktop' else (
         Path(os.environ['FEASIBILITY_HERMES_LAUNCHER']) if args.platform == 'windows'
         else Path(__file__).with_name('nanh-shim.py'))
     for attempt in range(1, args.attempts + 1):
         # Exceptions (including process cleanup and provenance failures) never retry.
-        status = run(args)
-        result = reduce_report(app=args.app, platform=args.platform,
+        status = phase_call('run', lambda: run(args))
+        result = phase_call('reduce-report', lambda: reduce_report(app=args.app, platform=args.platform,
             architecture='aarch64' if args.platform == 'macos' else 'x86_64',
             source_sha=args.source_sha, model='qwen3.6', frozen=args.frozen,
             prepared=args.prepared, checker=args.checker, launcher=launcher,
             real_nanh=args.real_nanh, report=args.directory / 'report.json',
-            facts=args.directory / 'qualification-facts')
-        write_json(history / f'attempt-{attempt}.json', result)
+            facts=args.directory / 'qualification-facts'))
+        phase_call('write-attempt', lambda: write_json(history / f'attempt-{attempt}.json', result))
         print(f'Desktop qualification attempt {attempt}/{args.attempts}: {result["outcome"]}', flush=True)
         if status == 0 and result['outcome'] == 'passed':
             return 0
@@ -719,10 +760,10 @@ def run_attempts(args):
             return 1
         # Retain private evidence locally. Only the closed reductions are uploaded.
         archive = args.directory / f'private-attempt-{attempt}'
-        ensure_private_directory(archive)
-        for name in ('report.json', 'qualification-facts'):
-            (args.directory / name).rename(archive / name)
-        time.sleep(5 * attempt)
+        phase_call('archive-directory', lambda: ensure_private_directory(archive))
+        phase_call('archive-report', lambda: (args.directory / 'report.json').rename(archive / 'report.json'))
+        phase_call('archive-facts', lambda: (args.directory / 'qualification-facts').rename(archive / 'qualification-facts'))
+        phase_call('retry-delay', lambda: time.sleep(5 * attempt))
     return 1
 
 
@@ -764,8 +805,15 @@ def main():
         publish_runner_failure(args, category,
                                error.reason if isinstance(error, PreparedAppUnavailable) else None)
         raise SystemExit('desktop qualification failed: ' + category) from None
-    except (OSError, RuntimeError, subprocess.SubprocessError):
-        publish_runner_failure(args, 'execution-failed')
+    except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+        phase = getattr(error, '_nanh_runner_phase', None)
+        if phase not in RUNNER_PHASES:
+            phase = None
+        publish_runner_failure(
+            args, 'execution-failed',
+            phase=phase,
+            error=error,
+        )
         raise SystemExit('desktop qualification failed; private evidence retained') from None
 
 

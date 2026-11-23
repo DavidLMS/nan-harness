@@ -29,6 +29,8 @@ BACKENDS[('chatgpt-desktop', 'windows', 'x86_64')] = 'renderer-dom'
 BACKENDS[('chatgpt-desktop', 'linux', 'x86_64')] = 'renderer-dom'
 BACKENDS[('chatgpt-desktop', 'macos', 'aarch64')] = 'renderer-dom'
 RUNNER_FAILURES = set('windows-ownership-helper-missing windows-ownership-helper-invalid prepared-identity-mismatch prepared-app-unavailable prepared-executable-missing prepared-executable-changed host-platform-mismatch backend-unavailable frozen-app-unavailable report-absent claude-windows-executable-invalid claude-windows-bootstrap-invalid claude-windows-bootstrap-mismatch claude-windows-release-mismatch claude-windows-policy-invalid codex-project-release-mismatch claude-persist-policy-invalid claude-persist-source-mismatch invalid-preflight execution-failed'.split())
+RUNNER_PHASES = frozenset('main preparation-directory foreground-setup checker-execution report-validation history-directory run reduce-report write-attempt archive-directory archive-report archive-facts retry-delay'.split())
+RUNNER_ERROR_TYPES = frozenset('os-error runtime-error subprocess-error value-error unknown'.split())
 PREPARATION_FAILURES = set('receipt-shape unclassified installation-unavailable installation-unreadable installation-ambiguous installation-failed unsupported-version version-unknown'.split())
 STEPS = {'launched', 'input-submitted', 'response-verified', 'tool-verified', 'error-recovered'}
 COMMIT = re.compile(r'[0-9a-f]{40}\Z')
@@ -3133,7 +3135,8 @@ def semantic_observations(directory, app, platform=None):
             record.update(diagnosticsOnly=True, counts=counts)
         elif mechanism == 'qualification-runner-failure':
             fields = {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'errorCategory'}
-            if (set(value) - {'preparationReason'} != fields or value['diagnosticsOnly'] is not True
+            runner_context = {'phase', 'errorType', 'errno'}
+            if (set(value) - ({'preparationReason'} | runner_context) != fields or value['diagnosticsOnly'] is not True
                     or type(value['errorCategory']) is not str or value['errorCategory'] not in RUNNER_FAILURES):
                 raise ValueError('invalid qualification runner failure')
             if 'preparationReason' in value:
@@ -3142,6 +3145,16 @@ def semantic_observations(directory, app, platform=None):
                         or type(reason) is not str or reason not in PREPARATION_FAILURES):
                     raise ValueError('invalid preparation reason')
                 record['preparationReason'] = reason
+            context_present = runner_context & set(value)
+            if context_present and context_present != runner_context:
+                raise ValueError('incomplete qualification runner context')
+            if context_present:
+                if (type(value['phase']) is not str or value['phase'] not in RUNNER_PHASES
+                        or type(value['errorType']) is not str or value['errorType'] not in RUNNER_ERROR_TYPES
+                        or (value['errno'] is not None
+                            and (type(value['errno']) is not int or not 0 < value['errno'] < 256))):
+                    raise ValueError('invalid qualification runner context')
+                record.update(phase=value['phase'], errorType=value['errorType'], errno=value['errno'])
             record.update(diagnosticsOnly=True, errorCategory=value['errorCategory'])
         elif mechanism == 'qualification-reduction-failure':
             fields = set('schemaVersion mechanism diagnosticsOnly category reportPresent observationCount metadataCount countsCapped'.split())
