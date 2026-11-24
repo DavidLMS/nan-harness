@@ -287,7 +287,7 @@ set -e
 parallel_output="$temporary_directory/output-parallel"
 parallel_state="$temporary_directory/concurrency-parallel"
 run_full_weekly_suite "$parallel_output" 2 "$parallel_state"
-[ "$(find "$parallel_output/reports" -type f -name '*.json' | wc -l | tr -d ' ')" = 32 ]
+[ "$(find "$parallel_output/reports" -type f -name '*.json' | wc -l | tr -d ' ')" = 34 ]
 [ "$(cat "$parallel_state/maximum")" = 2 ]
 [ ! -f "$parallel_state/guest-overlap" ]
 
