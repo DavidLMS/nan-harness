@@ -87,11 +87,10 @@ with `--no-search`. A native compaction override through `--context` is not
 supported in this version.
 
 `nanh vibe` (alias `nanh mistral-vibe`) launches Mistral Vibe 3.1.4 or newer with the
-selected NaN model. Install Mistral Vibe with the official installer,
-`curl -LsSf https://mistral.ai/vibe/install.sh | bash`, on macOS and Linux, or with
-`uv tool install --python 3.14 mistral-vibe` on Windows (requires
-[uv](https://docs.astral.sh/uv/)). Mistral Vibe needs Python 3.12 or newer; the
-official installer sets that up through uv. Native setup with `nanh config` is not
+selected NaN model. If Mistral Vibe is missing, nan-harness offers to install it with
+the official installer on macOS and Linux, or with
+`uv tool install --python 3.14 mistral-vibe` on Windows, which requires
+[uv](https://docs.astral.sh/uv/). Native setup with `nanh config` is not
 available yet.
 
 Harnesses that use OpenAI Chat Completions use an authenticated local gateway by
@@ -358,8 +357,8 @@ Independent provider and accounting failures remain reportable.
 
 `--context` is an approximate native compaction target, calculated from the
 starting model's effective context window. It is supported by Claude Code,
-Codex, OpenCode, Hermes, Pi, Prime Agent, OMP, Qwen Code, Kimi Code, Aider,
-Goose, Hermes Desktop and Zed. It is not supported by DeepSeek Harness,
+Codex, OpenCode, Hermes, Pi, Prime Agent, OMP, Qwen Code, Kimi Code, Mistral
+Vibe, Aider, Goose, Hermes Desktop and Zed. It is not supported by DeepSeek Harness,
 OpenClaw, Cline, fx, ChatGPT Desktop, Claude Desktop or Pen Desktop; those
 commands reject the option. The native harness may compact earlier to preserve
 its own safety margin, and changing models can change the effective threshold.

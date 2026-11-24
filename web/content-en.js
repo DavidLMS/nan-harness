@@ -251,7 +251,7 @@ function nanHarnessContentEn({ harnessLink, nanLink, unixInstallCommand, windows
         ['h3', 'Context'],
         ['p', '<code>--context</code> sets roughly how many tokens the agent uses before compacting the conversation. The agent may compact a little earlier.'],
         ['table', ['--context', 'Harnesses and apps'], [
-          ['Supported', 'Claude Code, Codex, OpenCode, Hermes Agent, Pi, Prime Agent, Oh My Pi, Qwen Code, Kimi Code, Aider, Goose, Hermes Desktop, Zed'],
+          ['Supported', 'Claude Code, Codex, OpenCode, Hermes Agent, Pi, Prime Agent, Oh My Pi, Qwen Code, Kimi Code, Mistral Vibe, Aider, Goose, Hermes Desktop, Zed'],
           ['Not supported', 'DeepSeek Harness, OpenClaw, Cline, fx, ChatGPT, Claude, Pen']
         ]]
       ]],
