@@ -39,7 +39,7 @@ to use either model for an individual image. See [image generation](#image-gener
 | `nanh pi` | [Pi](https://pi.dev/) | OpenAI Chat Completions | Optional |
 | `nanh kimi` | [Kimi Code](https://www.kimi.com/code) | OpenAI Chat Completions | Optional |
 | `nanh openclaw` | [OpenClaw](https://openclaw.ai/) | OpenAI Chat Completions | Optional |
-| `nanh vibe` | [Mistral Vibe](https://mistral.ai/products/vibe) | OpenAI Chat Completions | Not available |
+| `nanh vibe` | [Mistral Vibe](https://mistral.ai/products/vibe) | OpenAI Chat Completions | Optional |
 | `nanh hermes` | [Hermes Agent](https://hermes-agent.nousresearch.com/) | OpenAI Chat Completions | Optional |
 | `nanh omp` | [Oh My Pi](https://omp.sh/) | OpenAI Chat Completions | Optional |
 | `nanh mimo` | [MiMo Code](https://github.com/XiaomiMiMo/MiMo-Code) | OpenAI Chat Completions | Optional |
@@ -90,8 +90,12 @@ supported in this version.
 selected NaN model. If Mistral Vibe is missing, nan-harness offers to install it with
 the official installer on macOS and Linux, or with
 `uv tool install --python 3.14 mistral-vibe` on Windows, which requires
-[uv](https://docs.astral.sh/uv/). Native setup with `nanh config` is not
-available yet.
+[uv](https://docs.astral.sh/uv/). Use `nanh config vibe` to add the NaN provider,
+models and `active_model` to `$VIBE_HOME/config.toml` (default `~/.vibe`) and the
+saved key to `$VIBE_HOME/.env` as `NAN_VIBE_API_KEY`, for direct launches with
+`vibe`. It owns only those nan-harness entries, leaves your other providers,
+models, MCP servers and `.env` lines alone, and supports `--status`, `--refresh`
+and `--remove`.
 
 Harnesses that use OpenAI Chat Completions use an authenticated local gateway by
 default. This enables features such as reporting token usage when a session ends.

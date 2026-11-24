@@ -135,7 +135,7 @@ function nanHarnessContentEs({ harnessLink, nanLink, unixInstallCommand, windows
           ['nanh pi', harnessLink('Pi', 'pi'), 'opcional'],
           ['nanh kimi', harnessLink('Kimi Code', 'kimi'), 'opcional'],
           ['nanh openclaw', harnessLink('OpenClaw', 'openclaw'), 'opcional'],
-          ['nanh vibe', harnessLink('Mistral Vibe', 'vibe'), 'no disponible'],
+          ['nanh vibe', harnessLink('Mistral Vibe', 'vibe'), 'opcional'],
           ['nanh hermes', harnessLink('Hermes Agent', 'hermes'), 'opcional'],
           ['nanh omp', harnessLink('Oh My Pi', 'omp'), 'opcional'],
           ['nanh mimo', harnessLink('MiMo Code', 'mimo'), 'opcional'],

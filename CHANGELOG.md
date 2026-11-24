@@ -11,7 +11,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Launch Mistral Vibe 3.1.4 or newer through NaN with `nanh vibe` (alias
   `mistral-vibe`), using OpenAI Chat Completions with private provider routing
-  and live model discovery. Native setup with `nanh config` is not available yet.
+  and live model discovery.
+- Configure Mistral Vibe for direct use with `nanh config vibe` (alias
+  `mistral-vibe`), including reversible provider, model and `active_model`
+  entries merged into `config.toml` by name, a private `.env` credential,
+  catalog refresh, search, and preservation of your other settings.
 
 ### Fixed
 
