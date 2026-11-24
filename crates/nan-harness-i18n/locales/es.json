@@ -147,6 +147,7 @@
   "detail_must_be_a_positive_token_count": "debe ser un número positivo de tokens",
   "detail_must_be_an_absolute_path": "debe ser una ruta absoluta",
   "detail_must_be_an_http_or_https_url": "debe ser una URL HTTP o HTTPS",
+  "detail_must_be_between_minimum_and_maximum_tokens_for_the_vibe_context_window_effective_context_window_tokens": "debe estar entre {minimum} y {maximum} tokens para la ventana de contexto de Vibe de {effective_context_window} tokens",
   "detail_must_be_greater_than_requestedtokens": "debe ser mayor que requestedTokens",
   "detail_must_be_less_than_the_effective_context_window_effective_context_window_tokens": "debe ser menor que la ventana de contexto efectiva ({effective_context_window} tokens)",
   "detail_must_be_true_exactly_when_the_selected_transport_uses_a_bridge": "debe ser true exactamente cuando el transporte seleccionado use un puente",

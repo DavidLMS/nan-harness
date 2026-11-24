@@ -226,9 +226,33 @@ fn vibe_uses_its_native_compaction_threshold_and_rejects_invalid_limits() {
     // Without a request Vibe keeps its own per-window default.
     assert!(!config_template().contains("auto_compact_threshold"));
 
-    for requested in [0, 128_000, 200_000] {
+    // Vibe's range for a 128_000-token window is 50_000..=104_000.
+    for requested in [0, 49_999, 104_001, 128_000, 200_000] {
         assert!(ContextLimit::for_harness(HarnessKind::MistralVibe, requested, 128_000).is_err());
     }
+    let error = ContextLimit::for_harness(HarnessKind::MistralVibe, 49_999, 128_000)
+        .expect_err("a threshold below Vibe's floor must be rejected");
+    let PlanError::InvalidField { field, message } = error else {
+        panic!("expected an invalid context field");
+    };
+    assert_eq!(field, "context");
+    assert_eq!(
+        message,
+        nan_harness_i18n::DiagnosticText::from(
+            "must be between 50000 and 104000 tokens for the Vibe context window of 128000 tokens"
+                .to_owned()
+        )
+    );
+    for requested in [50_000, 104_000] {
+        assert!(ContextLimit::for_harness(HarnessKind::MistralVibe, requested, 128_000).is_ok());
+    }
+    // The documented 262_144 window allows 50_000..=238_144.
+    assert!(ContextLimit::for_harness(HarnessKind::MistralVibe, 238_144, 262_144).is_ok());
+    assert!(ContextLimit::for_harness(HarnessKind::MistralVibe, 238_145, 262_144).is_err());
+    assert!(ContextLimit::for_harness(HarnessKind::MistralVibe, 9_400, 262_144).is_err());
+    // A window below Vibe's 13_334-token minimum has no valid threshold.
+    assert!(ContextLimit::for_harness(HarnessKind::MistralVibe, 10_000, 13_333).is_err());
+    assert!(ContextLimit::for_harness(HarnessKind::MistralVibe, 10_000, 13_334).is_ok());
 }
 
 #[test]

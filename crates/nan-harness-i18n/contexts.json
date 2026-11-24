@@ -822,6 +822,13 @@
       "crates/nan-harness-core/src/launch_plan/validation/transport.rs"
     ]
   },
+  "detail_must_be_between_minimum_and_maximum_tokens_for_the_vibe_context_window_effective_context_window_tokens": {
+    "description": "Launch planning and session execution. Preserve command names, paths, provider identifiers and diagnostic codes.",
+    "section": "launch",
+    "sources": [
+      "crates/nan-harness-core/src/launch_plan/schema.rs"
+    ]
+  },
   "detail_must_be_greater_than_requestedtokens": {
     "description": "Launch planning and session execution. Preserve command names, paths, provider identifiers and diagnostic codes.",
     "section": "launch",

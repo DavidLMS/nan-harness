@@ -207,9 +207,20 @@ impl ContextLimit {
                     effective_context_window,
                 ),
             },
-            HarnessKind::MistralVibe => NativeContextLimit::VibeThreshold {
-                threshold_tokens: requested_tokens,
-            },
+            HarnessKind::MistralVibe => {
+                let (minimum, maximum) = vibe_threshold_bounds(effective_context_window);
+                if !(minimum..=maximum).contains(&requested_tokens) {
+                    return Err(PlanError::InvalidField {
+                        field: "context",
+                        message: nan_harness_i18n::DiagnosticText::new(|locale| {
+                            nan_harness_i18n::messages::detail_must_be_between_minimum_and_maximum_tokens_for_the_vibe_context_window_effective_context_window_tokens(locale, &(effective_context_window), &(maximum), &(minimum))
+                        }),
+                    });
+                }
+                NativeContextLimit::VibeThreshold {
+                    threshold_tokens: requested_tokens,
+                }
+            }
             HarnessKind::ZCode
             | HarnessKind::DeepSeekHarness
             | HarnessKind::OpenClaw
@@ -247,6 +258,19 @@ impl ContextLimit {
             millionths % 1_000_000
         ))
     }
+}
+
+/// Vibe's accepted compaction-threshold range for a context window.
+///
+/// Mirrors `threshold_bounds` in Vibe's completion profile: the floor keeps
+/// compaction useful and the ceiling leaves room for the summary request.
+/// Vibe refuses explicit values outside the range or silently moves them, so
+/// nanh rejects them up front. Windows too small for any value yield an empty
+/// range (`minimum > maximum`).
+fn vibe_threshold_bounds(window: u64) -> (u64, u64) {
+    let minimum = (window / 2).clamp(10_000, 50_000);
+    let headroom = window.div_ceil(4).min(24_000);
+    (minimum, window - headroom)
 }
 
 fn ceil_percent(value: u64, denominator: u64) -> u64 {
