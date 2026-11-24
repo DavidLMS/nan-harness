@@ -47,6 +47,13 @@ class WindowsInstallerTests(unittest.TestCase):
         self.assertIn("https://openclaw.ai/install.ps1", SCRIPT)
         self.assertNotIn("'openclaw' { Npm", SCRIPT)
 
+    def test_vibe_stages_its_app_server_launcher_beside_the_cli_launcher(self):
+        # Vibe's CLI resolves vibe-app-server.exe next to the launcher it was started from.
+        # A copied vibe.exe alone passes --version but fails every headless run with exit 2.
+        block = SCRIPT.split("'mistral-vibe' {", 1)[1].split("'aider' {", 1)[0]
+        self.assertIn("@('vibe.exe','vibe-app-server.exe')", block)
+        self.assertIn('(Join-Path $venv "Scripts/$launcher") (Join-Path $bin $launcher)', block)
+
     @unittest.skipUnless(shutil.which('pwsh'), 'PowerShell runtime is unavailable')
     def test_pinned_installer_uses_blob_bytes_despite_checkout_filters(self):
         function = SCRIPT.split('function Copy-PinnedHermesInstaller', 1)[1].split('function Invoke-HermesPinned', 1)[0]

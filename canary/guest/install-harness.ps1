@@ -392,7 +392,12 @@ try {
       $venv = Join-Path $env:USERPROFILE '.nan-harness-canary-venv'
       Invoke-Native 'py.exe' @("-$PythonVersion",'-m','venv',$venv) 'py-launcher' 'virtualenv'
       Invoke-Native (Join-Path $venv 'Scripts/python.exe') @('-m','pip','install',"mistral-vibe==$Version") 'python' 'install'
-      Copy-Item (Join-Path $venv 'Scripts/vibe.exe') (Join-Path $bin 'vibe.exe') -Force
+      # `vibe.exe` starts the bundled Rust CLI, which reaches the agent through the
+      # `vibe-app-server.exe` launcher beside the invoked `vibe.exe`. Stage both together,
+      # or every real run exits 2 as an infrastructure failure while `--version` still works.
+      foreach ($launcher in @('vibe.exe','vibe-app-server.exe')) {
+        Copy-Item (Join-Path $venv "Scripts/$launcher") (Join-Path $bin $launcher) -Force
+      }
     }
     'aider' {
       $venv = Join-Path $env:USERPROFILE '.nan-harness-canary-venv'
