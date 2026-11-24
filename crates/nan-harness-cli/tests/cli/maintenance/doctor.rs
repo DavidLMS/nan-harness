@@ -249,7 +249,7 @@ fn vibe_doctor_accepts_only_its_own_version_output_shape() {
     use crate::support::fake_harness;
 
     let directory = tempfile::tempdir().expect("temporary directory should be created");
-    let executable = fake_harness(directory.path(), "vibe 3.1.4");
+    let executable = fake_harness(directory.path(), "vibe 3.1.5");
     let output = run_with_embedded_compatibility(&[
         "doctor",
         "vibe",
@@ -260,7 +260,7 @@ fn vibe_doctor_accepts_only_its_own_version_output_shape() {
     assert!(output.status.success(), "{stdout}");
     assert!(stdout.contains("Harness: mistral-vibe"));
     assert!(stdout.contains("Minimum supported: 3.1.4"));
-    assert!(stdout.contains("Last compatible: 3.1.4"));
+    assert!(stdout.contains("Last compatible: 3.1.5"));
     assert!(stdout.contains("Last live verified: none"));
     assert!(stdout.contains("Compatibility: tested"));
 

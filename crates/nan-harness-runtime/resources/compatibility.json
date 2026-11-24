@@ -172,8 +172,8 @@
     {
       "id": "mistral-vibe",
       "command": "vibe --version",
-      "lastCompatibleVersion": "3.1.4",
-      "compatibleAt": "2026-11-24T00:00:00Z",
+      "lastCompatibleVersion": "3.1.5",
+      "compatibleAt": "2026-11-24T22:33:05Z",
       "minimumVersion": "3.1.4",
       "transport": "direct-chat",
       "status": "verified"
