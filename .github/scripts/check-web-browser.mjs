@@ -98,7 +98,7 @@ async function checkPages(origin, viewport, javaScriptEnabled) {
           await page.locator('[data-picker-control]').press('End');
           assert.equal(await page.locator('[data-picker-command-text]').innerText(), 'nanh fx');
           assert.equal(await page.locator('[data-picker-option][aria-selected="true"]').count(), 1);
-          for (const harness of ['mimo', 'zcode']) {
+          for (const harness of ['mimo', 'zcode', 'vibe']) {
             const control = page.locator('[data-picker-control]');
             await control.press('Home');
             const index = Number(await page.locator(`#picker-option-${harness}`).getAttribute('data-logical-index'));

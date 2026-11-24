@@ -18,6 +18,7 @@ const harnesses = [
   ['kimi', 'Kimi Code', 'nanh kimi', 'K', 'logos/kimi.svg'],
   ['aider', 'Aider', 'nanh aider', 'A', 'logos/aider.svg'],
   ['goose', 'Goose', 'nanh goose', 'G', 'logos/goose.svg'],
+  ['vibe', 'Mistral Vibe', 'nanh vibe', 'V', 'logos/mistral-vibe.svg'],
   ['fx', 'fx', 'nanh fx', 'fx', 'logos/fx.svg']
 ];
 
@@ -43,6 +44,7 @@ const harnessSites = {
   kimi: 'https://www.kimi.com/code',
   aider: 'https://aider.chat/',
   goose: 'https://github.com/block/goose',
+  vibe: 'https://mistral.ai/products/vibe',
   fx: 'https://fx.sh/'
 };
 

@@ -28,6 +28,7 @@ Package: https://www.npmjs.com/package/simple-icons/v/16.28.0
 | `openclaw.svg` | [`openclaw/openclaw` at `73ff2d2`](https://github.com/openclaw/openclaw/blob/73ff2d2f45b26856882423d9ae87a76a727ac7cd/ui/public/favicon.svg) | MIT |
 | `aider.svg` | [`Aider-AI/aider` at `5dc9490`](https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/website/assets/logo.svg) | Apache-2.0 |
 | `goose.svg` | [`aaif-goose/goose` at `384b6cc`](https://github.com/aaif-goose/goose/blob/384b6ccfd3de131a2302ff0c6dcf7455999780ae/documentation/static/img/goose.svg) | Apache-2.0 |
+| `mistral-vibe.svg` | [`mistralai/mistral-vibe` at `e76235b`](https://github.com/mistralai/mistral-vibe/blob/e76235b203b8965af584e88e69284bc704c31a1f/distribution/zed/icons/mistral_vibe.svg), retrieved 2026-11-24 | Apache-2.0; used only for product identification. Mistral AI and Mistral Vibe names and marks remain the property of Mistral AI |
 | `fx.svg` | [Official `fx.sh` header mark](https://fx.sh/), associated with [`vercel-labs/fx` at `580a0c5`](https://github.com/vercel-labs/fx/tree/580a0c5da9386317251968c09c1cee69e763487a) | Used only for product identification; the linked project repository is Apache-2.0; static glyph extracted without the website-only hover shimmer |
 
 The Apache-2.0 text is included in `licenses/APACHE-2.0.txt`. The applicable
