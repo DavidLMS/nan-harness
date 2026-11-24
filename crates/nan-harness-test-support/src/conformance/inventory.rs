@@ -77,7 +77,7 @@ pub(crate) fn round_trip_probe(
                 true,
             ),
         ),
-        HarnessKind::Hermes | HarnessKind::Fx => (
+        HarnessKind::Hermes | HarnessKind::Fx | HarnessKind::MistralVibe => (
             "write_file",
             json!({
                 "path": workspace.join("tool-output.txt"),
@@ -149,14 +149,6 @@ pub(crate) fn round_trip_probe(
         HarnessKind::KimiCode => (
             "Write",
             json!({"path": "tool-output.txt", "content": ROUND_TRIP_MARKER}),
-            filesystem_contract(workspace.join("tool-output.txt"), ROUND_TRIP_MARKER, true),
-        ),
-        HarnessKind::MistralVibe => (
-            "write_file",
-            json!({
-                "path": workspace.join("tool-output.txt"),
-                "content": ROUND_TRIP_MARKER
-            }),
             filesystem_contract(workspace.join("tool-output.txt"), ROUND_TRIP_MARKER, true),
         ),
         HarnessKind::Aider => (
