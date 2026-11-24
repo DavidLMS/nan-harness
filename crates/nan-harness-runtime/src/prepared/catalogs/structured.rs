@@ -138,6 +138,11 @@ pub(in crate::prepared) fn mistral_vibe_model_catalog(
 
 fn mistral_vibe_model_table(model: &CodingModelProfile) -> Result<toml::Value, DiagnosticText> {
     let (context_window, max_output_tokens) = kimi_model_limits(model)?;
+    // Vibe refuses a model whose max output does not fit inside its window
+    // (`max_output_tokens < max_context_length`). A profile may advertise an
+    // output equal to the window, so keep one token of input room. Vibe still
+    // caps each request to the room its window leaves.
+    let max_output_tokens = max_output_tokens.min(context_window.saturating_sub(1));
     let mut table = toml::Table::from_iter([
         ("name".to_owned(), toml::Value::String(model.id.clone())),
         ("provider".to_owned(), toml::Value::String("nan".to_owned())),

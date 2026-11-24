@@ -336,6 +336,35 @@ fn vibe_catalog_lists_every_model_and_keeps_reasoning_omission_unless_unadjustab
 }
 
 #[test]
+fn vibe_catalog_keeps_max_output_below_the_context_window() {
+    let mut equal = model("equal-window");
+    equal.context_window = 1_000_000;
+    equal.max_output_tokens = 1_000_000;
+    let mut oversized = model("oversized");
+    oversized.context_window = 128_000;
+    oversized.max_output_tokens = 500_000;
+    let mut fits = model("fits");
+    fits.max_output_tokens = 65_536;
+    let rendered = mistral_vibe_model_catalog(&[equal, oversized, fits]).expect("Vibe catalog");
+    let table: toml::Table = toml::from_str(&rendered).expect("Vibe catalog should be TOML");
+    let limits: Vec<(i64, i64)> = table["models"]
+        .as_array()
+        .expect("models array")
+        .iter()
+        .map(|entry| {
+            (
+                entry["max_context_length"].as_integer().unwrap(),
+                entry["max_output_tokens"].as_integer().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        limits,
+        [(1_000_000, 999_999), (128_000, 127_999), (262_144, 65_536)]
+    );
+}
+
+#[test]
 fn vibe_catalog_placeholder_renders_through_the_shared_facade() {
     use nan_harness_core::launch_plan::MISTRAL_VIBE_MODEL_CATALOG_PLACEHOLDER;
     let models = known_models();
