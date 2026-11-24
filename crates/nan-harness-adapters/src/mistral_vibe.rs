@@ -8,7 +8,10 @@ use nan_harness_core::launch_plan::{
     NAN_SEARCH_BLOCK_BEGIN, NAN_SEARCH_BLOCK_END, OverlayFile, OverlayFilePolicy,
     PROVIDER_BASE_URL_PLACEHOLDER, TemporaryArtifactMode, VIBE_HOME_PLACEHOLDER,
 };
-use nan_harness_core::{HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError};
+use nan_harness_core::{
+    ContextLimit, HarnessAdapter, HarnessKind, LaunchPlan, NativeContextLimit, PlanContext,
+    PlanError,
+};
 use std::collections::BTreeSet;
 
 const CREDENTIAL_TARGET: &str = "NAN_VIBE_API_KEY";
@@ -64,7 +67,10 @@ impl HarnessAdapter for MistralVibeAdapter {
                     files: vec![OverlayFile {
                         path: "config.toml".to_owned(),
                         mode: TemporaryArtifactMode::OwnerFile,
-                        content_template: vibe_config(&context.model.resolved_id),
+                        content_template: vibe_config(
+                            &context.model.resolved_id,
+                            context.context_limit.as_ref(),
+                        ),
                         policy: OverlayFilePolicy::MergeTomlMcpServers,
                     }],
                     lifecycle: ArtifactLifecycle::Launch,
@@ -74,7 +80,15 @@ impl HarnessAdapter for MistralVibeAdapter {
     }
 }
 
-fn vibe_config(model_id: &str) -> String {
+fn vibe_config(model_id: &str, context_limit: Option<&ContextLimit>) -> String {
+    // A global threshold applies to every model without its own; the managed
+    // catalog never sets per-model thresholds.
+    let compaction = match context_limit.map(|limit| &limit.native) {
+        Some(NativeContextLimit::VibeThreshold { threshold_tokens }) => {
+            format!("auto_compact_threshold = {threshold_tokens}\n")
+        }
+        _ => String::new(),
+    };
     let active_model = toml_string(model_id);
     let search_endpoint = toml_string(&nan_search_endpoint());
     let search_server = toml_string(NAN_SEARCH_MCP_ID);
@@ -88,6 +102,7 @@ fn vibe_config(model_id: &str) -> String {
          enable_update_checks = false\n\
          enable_auto_update = false\n\
          experimental_enable_model_catalog = false\n\
+         {compaction}\
          \n\
          [[providers]]\n\
          name = \"nan\"\n\

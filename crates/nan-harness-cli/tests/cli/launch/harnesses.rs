@@ -159,6 +159,45 @@ fn vibe_dry_run_rejects_a_native_model_and_keeps_other_arguments() {
 
 #[cfg(unix)]
 #[test]
+fn vibe_context_sets_a_native_threshold_and_rejects_invalid_values() {
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let executable = fake_harness(directory.path(), "vibe 3.1.4");
+    let executable = executable.to_str().expect("path should be UTF-8");
+
+    let accepted = run_with_embedded_compatibility(&[
+        "vibe",
+        "--executable",
+        executable,
+        "--dry-run",
+        "--context",
+        "50000",
+    ]);
+    let stdout = String::from_utf8(accepted.stdout).expect("output should be UTF-8");
+    assert!(
+        accepted.status.success(),
+        "{}",
+        String::from_utf8_lossy(&accepted.stderr)
+    );
+    assert!(
+        stdout.contains("auto_compact_threshold = 50000"),
+        "{stdout}"
+    );
+
+    for value in ["0", "99999999"] {
+        let rejected = run_with_embedded_compatibility(&[
+            "vibe",
+            "--executable",
+            executable,
+            "--dry-run",
+            "--context",
+            value,
+        ]);
+        assert!(!rejected.status.success(), "{value}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
 fn gateway_escape_hatch_dry_run_explains_its_effect() {
     let directory = tempfile::tempdir().expect("temporary directory should be created");
     let executable = fake_harness(directory.path(), "0.84.2");

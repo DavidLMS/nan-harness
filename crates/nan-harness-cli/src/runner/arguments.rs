@@ -215,6 +215,7 @@ pub(crate) fn validate_limit_request(
                 | HarnessKind::PrimeAgent
                 | HarnessKind::QwenCode
                 | HarnessKind::KimiCode
+                | HarnessKind::MistralVibe
                 | HarnessKind::Aider
                 | HarnessKind::Goose
         ) {

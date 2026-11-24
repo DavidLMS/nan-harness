@@ -81,6 +81,7 @@ pub enum NativeContextLimit {
     HermesThreshold { threshold_tokens: u64 },
     PiReserve { reserve_tokens: u64 },
     OmpThreshold { threshold_tokens: u64 },
+    VibeThreshold { threshold_tokens: u64 },
     QwenFraction { fraction_millionths: u64 },
     KimiReserve { reserved_context_size: u64 },
     AiderHistory { max_chat_history_tokens: u64 },
@@ -206,8 +207,10 @@ impl ContextLimit {
                     effective_context_window,
                 ),
             },
+            HarnessKind::MistralVibe => NativeContextLimit::VibeThreshold {
+                threshold_tokens: requested_tokens,
+            },
             HarnessKind::ZCode
-            | HarnessKind::MistralVibe
             | HarnessKind::DeepSeekHarness
             | HarnessKind::OpenClaw
             | HarnessKind::Cline

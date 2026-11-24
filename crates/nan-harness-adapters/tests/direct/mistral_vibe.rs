@@ -202,3 +202,31 @@ fn vibe_rejects_a_user_model_but_preserves_other_arguments() {
     );
     assert_eq!(MistralVibeAdapter.kind(), HarnessKind::MistralVibe);
 }
+
+#[test]
+fn vibe_uses_its_native_compaction_threshold_and_rejects_invalid_limits() {
+    use nan_harness_core::{ContextLimit, NativeContextLimit};
+
+    let mut with_limit = context(HarnessKind::MistralVibe, Vec::new());
+    let limit =
+        ContextLimit::for_harness(HarnessKind::MistralVibe, 64_000, 128_000).expect("valid limit");
+    assert_eq!(
+        limit.native,
+        NativeContextLimit::VibeThreshold {
+            threshold_tokens: 64_000
+        }
+    );
+    with_limit.context_limit = Some(limit);
+    let plan = plan(&MistralVibeAdapter, &with_limit);
+    let template = plan.configuration_overlays[0].files[0]
+        .content_template
+        .clone();
+    let config = parse_without_catalog(&without_search_block(&template));
+    assert_eq!(config["auto_compact_threshold"].as_integer(), Some(64_000));
+    // Without a request Vibe keeps its own per-window default.
+    assert!(!config_template().contains("auto_compact_threshold"));
+
+    for requested in [0, 128_000, 200_000] {
+        assert!(ContextLimit::for_harness(HarnessKind::MistralVibe, requested, 128_000).is_err());
+    }
+}

@@ -42,6 +42,7 @@ fn missing_installable_harness_is_nonfatal_during_dry_run() {
         "pi",
         "prime-agent",
         "cline",
+        "vibe",
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
             .args([harness, "--dry-run"])
@@ -142,6 +143,58 @@ fn harness_doctor_json_reports_discovery_failures_as_json() {
     assert_eq!(report["safeToShare"], true);
     assert!(report.get("version").is_none());
     assert!(output.stderr.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn vibe_installed_by_uv_is_found_outside_path_in_the_tool_directory() {
+    let path = tempfile::tempdir().expect("temporary PATH directory should exist");
+    let home = tempfile::tempdir().expect("temporary home directory should exist");
+    let tool_bin = tempfile::tempdir().expect("uv tool directory should exist");
+    let fake = crate::support::fake_harness(tool_bin.path(), "vibe 3.1.4");
+    std::fs::rename(&fake, tool_bin.path().join("vibe")).expect("fake vibe should be placed");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
+        .args(["vibe", "--dry-run"])
+        .env("PATH", path.path())
+        .env("HOME", home.path())
+        .env("UV_TOOL_BIN_DIR", tool_bin.path())
+        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
+        .env_remove("USERPROFILE")
+        .env_remove("NAN_UPDATE_MANIFEST_URL")
+        .env_remove("NAN_HARNESS_GLITCHTIP_DSN")
+        .output()
+        .expect("nanh should start");
+    let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
+
+    assert!(output.status.success(), "{stderr}");
+    assert!(!stderr.contains("was not found"), "{stderr}");
+}
+
+#[cfg(unix)]
+#[test]
+fn missing_vibe_is_a_setup_requirement_without_an_interactive_terminal() {
+    let path = tempfile::tempdir().expect("temporary PATH directory should exist");
+    let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
+        .args(["vibe"])
+        .env("PATH", path.path())
+        .env("HOME", path.path())
+        .env("NAN_HARNESS_CONFIG_DIR", path.path().join("state"))
+        .env("NAN_HARNESS_CREDENTIAL_BACKEND", "file")
+        .env_remove("USERPROFILE")
+        .env_remove("UV_TOOL_BIN_DIR")
+        .env_remove("XDG_BIN_HOME")
+        .env_remove("NAN_API_KEY")
+        .env_remove("NAN_UPDATE_MANIFEST_URL")
+        .env_remove("NAN_HARNESS_GLITCHTIP_DSN")
+        .output()
+        .expect("nanh should start");
+    let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
+
+    assert!(!output.status.success());
+    assert!(stderr.contains("setup required:"), "{stderr}");
+    assert!(stderr.contains("mistral-vibe was not found"), "{stderr}");
+    assert!(stderr.contains("installation requires an interactive terminal"));
 }
 
 #[cfg(unix)]
