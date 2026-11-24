@@ -87,7 +87,7 @@ jobs:
             echo "workflow_commit=$(git rev-parse HEAD)"
           } >> "$GITHUB_OUTPUT"
       - id: matrix
-        name: Expand the mandatory 52-cell matrix
+        name: Expand the mandatory 55-cell matrix
         run: |
           echo "matrix=$(python3 canary/actions/release_gate.py matrix)" >> "$GITHUB_OUTPUT"
           echo 'Windows skips: Prime Agent and FX (official-windows-distribution-unavailable); skips do not count as passes.' >> "$GITHUB_STEP_SUMMARY"
@@ -156,7 +156,7 @@ jobs:
     if: inputs.mode == 'live' && github.ref == 'refs/heads/main'
     uses: ./.github/workflows/live-check-approval.yml
     with:
-      subject: Verify ${{ inputs.tag }} at ${{ inputs.tag_commit }} with all 52 CLI cells, three OpenCode V2 cells and 12 native Desktop cells; publication remains a separate protected operation.
+      subject: Verify ${{ inputs.tag }} at ${{ inputs.tag_commit }} with all 55 CLI cells, three OpenCode V2 cells and 12 native Desktop cells; publication remains a separate protected operation.
 
   cell:
     name: ${{ matrix.system }} / ${{ matrix.harness }}
@@ -320,7 +320,7 @@ jobs:
           retention-days: 7
 
   aggregate:
-    name: Validate full 52-cell evidence
+    name: Validate full 55-cell evidence
     needs: [prepare, cell, opencode-v2]
     if: always() && needs.prepare.result == 'success' && needs.cell.result == 'success' && needs.opencode-v2.result == 'success'
     runs-on: ubuntu-24.04
@@ -369,7 +369,7 @@ jobs:
         run: |
           {
             echo '## Verification-only result'
-            echo 'The exact 52-cell deterministic evidence passed; no publication is permitted for deterministic mode.'
+            echo 'The exact 55-cell deterministic evidence passed; no publication is permitted for deterministic mode.'
           } >> "$GITHUB_STEP_SUMMARY"
 
   desktop:

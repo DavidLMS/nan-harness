@@ -24,7 +24,7 @@ V1 retains its existing compatibility manifest evidence. V2 has a separate
 `@opencode/cli@2.0.27` package, with Linux, macOS and Windows jobs, required by CI and release draft creation.
 The live release gate additionally requires three independent V2 tool probes
 against the attested release binaries. Their evidence is separate from the
-52 logical-harness cells, whose OpenCode entry remains V1. A workflow
+55 logical-harness cells, whose OpenCode entry remains V1. A workflow
 being present does not establish that its hosted jobs have passed.
 
 Local macOS qualification against the real 2.0.27 executable and synthetic,
