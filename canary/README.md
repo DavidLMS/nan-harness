@@ -74,6 +74,12 @@ New release publication requires the complete 52-cell matrix. Existing 30-, 43-,
 and 49-cell publication receipts remain usable only for recommendation of their
 already published release.
 
+Mistral Vibe's pinned conformance also runs `config vibe` against a local scripted
+provider: a direct `vibe` process reads the persisted `config.toml` catalog and the
+`.env` credential, while configure, rotation and removal keep the user's other
+providers, models, MCP servers and `.env` lines. This pinned check is not part of
+the published-binary conformance report.
+
 | Trigger | Platforms | Coverage |
 | --- | --- | --- |
 | Daily hosted | Linux/macOS ARM64 and Windows x64 | Pending upstream versions: clean install, doctor, deterministic conformance and live `qwen3.6`; partial feed publication by harness |

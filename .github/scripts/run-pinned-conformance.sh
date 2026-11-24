@@ -43,6 +43,8 @@ for harness in "$@"; do
         cargo test --locked -p nan-harness-cli --test conformance_direct "$test_filter" -- --ignored
         if [ "$harness" = 'mimo-code' ]; then
           cargo test --locked -p nan-harness-cli --test cli configuration::mimo -- --include-ignored
+        elif [ "$harness" = 'mistral-vibe' ]; then
+          cargo test --locked -p nan-harness-cli --test cli configuration::vibe -- --include-ignored
         fi
       )
       ;;

@@ -16,7 +16,7 @@ cat >"$bin_directory/cargo" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s|%s\n' "${CLINE_NO_AUTO_UPDATE:-unset}" "$*" >>"$PINNED_CARGO_LOG"
-if [ "${PINNED_FAIL_NATIVE:-false}" = true ] && [ "$*" = 'test --locked -p nan-harness-cli --test cli configuration::mimo -- --include-ignored' ]; then
+if [ -n "${PINNED_FAIL_NATIVE:-}" ] && [ "$*" = "test --locked -p nan-harness-cli --test cli configuration::${PINNED_FAIL_NATIVE} -- --include-ignored" ]; then
   exit 23
 fi
 EOF
@@ -59,6 +59,7 @@ grep -Fq 'conformance_direct mimo_' "$temporary_directory/cargo.log"
 grep -Fq 'conformance_direct vibe_' "$temporary_directory/cargo.log"
 grep -Fq 'run --locked --quiet -- doctor vibe' "$temporary_directory/cargo.log"
 grep -Fxq 'unset|test --locked -p nan-harness-cli --test cli configuration::mimo -- --include-ignored' "$temporary_directory/cargo.log"
+grep -Fxq 'unset|test --locked -p nan-harness-cli --test cli configuration::vibe -- --include-ignored' "$temporary_directory/cargo.log"
 grep -Fq 'unset|run --locked --quiet -- doctor mimo' "$temporary_directory/cargo.log"
 grep -Fq 'conformance_direct deepseek_harness_' "$temporary_directory/cargo.log"
 grep -Fq '1|run --locked --quiet -- doctor cline' "$temporary_directory/cargo.log"
@@ -72,8 +73,17 @@ fi
 if PINNED_INSTALL_LOG="$temporary_directory/failure-install.log" \
   PINNED_CARGO_LOG="$temporary_directory/failure-cargo.log" \
   NAN_PINNED_INSTALLER="$temporary_directory/installer" \
-  PINNED_FAIL_NATIVE=true PATH="$bin_directory:$PATH" \
+  PINNED_FAIL_NATIVE=mimo PATH="$bin_directory:$PATH" \
   bash "$repository_root/.github/scripts/run-pinned-conformance.sh" mimo-code; then
   printf 'pinned conformance ignored a failed MiMo native configuration check\n' >&2
+  exit 1
+fi
+
+if PINNED_INSTALL_LOG="$temporary_directory/vibe-failure-install.log" \
+  PINNED_CARGO_LOG="$temporary_directory/vibe-failure-cargo.log" \
+  NAN_PINNED_INSTALLER="$temporary_directory/installer" \
+  PINNED_FAIL_NATIVE=vibe PATH="$bin_directory:$PATH" \
+  bash "$repository_root/.github/scripts/run-pinned-conformance.sh" mistral-vibe; then
+  printf 'pinned conformance ignored a failed Vibe native configuration check\n' >&2
   exit 1
 fi
