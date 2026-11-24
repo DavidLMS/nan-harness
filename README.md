@@ -45,6 +45,7 @@ to use either model for an individual image. See [image generation](#image-gener
 | `nanh zcode` | [ZCode](https://github.com/zai-org/ZCode) | OpenAI Chat Completions | Optional |
 | `nanh prime-agent` | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) | OpenAI Chat Completions | Optional |
 | `nanh dsh` | [DeepSeek Harness](https://deepseek.com/harness/en/) | OpenAI Chat Completions | Optional |
+| `nanh vibe` | [Mistral Vibe](https://mistral.ai/products/vibe) | OpenAI Chat Completions | Not available |
 | `nanh fx` | [fx](https://fx.sh/) | fx AI Gateway bridge | Not available |
 
 The Prime Agent and fx integrations do not yet support Windows. On Windows,
@@ -84,6 +85,14 @@ credential in its provider file; nanh writes a launch token there instead of
 the real NaN key. An independently built, unadapted CLI can run through nanh
 with `--no-search`. A native compaction override through `--context` is not
 supported in this version.
+
+`nanh vibe` (alias `nanh mistral-vibe`) launches Mistral Vibe 3.1.4 or newer with the
+selected NaN model. Install Mistral Vibe with the official installer,
+`curl -LsSf https://mistral.ai/vibe/install.sh | bash`, on macOS and Linux, or with
+`uv tool install --python 3.14 mistral-vibe` on Windows (requires
+[uv](https://docs.astral.sh/uv/)). Mistral Vibe needs Python 3.12 or newer; the
+official installer sets that up through uv. Native setup with `nanh config` is not
+available yet.
 
 Harnesses that use OpenAI Chat Completions use an authenticated local gateway by
 default. This enables features such as reporting token usage when a session ends.

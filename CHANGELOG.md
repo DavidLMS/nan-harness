@@ -7,6 +7,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Launch Mistral Vibe 3.1.4 or newer through NaN with `nanh vibe` (alias
+  `mistral-vibe`), using OpenAI Chat Completions with private provider routing
+  and live model discovery. Native setup with `nanh config` is not available yet.
+
 ### Fixed
 
 - Classify Claude Windows pre-submit deadline receipts as timeouts, and retain
