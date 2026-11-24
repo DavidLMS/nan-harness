@@ -13,7 +13,8 @@ mod zcode;
 
 use super::documents::{
     get_yaml_path, prepare_exact_file, prepare_exact_file_removal, prepare_json,
-    prepare_json_removal, prepare_text_block, prepare_yaml, prepare_yaml_removal,
+    prepare_json_removal, prepare_text_block, prepare_text_block_removal, prepare_yaml,
+    prepare_yaml_removal,
 };
 use super::*;
 use nan_harness_core::SecretValue;

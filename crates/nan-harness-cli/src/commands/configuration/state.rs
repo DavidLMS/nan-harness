@@ -101,10 +101,11 @@ pub(crate) struct TextBlockReceipt {
     pub(crate) block_sha256: String,
     #[serde(default = "default_true")]
     pub(crate) active: bool,
-    /// The block was appended after a line break that nan-harness added, so
-    /// removal must take that break back to restore the original bytes.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub(crate) separator_added: bool,
+    /// Whether the block was appended after a line break that nan-harness
+    /// added. Absent in receipts written before this was recorded, which keep
+    /// the original removal behaviour of always taking the preceding break.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) separator_added: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

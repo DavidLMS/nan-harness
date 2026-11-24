@@ -30,7 +30,7 @@ pub(crate) fn prepare_text_block(
             block_sha256: sha256(desired.as_bytes()),
             active: true,
             separator_added: previous.map_or_else(
-                || !source.is_empty() && !source.ends_with('\n'),
+                || Some(!source.is_empty() && !source.ends_with('\n')),
                 |receipt| receipt.separator_added,
             ),
         }),
@@ -147,7 +147,7 @@ pub(crate) fn prepare_inactive_text_block(
             end: plan.end.clone(),
             block_sha256: String::new(),
             active: false,
-            separator_added: false,
+            separator_added: None,
         });
         return Ok(prepared);
     }
@@ -165,7 +165,7 @@ pub(crate) fn prepare_inactive_text_block(
             end: plan.end.clone(),
             block_sha256: String::new(),
             active: false,
-            separator_added: false,
+            separator_added: None,
         }),
     })
 }
@@ -202,7 +202,7 @@ pub(crate) fn prepare_text_block_removal(
         ));
     }
     let mut rendered = source;
-    let start = if receipt.separator_added
+    let start = if receipt.separator_added.unwrap_or(true)
         && range.start > 0
         && rendered.as_bytes().get(range.start - 1) == Some(&b'\n')
     {
