@@ -29,7 +29,7 @@ chmod 755 "$temporary_directory/installer" "$bin_directory/cargo" "$bin_director
 
 expected=(
   aider claude-code cline codex deepseek-harness fx goose hermes kimi-code mimo-code
-  omp openclaw opencode pi prime-agent qwen-code zcode
+  mistral-vibe omp openclaw opencode pi prime-agent qwen-code zcode
 )
 configured="$(
   sed -n 's/^[[:space:]]*harnesses: //p' "$repository_root/.github/workflows/pinned-conformance.yml" \
@@ -56,6 +56,8 @@ grep -Fq 'conformance_fx fx_' "$temporary_directory/cargo.log"
 grep -Fq 'conformance_direct zcode_' "$temporary_directory/cargo.log"
 grep -Fq 'zcode-source.py check' "$temporary_directory/cargo.log"
 grep -Fq 'conformance_direct mimo_' "$temporary_directory/cargo.log"
+grep -Fq 'conformance_direct vibe_' "$temporary_directory/cargo.log"
+grep -Fq 'run --locked --quiet -- doctor vibe' "$temporary_directory/cargo.log"
 grep -Fxq 'unset|test --locked -p nan-harness-cli --test cli configuration::mimo -- --include-ignored' "$temporary_directory/cargo.log"
 grep -Fq 'unset|run --locked --quiet -- doctor mimo' "$temporary_directory/cargo.log"
 grep -Fq 'conformance_direct deepseek_harness_' "$temporary_directory/cargo.log"

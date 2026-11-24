@@ -71,7 +71,7 @@ cargo_xtask() {
 }
 harnesses=(
   claude-code codex mimo-code zcode opencode hermes pi gentle-shell omp prime-agent deepseek-harness
-  openclaw cline qwen-code kimi-code aider goose fx
+  openclaw cline qwen-code kimi-code mistral-vibe aider goose fx
 )
 [ -n "$release_repository" ] || usage
 updates_directory="$output_directory/compatibility-updates"

@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [Parameter(Mandatory=$true)][ValidateSet('claude-code','codex','mimo-code','zcode','opencode','hermes','pi','gentle-shell','omp','prime-agent','deepseek-harness','openclaw','cline','qwen-code','kimi-code','aider','goose','fx')][string]$Harness,
+  [Parameter(Mandatory=$true)][ValidateSet('claude-code','codex','mimo-code','zcode','opencode','hermes','pi','gentle-shell','omp','prime-agent','deepseek-harness','openclaw','cline','qwen-code','kimi-code','mistral-vibe','aider','goose','fx')][string]$Harness,
   [Parameter(Mandatory=$true)][string]$Version,
   [ValidatePattern('^[0-9]+\.[0-9]+$')][string]$PythonVersion = '3.12',
   [string]$Ref = ''
@@ -387,6 +387,12 @@ try {
         throw 'official Goose release has no Windows x64 asset'
       }
       Install-ArchiveAsset $asset.browser_download_url '(^|[\\/])goose\.exe$' 'goose.exe'
+    }
+    'mistral-vibe' {
+      $venv = Join-Path $env:USERPROFILE '.nan-harness-canary-venv'
+      Invoke-Native 'py.exe' @("-$PythonVersion",'-m','venv',$venv) 'py-launcher' 'virtualenv'
+      Invoke-Native (Join-Path $venv 'Scripts/python.exe') @('-m','pip','install',"mistral-vibe==$Version") 'python' 'install'
+      Copy-Item (Join-Path $venv 'Scripts/vibe.exe') (Join-Path $bin 'vibe.exe') -Force
     }
     'aider' {
       $venv = Join-Path $env:USERPROFILE '.nan-harness-canary-venv'

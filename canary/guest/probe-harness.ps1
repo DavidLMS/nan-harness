@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [Parameter(Mandatory=$true)][ValidateSet('claude-code','codex','mimo-code','zcode','opencode','hermes','pi','omp','prime-agent','deepseek-harness','openclaw','cline','qwen-code','kimi-code','aider','goose','fx')][string]$Harness,
+  [Parameter(Mandatory=$true)][ValidateSet('claude-code','codex','mimo-code','zcode','opencode','hermes','pi','omp','prime-agent','deepseek-harness','openclaw','cline','qwen-code','kimi-code','mistral-vibe','aider','goose','fx')][string]$Harness,
   [Parameter(Mandatory=$true)][ValidateSet('version-doctor','deterministic-contract','live-tool')][string]$Stage,
   [string]$Model = 'qwen3.6', [Parameter(Mandatory=$true)][string]$NanBinary,
   [Parameter(Mandatory=$true)][string]$Canary, [Parameter(Mandatory=$true)][string]$Version
@@ -275,6 +275,7 @@ try {
     'cline' { Run-Native @('cline','--model',$Model,'--','--json','--timeout','120',$prompt); if (-not (Has-Text 'read_files')) { Fail 'tool evidence missing' } }
     'qwen-code' { Run-Native @('qwen','--model',$Model,'--','--safe-mode','--prompt',$prompt,'--output-format','stream-json'); if (-not (Has-Text '"name":"read_file"')) { Fail 'tool evidence missing' } }
     'kimi-code' { Run-Native @('kimi','--model',$Model,'--','--prompt',$prompt,'--output-format','stream-json'); if (-not (Has-Text 'Read')) { Fail 'tool evidence missing' } }
+    'mistral-vibe' { Run-Native @('vibe','--model',$Model,'--','--trust','--auto-approve','--max-turns','12','--output','streaming','--prompt',$prompt); if (-not (Has-Text '"toolName":"file_system.read_file"')) { Fail 'tool evidence missing' } }
     'aider' { $target=Join-Path $workspace 'edit-target.txt'; Set-Content $target 'AIDER_CANARY_BEFORE'; Run-Native @('aider','--model',$Model,'--','--message','Replace the entire file content with exactly AIDER_CANARY_TOOL_OK. After the edit succeeds, respond with the standalone token NAN_CANARY_OK as the final line of your response.','--yes-always','--no-auto-commits','--no-git','--edit-format','whole','--no-show-model-warnings','--no-check-update','--map-tokens','0','edit-target.txt'); Read-Exact $target 'AIDER_CANARY_TOOL_OK' }
     'goose' { Run-Native @('goose','--model',$Model,'--','run','--no-profile','--no-session','--with-builtin','developer','--output-format','json','--text',$prompt); if (-not (Has-Regex '"name"\s*:\s*"shell"')) { Fail 'tool evidence missing' } }
     'fx' { Run-Native @('fx','--model',$Model,'--','ask','--yolo','--no-save','--no-color',$prompt); if (-not (Has-Text "Reading $readTarget")) { Fail 'tool evidence missing' } }

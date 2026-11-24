@@ -263,6 +263,13 @@ case "$harness" in
     probe_stage='tool-evidence'
     grep -F 'Read' "$output" "$stderr_output" >/dev/null
     ;;
+  mistral-vibe)
+    "$nan_command" vibe --model "$model" -- \
+      --trust --auto-approve --max-turns 12 --output streaming --prompt "$prompt" \
+      >"$output" 2>"$stderr_output"
+    probe_stage='tool-evidence'
+    grep -F '"toolName":"file_system.read_file"' "$output" "$stderr_output" >/dev/null
+    ;;
   aider)
     verify_read_marker=false
     printf '%s\n' 'AIDER_CANARY_BEFORE' > edit-target.txt

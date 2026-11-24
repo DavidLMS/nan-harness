@@ -258,6 +258,13 @@ case "$harness_id" in
     fi
     append_path "$HOME/.kimi-code/bin"
     ;;
+  mistral-vibe)
+    if [ "$install_mode" = '--latest' ]; then
+      uv_tool_install 3.14 'mistral-vibe'
+    else
+      uv_tool_install 3.14 "mistral-vibe==$version"
+    fi
+    ;;
   aider)
     if [ "$install_mode" = '--latest' ]; then
       uv_tool_install 3.12 'aider-chat'

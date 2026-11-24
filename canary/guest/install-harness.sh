@@ -223,6 +223,16 @@ case "$harness" in
     if [ "$version" != latest ]; then arguments=(--version "$version"); fi
     KIMI_NO_MODIFY_PATH=1 bash "$installer" "${arguments[@]}"
     ;;
+  mistral-vibe)
+    if ! command -v uv >/dev/null 2>&1; then
+      python3 -m venv "$HOME/.local/share/nan-harness-canary-uv"
+      "$HOME/.local/share/nan-harness-canary-uv/bin/python" -m pip install 'uv==0.11.31'
+      export PATH="$HOME/.local/share/nan-harness-canary-uv/bin:$PATH"
+    fi
+    package=mistral-vibe
+    if [ "$version" != latest ]; then package="mistral-vibe==$version"; fi
+    uv tool install --python 3.14 "$package"
+    ;;
   aider)
     if ! command -v uv >/dev/null 2>&1; then
       python3 -m venv "$HOME/.local/share/nan-harness-canary-uv"

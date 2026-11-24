@@ -24,12 +24,13 @@ for harness in "$@"; do
       cargo test --locked -p nan-harness-cli --test conformance_codex codex_native_inventory_crosses_the_responses_bridge -- --ignored --exact
       cargo test --locked -p nan-harness-cli --test conformance_codex codex_always_on_models_accept_inherited_disabled_reasoning -- --ignored --exact
       ;;
-    mimo-code|opencode|pi|omp|openclaw|cline|qwen-code|deepseek-harness|hermes|kimi-code|aider|prime-agent|goose)
+    mimo-code|opencode|pi|omp|openclaw|cline|qwen-code|deepseek-harness|hermes|kimi-code|mistral-vibe|aider|prime-agent|goose)
       case "$harness" in
         mimo-code) command_name=mimo; test_filter=mimo_ ;;
         qwen-code) command_name=qwen; test_filter=qwen_code_ ;;
         deepseek-harness) command_name=deepseek; test_filter=deepseek_harness_ ;;
         kimi-code) command_name=kimi; test_filter=kimi_code_ ;;
+        mistral-vibe) command_name=vibe; test_filter=vibe_ ;;
         prime-agent) command_name=prime; test_filter=prime_agent_ ;;
         omp) command_name=omp; test_filter=omp_ ;;
         *) command_name="$harness"; test_filter="${harness//-/_}_" ;;
