@@ -7,6 +7,7 @@ mod goose;
 mod hermes;
 mod kimi_code;
 mod mimo_code;
+mod mistral_vibe;
 mod omp;
 mod openclaw;
 mod opencode;

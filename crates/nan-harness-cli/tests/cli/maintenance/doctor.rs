@@ -192,6 +192,43 @@ fn doctor_checks_a_real_executable_boundary() {
 
 #[cfg(unix)]
 #[test]
+fn vibe_doctor_accepts_only_its_own_version_output_shape() {
+    use crate::support::fake_harness;
+
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let executable = fake_harness(directory.path(), "vibe 3.1.4");
+    let output = run_with_embedded_compatibility(&[
+        "doctor",
+        "vibe",
+        "--executable",
+        executable.to_str().expect("path should be UTF-8"),
+    ]);
+    let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
+    assert!(output.status.success(), "{stdout}");
+    assert!(stdout.contains("Harness: mistral-vibe"));
+    assert!(stdout.contains("Minimum supported: 3.1.4"));
+    assert!(stdout.contains("Last compatible: 3.1.4"));
+    assert!(stdout.contains("Last live verified: none"));
+    assert!(stdout.contains("Compatibility: tested"));
+
+    // `vibe` is a generic executable name: a bare version could be any program.
+    for impostor in ["3.1.4", "other 3.1.4", "vibe version 3.1.4"] {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
+        let executable = fake_harness(directory.path(), impostor);
+        let output = run_with_embedded_compatibility(&[
+            "vibe",
+            "--dry-run",
+            "--executable",
+            executable.to_str().expect("path should be UTF-8"),
+        ]);
+        let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
+        assert!(!output.status.success(), "{impostor}");
+        assert!(stderr.contains("error [NH-DISCOVERY-005]"), "{stderr}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
 fn harness_doctor_json_exposes_compatibility_evidence() {
     use std::os::unix::fs::PermissionsExt;
 

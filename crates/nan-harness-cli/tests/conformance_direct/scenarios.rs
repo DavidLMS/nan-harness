@@ -32,6 +32,8 @@ mod hermes;
 mod kimi_code;
 #[path = "scenarios/mimo_code.rs"]
 mod mimo_code;
+#[path = "scenarios/mistral_vibe.rs"]
+mod mistral_vibe;
 #[path = "scenarios/omp.rs"]
 mod omp;
 #[path = "scenarios/openclaw.rs"]

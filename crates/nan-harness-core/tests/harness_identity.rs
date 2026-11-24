@@ -7,7 +7,7 @@ use nan_harness_core::harness::{
 use nan_harness_core::{HarnessKind, VersionStatus};
 use semver::Version;
 
-const KIND_CONTRACTS: [(HarnessKind, &str, &str); 17] = [
+const KIND_CONTRACTS: [(HarnessKind, &str, &str); 18] = [
     (HarnessKind::ClaudeCode, "claude-code", "claude"),
     (HarnessKind::Codex, "codex", "codex"),
     (HarnessKind::OpenCode, "opencode", "opencode"),
@@ -22,12 +22,13 @@ const KIND_CONTRACTS: [(HarnessKind, &str, &str); 17] = [
     (HarnessKind::Cline, "cline", "cline"),
     (HarnessKind::QwenCode, "qwen-code", "qwen"),
     (HarnessKind::KimiCode, "kimi-code", "kimi"),
+    (HarnessKind::MistralVibe, "mistral-vibe", "vibe"),
     (HarnessKind::Aider, "aider", "aider"),
     (HarnessKind::Goose, "goose", "goose"),
     (HarnessKind::Fx, "fx", "fx"),
 ];
 
-const ALIAS_CONTRACTS: [(HarnessKind, &[&str]); 17] = [
+const ALIAS_CONTRACTS: [(HarnessKind, &[&str]); 18] = [
     (HarnessKind::ClaudeCode, &["claude-code", "claude"]),
     (HarnessKind::Codex, &["codex"]),
     (HarnessKind::OpenCode, &["opencode"]),
@@ -45,12 +46,13 @@ const ALIAS_CONTRACTS: [(HarnessKind, &[&str]); 17] = [
     (HarnessKind::Cline, &["cline"]),
     (HarnessKind::QwenCode, &["qwen-code", "qwen"]),
     (HarnessKind::KimiCode, &["kimi-code", "kimi"]),
+    (HarnessKind::MistralVibe, &["mistral-vibe", "vibe"]),
     (HarnessKind::Aider, &["aider"]),
     (HarnessKind::Goose, &["goose"]),
     (HarnessKind::Fx, &["fx"]),
 ];
 
-const JSON_CONTRACTS: [(HarnessKind, &str); 17] = [
+const JSON_CONTRACTS: [(HarnessKind, &str); 18] = [
     (HarnessKind::ClaudeCode, "\"claude-code\""),
     (HarnessKind::Codex, "\"codex\""),
     (HarnessKind::OpenCode, "\"opencode\""),
@@ -65,6 +67,7 @@ const JSON_CONTRACTS: [(HarnessKind, &str); 17] = [
     (HarnessKind::Cline, "\"cline\""),
     (HarnessKind::QwenCode, "\"qwen-code\""),
     (HarnessKind::KimiCode, "\"kimi-code\""),
+    (HarnessKind::MistralVibe, "\"mistral-vibe\""),
     (HarnessKind::Aider, "\"aider\""),
     (HarnessKind::Goose, "\"goose\""),
     (HarnessKind::Fx, "\"fx\""),
