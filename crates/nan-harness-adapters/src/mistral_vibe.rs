@@ -106,13 +106,7 @@ fn vibe_config(model_id: &str, context_limit: Option<&ContextLimit>) -> String {
          experimental_enable_model_catalog = false\n\
          {compaction}\
          \n\
-         [[providers]]\n\
-         name = \"nan\"\n\
-         api_base = {base_url}\n\
-         api_key_env_var = \"{CREDENTIAL_TARGET}\"\n\
-         api_style = \"openai\"\n\
-         backend = \"generic\"\n\
-         reasoning_field_name = \"reasoning_content\"\n\
+         {provider}\
          \n\
          {MISTRAL_VIBE_MODEL_CATALOG_PLACEHOLDER}\
          {NAN_SEARCH_BLOCK_BEGIN}\n\
@@ -123,7 +117,26 @@ fn vibe_config(model_id: &str, context_limit: Option<&ContextLimit>) -> String {
          args = [\"__search-mcp\", \"--endpoint\", {search_endpoint}, \"--token-env\", \"{CREDENTIAL_TARGET}\"]\n\
          env = {{ {CREDENTIAL_TARGET} = {token_secret} }}\n\
          {NAN_SEARCH_BLOCK_END}",
-        base_url = toml_string(PROVIDER_BASE_URL_PLACEHOLDER),
+        provider = mistral_vibe_provider_block(PROVIDER_BASE_URL_PLACEHOLDER, CREDENTIAL_TARGET),
+    )
+}
+
+/// Renders the `[[providers]]` entry that routes Vibe through NaN.
+///
+/// Managed launches and native setup share this projection so both describe
+/// the provider identically; only the credential variable differs.
+#[must_use]
+pub fn mistral_vibe_provider_block(api_base: &str, api_key_env_var: &str) -> String {
+    format!(
+        "[[providers]]\n\
+         name = \"nan\"\n\
+         api_base = {}\n\
+         api_key_env_var = {}\n\
+         api_style = \"openai\"\n\
+         backend = \"generic\"\n\
+         reasoning_field_name = \"reasoning_content\"\n",
+        toml_string(api_base),
+        toml_string(api_key_env_var),
     )
 }
 

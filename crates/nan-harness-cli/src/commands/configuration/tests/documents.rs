@@ -55,7 +55,9 @@ fn document_health_distinguishes_missing_changed_invalid_and_unreadable_formats(
             assert_eq!(inspect_document(receipt), expected, "{harness}");
             let changed = match receipt {
                 DocumentReceipt::Json(_) | DocumentReceipt::Yaml(_) => "{}",
-                DocumentReceipt::Toml(_) => "# user changed configuration\n",
+                DocumentReceipt::Toml(_) | DocumentReceipt::VibeToml(_) => {
+                    "# user changed configuration\n"
+                }
                 DocumentReceipt::TextBlock(_) | DocumentReceipt::ExactFile(_) => {
                     "user changed configuration\n"
                 }
@@ -112,6 +114,7 @@ fn disabled_document_health_preserves_empty_and_inactive_semantics() {
         end: "end".into(),
         block_sha256: String::new(),
         active: false,
+        separator_added: false,
     });
     for receipt in [&json, &yaml, &exact, &text] {
         assert_eq!(inspect_document(receipt), ConfigurationHealth::Active);

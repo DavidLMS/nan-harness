@@ -9,6 +9,7 @@ pub(crate) enum DocumentPlan {
     TextBlock(TextBlockPlan),
     ExactFile(ExactFilePlan),
     Kimi(KimiPlan),
+    Vibe(VibePlan),
 }
 
 #[derive(Debug, Clone)]
@@ -82,4 +83,20 @@ pub(crate) struct KimiPlan {
     pub(crate) base_url: String,
     pub(crate) models: Vec<CodingModelProfile>,
     pub(crate) default_model: String,
+}
+
+/// Entries in Vibe's `[[providers]]`, `[[models]]` and `[[mcp_servers]]` arrays
+/// that nan-harness owns, plus the top-level `active_model` it selects.
+#[derive(Debug, Clone)]
+pub(crate) struct VibePlan {
+    pub(crate) path: PathBuf,
+    pub(crate) entries: Vec<VibeEntryPlan>,
+    pub(crate) active_model: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct VibeEntryPlan {
+    pub(crate) array: &'static str,
+    pub(crate) name: String,
+    pub(crate) table: toml_edit::Table,
 }

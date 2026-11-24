@@ -38,7 +38,7 @@ pub use hermes::{
 };
 pub use kimi_code::KimiCodeAdapter;
 pub use mimo_code::MimoCodeAdapter;
-pub use mistral_vibe::MistralVibeAdapter;
+pub use mistral_vibe::{MistralVibeAdapter, mistral_vibe_provider_block};
 pub use omp::{OmpAdapter, OmpSearchMode, render_omp_search_extension};
 pub use openclaw::{OpenClawAdapter, render_openclaw_media_plugin, render_openclaw_search_plugin};
 pub use opencode::OpenCodeAdapter;

@@ -8,6 +8,7 @@ mod search;
 mod specific;
 mod types;
 mod values;
+mod vibe;
 mod zcode;
 
 pub(crate) use combinators::{ensure_supported, preferred_model};
@@ -20,7 +21,7 @@ pub(crate) use families::pi_family_plans;
 pub(crate) use search::{hermes_search_provider, openclaw_search_plugin, search_mcp_plan};
 pub(crate) use types::{
     DocumentPlan, ExactFilePlan, JsonEntryMode, JsonEntryPlan, JsonPlan, KimiPlan, TextBlockPlan,
-    YamlEntryMode, YamlPlan,
+    VibePlan, YamlEntryMode, YamlPlan,
 };
 #[cfg(test)]
 pub(crate) use types::{LegacyTextBlock, YamlEntryPlan};

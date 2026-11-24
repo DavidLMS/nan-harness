@@ -8,6 +8,7 @@ mod paths;
 mod plugin_syntax;
 mod recovery;
 mod search_policy;
+mod vibe;
 mod zcode;
 
 use super::documents::{
@@ -63,6 +64,7 @@ fn assert_persistent_search_contract(harness: HarnessKind, home: &Path) {
         }
         HarnessKind::QwenCode => vec![home.join(".qwen/mcp.json")],
         HarnessKind::KimiCode => vec![home.join(".kimi-code/mcp.json")],
+        HarnessKind::MistralVibe => vec![home.join(".vibe/config.toml")],
         HarnessKind::Goose => vec![home.join(".config/goose/config.yaml")],
         HarnessKind::Aider => {
             let config = fs::read_to_string(home.join(".aider.conf.yml"))
@@ -70,10 +72,7 @@ fn assert_persistent_search_contract(harness: HarnessKind, home: &Path) {
             assert!(!config.contains("nan-search"));
             return;
         }
-        HarnessKind::ClaudeCode
-        | HarnessKind::Codex
-        | HarnessKind::Fx
-        | HarnessKind::MistralVibe => {
+        HarnessKind::ClaudeCode | HarnessKind::Codex | HarnessKind::Fx => {
             unreachable!()
         }
     };
@@ -131,6 +130,7 @@ fn receipt_path(receipt: &DocumentReceipt) -> &Path {
         DocumentReceipt::TextBlock(receipt) => &receipt.path,
         DocumentReceipt::ExactFile(receipt) => &receipt.path,
         DocumentReceipt::Toml(receipt) => &receipt.path,
+        DocumentReceipt::VibeToml(receipt) => &receipt.path,
     }
 }
 
