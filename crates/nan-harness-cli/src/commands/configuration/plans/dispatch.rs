@@ -117,7 +117,11 @@ pub(crate) fn for_harness_with_media(
             default_model,
             search.managed,
         )?,
-        HarnessKind::ClaudeCode | HarnessKind::Codex | HarnessKind::Fx => {
+        // Native Vibe setup is not implemented yet; managed launches cover it.
+        HarnessKind::ClaudeCode
+        | HarnessKind::Codex
+        | HarnessKind::Fx
+        | HarnessKind::MistralVibe => {
             return Err(ConfigurationError::BridgeOnly(harness));
         }
     };

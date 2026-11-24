@@ -13,5 +13,8 @@ nan-harness-core = { path = "../nan-harness-core", version = "0.1.33" }
 serde_json.workspace = true
 semver.workspace = true
 
+[dev-dependencies]
+toml.workspace = true
+
 [lints]
 workspace = true

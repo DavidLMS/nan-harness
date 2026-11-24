@@ -151,6 +151,14 @@ pub(crate) fn round_trip_probe(
             json!({"path": "tool-output.txt", "content": ROUND_TRIP_MARKER}),
             filesystem_contract(workspace.join("tool-output.txt"), ROUND_TRIP_MARKER, true),
         ),
+        HarnessKind::MistralVibe => (
+            "write_file",
+            json!({
+                "path": workspace.join("tool-output.txt"),
+                "content": ROUND_TRIP_MARKER
+            }),
+            filesystem_contract(workspace.join("tool-output.txt"), ROUND_TRIP_MARKER, true),
+        ),
         HarnessKind::Aider => (
             "edit-protocol",
             json!({}),

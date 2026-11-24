@@ -88,6 +88,7 @@ fn headless_base_arguments(
         HarnessKind::Cline => cline_base_arguments(prompt, workspace),
         HarnessKind::QwenCode => qwen_base_arguments(prompt),
         HarnessKind::KimiCode => kimi_base_arguments(prompt),
+        HarnessKind::MistralVibe => vibe_base_arguments(prompt),
         HarnessKind::Aider => aider_arguments(run_kind, prompt),
         HarnessKind::Goose => goose_base_arguments(prompt),
         HarnessKind::Fx => fx_base_arguments(prompt),
@@ -251,6 +252,21 @@ fn kimi_base_arguments(prompt: &str) -> Vec<OsString> {
         prompt.to_owned().into(),
         "--output-format".into(),
         "stream-json".into(),
+    ]
+}
+
+fn vibe_base_arguments(prompt: &str) -> Vec<OsString> {
+    // `--trust` covers only this invocation; `--auto-approve` keeps the headless run
+    // from waiting on a tool-approval prompt that nothing can answer.
+    vec![
+        "--trust".into(),
+        "--auto-approve".into(),
+        "--max-turns".into(),
+        "12".into(),
+        "--output".into(),
+        "streaming".into(),
+        "--prompt".into(),
+        prompt.to_owned().into(),
     ]
 }
 

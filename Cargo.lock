@@ -1719,6 +1719,7 @@ dependencies = [
  "nan-harness-i18n",
  "semver",
  "serde_json",
+ "toml",
 ]
 
 [[package]]

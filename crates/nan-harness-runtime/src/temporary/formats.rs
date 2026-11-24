@@ -156,3 +156,48 @@ pub(super) fn merge_toml_tables(target: &mut toml::Table, patch: toml::Table) {
         }
     }
 }
+
+/// Merges like [`merge_toml_tables`], except the top-level `mcp_servers` array
+/// of tables is combined by `name`: unmanaged entries survive in their original
+/// order and a patch entry replaces the existing entry with the same name.
+/// A value that is not an array of named tables is replaced wholesale.
+pub(super) fn merge_toml_tables_by_mcp_server_name(
+    target: &mut toml::Table,
+    mut patch: toml::Table,
+) {
+    const KEY: &str = "mcp_servers";
+    let patch_servers = patch.remove(KEY);
+    merge_toml_tables(target, patch);
+    let Some(patch_servers) = patch_servers else {
+        return;
+    };
+    match (target.get_mut(KEY), patch_servers) {
+        (Some(toml::Value::Array(existing)), toml::Value::Array(additions))
+            if all_named_tables(existing) && all_named_tables(&additions) =>
+        {
+            for addition in additions {
+                let name = table_name(&addition).map(str::to_owned);
+                match existing
+                    .iter_mut()
+                    .find(|entry| table_name(entry) == name.as_deref())
+                {
+                    Some(entry) => *entry = addition,
+                    None => existing.push(addition),
+                }
+            }
+        }
+        (_, patch_servers) => {
+            target.insert(KEY.to_owned(), patch_servers);
+        }
+    }
+}
+
+fn table_name(value: &toml::Value) -> Option<&str> {
+    value.get("name").and_then(toml::Value::as_str)
+}
+
+fn all_named_tables(values: &[toml::Value]) -> bool {
+    values
+        .iter()
+        .all(|value| value.is_table() && table_name(value).is_some())
+}

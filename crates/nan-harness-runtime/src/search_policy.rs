@@ -424,6 +424,14 @@ mod tests {
             candidates(HarnessKind::KimiCode, home, working),
             BTreeSet::from([kimi_home.join("config.toml"), kimi_home.join("mcp.json")])
         );
+        let vibe_home = env::var_os("VIBE_HOME").map_or_else(|| home.join(".vibe"), PathBuf::from);
+        assert_eq!(
+            candidates(HarnessKind::MistralVibe, home, working),
+            BTreeSet::from([
+                vibe_home.join("config.toml"),
+                working.join(".vibe/config.toml")
+            ])
+        );
         let mut goose = BTreeSet::from([
             config_home.join("goose/config.yaml"),
             config_home.join("goose/profiles.yaml"),

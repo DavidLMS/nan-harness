@@ -62,6 +62,7 @@ pub(super) fn telemetry_operation(cli: &Cli) -> OperationContext {
         | Command::Cline(arguments)
         | Command::Qwen(arguments)
         | Command::Kimi(arguments)
+        | Command::Vibe(arguments)
         | Command::Aider(arguments)
         | Command::Goose(arguments) => harness_operation(arguments.run.dry_run),
         Command::Doctor(_) => OperationContext::new(OperationKind::Doctor),
@@ -115,6 +116,7 @@ pub(super) const fn telemetry_transport(cli: &Cli) -> Option<TelemetryTransport>
         | Command::Cline(_)
         | Command::Qwen(_)
         | Command::Kimi(_)
+        | Command::Vibe(_)
         | Command::Aider(_)
         | Command::Goose(_) => Some(TelemetryTransport::DirectChat),
         Command::Fx(_) => Some(TelemetryTransport::FxGatewayBridge),

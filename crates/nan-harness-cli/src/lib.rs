@@ -758,6 +758,7 @@ mod tests {
             "cline",
             "qwen",
             "kimi",
+            "vibe",
             "aider",
             "goose",
         ] {

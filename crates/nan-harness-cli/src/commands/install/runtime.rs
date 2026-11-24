@@ -162,6 +162,10 @@ pub(super) fn npm_hint_for(kind: HarnessKind, locale: nan_harness_i18n::Locale) 
     }
 }
 
+pub(super) fn uv_hint_for(kind: HarnessKind, locale: nan_harness_i18n::Locale) -> String {
+    nan_harness_i18n::messages::install_uv(locale, kind.binary_name(), &kind)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{runtime_hint, runtime_requirement};

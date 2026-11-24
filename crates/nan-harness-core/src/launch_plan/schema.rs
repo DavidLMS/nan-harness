@@ -41,6 +41,7 @@ pub const PRIME_HOME_PLACEHOLDER: &str = "{runtime:prime_home}";
 pub const PI_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:pi_model_catalog}";
 pub const QWEN_CODE_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:qwen_code_model_catalog}";
 pub const KIMI_CODE_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:kimi_code_model_catalog}";
+pub const MISTRAL_VIBE_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:mistral_vibe_model_catalog}";
 pub const SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER: &str = "{runtime:selected_model_display_name}";
 pub const SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER: &str =
     "{runtime:selected_model_context_window}";
@@ -50,6 +51,7 @@ pub const SELECTED_MODEL_CAPABILITIES_PLACEHOLDER: &str = "{runtime:selected_mod
 pub const USER_HOME_PLACEHOLDER: &str = "{runtime:user_home}";
 pub const CODEX_HOME_PLACEHOLDER: &str = "{runtime:codex_home}";
 pub const HERMES_HOME_PLACEHOLDER: &str = "{runtime:hermes_home}";
+pub const VIBE_HOME_PLACEHOLDER: &str = "{runtime:vibe_home}";
 pub const CODEX_HOME_OVERLAY_ID: &str = "codex-home";
 pub const CODEX_HOME_ARTIFACT_PLACEHOLDER: &str = "{artifact:codex-home}";
 pub const CODEX_PROFILE_ARTIFACT_ID: &str = "codex-profile";
@@ -205,6 +207,7 @@ impl ContextLimit {
                 ),
             },
             HarnessKind::ZCode
+            | HarnessKind::MistralVibe
             | HarnessKind::DeepSeekHarness
             | HarnessKind::OpenClaw
             | HarnessKind::Cline
@@ -379,6 +382,9 @@ pub enum OverlayFilePolicy {
     CopyBinary,
     MergeJson,
     MergeToml,
+    /// Like `MergeToml`, but the top-level `mcp_servers` array of tables is
+    /// merged by `name` so user-owned servers survive; patch entries win.
+    MergeTomlMcpServers,
     MergeYaml,
 }
 

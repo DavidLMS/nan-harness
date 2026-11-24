@@ -31,6 +31,7 @@ pub(crate) fn harness_run_arguments(cli: &Cli) -> Option<(HarnessKind, &HarnessR
         Command::Cline(arguments) => Some((HarnessKind::Cline, &arguments.run)),
         Command::Qwen(arguments) => Some((HarnessKind::QwenCode, &arguments.run)),
         Command::Kimi(arguments) => Some((HarnessKind::KimiCode, &arguments.run)),
+        Command::Vibe(arguments) => Some((HarnessKind::MistralVibe, &arguments.run)),
         Command::Aider(arguments) => Some((HarnessKind::Aider, &arguments.run)),
         Command::Goose(arguments) => Some((HarnessKind::Goose, &arguments.run)),
         Command::Fx(arguments) => Some((HarnessKind::Fx, &arguments.run)),
@@ -79,6 +80,9 @@ fn non_interactive_mode(kind: HarnessKind, arguments: &HarnessRunArgs) -> bool {
         HarnessKind::ZCode => has_any_flag(&arguments.arguments, &["-p", "--prompt", "--target"]),
         HarnessKind::QwenCode | HarnessKind::KimiCode => {
             has_any_flag(&arguments.arguments, &["-p", "--prompt"])
+        }
+        HarnessKind::MistralVibe => {
+            has_any_flag(&arguments.arguments, &["-p", "--prompt", "--prompt-file"])
         }
         HarnessKind::Aider => has_any_flag(&arguments.arguments, &["-m", "--message"]),
         HarnessKind::Codex => has_subcommand(&arguments.arguments, &["exec", "review"]),
@@ -130,6 +134,7 @@ pub(crate) const fn direct_chat_gateway_disabled(cli: &Cli) -> bool {
         | Command::Cline(arguments)
         | Command::Qwen(arguments)
         | Command::Kimi(arguments)
+        | Command::Vibe(arguments)
         | Command::Aider(arguments)
         | Command::Goose(arguments) => arguments.no_chat_gateway,
         Command::HermesDesktop(arguments) => arguments.no_chat_gateway,
@@ -260,6 +265,7 @@ mod tests {
             ("cline", ["--json", "Hello"].as_slice()),
             ("qwen", ["--prompt=Hello"].as_slice()),
             ("kimi", ["--prompt", "Hello"].as_slice()),
+            ("vibe", ["--trust", "-p", "Hello"].as_slice()),
             ("zcode", ["--prompt", "Hello"].as_slice()),
             ("zai", ["--target", "synthetic-target"].as_slice()),
             ("aider", ["--message", "Hello"].as_slice()),

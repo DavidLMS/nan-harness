@@ -147,6 +147,17 @@ impl InstallError {
         }
     }
 
+    fn missing_uv(&self) -> Option<HarnessKind> {
+        match self {
+            Self::CommandStart {
+                harness,
+                program: "uv",
+                source,
+            } if source.kind() == io::ErrorKind::NotFound => Some(*harness),
+            _ => None,
+        }
+    }
+
     pub(crate) fn gentle_shell_message(&self, locale: nan_harness_i18n::Locale) -> Option<String> {
         use nan_harness_i18n::messages as m;
         let hint =
@@ -212,6 +223,7 @@ impl InstallError {
 
     pub(crate) fn is_runtime_precondition(&self) -> bool {
         self.missing_npm().is_some()
+            || self.missing_uv().is_some()
             || matches!(
                 self,
                 Self::GentleShellGoPrerequisite
@@ -241,6 +253,9 @@ impl nan_harness_i18n::TerminalMessage for InstallError {
         use nan_harness_i18n::messages as m;
         if let Some(harness) = self.missing_npm() {
             return super::runtime::npm_hint_for(harness, locale);
+        }
+        if let Some(harness) = self.missing_uv() {
+            return super::runtime::uv_hint_for(harness, locale);
         }
         if matches!(self, Self::GentleShellGoPrerequisite) {
             return m::install_gentle_shell_go(locale);

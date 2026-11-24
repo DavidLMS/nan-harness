@@ -170,6 +170,15 @@
       "status": "verified"
     },
     {
+      "id": "mistral-vibe",
+      "command": "vibe --version",
+      "lastCompatibleVersion": "3.1.4",
+      "compatibleAt": "2026-11-24T00:00:00Z",
+      "minimumVersion": "3.1.4",
+      "transport": "direct-chat",
+      "status": "verified"
+    },
+    {
       "id": "aider",
       "command": "aider --version",
       "lastCompatibleVersion": "0.86.2",

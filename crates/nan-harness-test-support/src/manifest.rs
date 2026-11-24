@@ -290,6 +290,10 @@ pub fn embedded_manifest_sources() -> &'static [(HarnessKind, &'static str)] {
             include_str!("../../../tests/conformance/kimi-code/manifest.toml"),
         ),
         (
+            HarnessKind::MistralVibe,
+            include_str!("../../../tests/conformance/mistral-vibe/manifest.toml"),
+        ),
+        (
             HarnessKind::Aider,
             include_str!("../../../tests/conformance/aider/manifest.toml"),
         ),

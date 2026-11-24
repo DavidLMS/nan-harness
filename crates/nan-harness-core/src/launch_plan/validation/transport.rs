@@ -26,6 +26,7 @@ pub(super) fn validate(plan: &LaunchPlan) -> Result<(), PlanError> {
         | HarnessKind::Cline
         | HarnessKind::QwenCode
         | HarnessKind::KimiCode
+        | HarnessKind::MistralVibe
         | HarnessKind::Aider
         | HarnessKind::Goose => TransportKind::DirectChat,
     };

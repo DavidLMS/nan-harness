@@ -1,7 +1,8 @@
 use super::TemporaryError;
 use super::formats::{
-    merge_json_objects, merge_toml_tables, merge_yaml_mappings, parse_json_object,
-    parse_toml_table, parse_yaml_mapping, relocate_hook_state_keys,
+    merge_json_objects, merge_toml_tables, merge_toml_tables_by_mcp_server_name,
+    merge_yaml_mappings, parse_json_object, parse_toml_table, parse_yaml_mapping,
+    relocate_hook_state_keys,
 };
 use super::paths::{ensure_mode, invalid_artifact, path_exists, render_overlay_paths};
 use super::platform::{link_entry, restrict_directory};
@@ -151,7 +152,7 @@ fn overlay_file_content(
                 )
             })
         }
-        OverlayFilePolicy::MergeToml => {
+        OverlayFilePolicy::MergeToml | OverlayFilePolicy::MergeTomlMcpServers => {
             let mut base = if path_exists(source_path) {
                 let content = fs::read_to_string(source_path)
                     .map_err(|source| overlay_error(&overlay.id, source))?;
@@ -160,7 +161,11 @@ fn overlay_file_content(
                 toml::Table::new()
             };
             let patch = parse_toml_table(&overlay.id, "patch", &rendered)?;
-            merge_toml_tables(&mut base, patch);
+            if file.policy == OverlayFilePolicy::MergeTomlMcpServers {
+                merge_toml_tables_by_mcp_server_name(&mut base, patch);
+            } else {
+                merge_toml_tables(&mut base, patch);
+            }
             relocate_hook_state_keys(&mut base, source_path, target_path);
             toml::to_string(&toml::Value::Table(base)).map_err(|error| {
                 invalid_artifact(
