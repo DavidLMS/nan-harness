@@ -75,6 +75,10 @@ cleanup() {
   fi
   cleanup_attempt=0
   while [ -e "$workspace" ] && [ "$cleanup_attempt" -lt 10 ]; do
+    # Harnesses may leave read-only files and directories (Vibe's plugin cache
+    # is mode 0500/0400), which rm cannot delete. chmod -R does not follow
+    # symlinks, so nothing outside the workspace is touched.
+    chmod -R u+rwX "$workspace" 2>/dev/null || true
     rm -rf "$workspace" 2>/dev/null || true
     cleanup_attempt="$((cleanup_attempt + 1))"
     if [ -e "$workspace" ]; then
