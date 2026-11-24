@@ -39,13 +39,13 @@ to use either model for an individual image. See [image generation](#image-gener
 | `nanh pi` | [Pi](https://pi.dev/) | OpenAI Chat Completions | Optional |
 | `nanh kimi` | [Kimi Code](https://www.kimi.com/code) | OpenAI Chat Completions | Optional |
 | `nanh openclaw` | [OpenClaw](https://openclaw.ai/) | OpenAI Chat Completions | Optional |
+| `nanh vibe` | [Mistral Vibe](https://mistral.ai/products/vibe) | OpenAI Chat Completions | Not available |
 | `nanh hermes` | [Hermes Agent](https://hermes-agent.nousresearch.com/) | OpenAI Chat Completions | Optional |
 | `nanh omp` | [Oh My Pi](https://omp.sh/) | OpenAI Chat Completions | Optional |
 | `nanh mimo` | [MiMo Code](https://github.com/XiaomiMiMo/MiMo-Code) | OpenAI Chat Completions | Optional |
 | `nanh zcode` | [ZCode](https://github.com/zai-org/ZCode) | OpenAI Chat Completions | Optional |
 | `nanh prime-agent` | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) | OpenAI Chat Completions | Optional |
 | `nanh dsh` | [DeepSeek Harness](https://deepseek.com/harness/en/) | OpenAI Chat Completions | Optional |
-| `nanh vibe` | [Mistral Vibe](https://mistral.ai/products/vibe) | OpenAI Chat Completions | Not available |
 | `nanh fx` | [fx](https://fx.sh/) | fx AI Gateway bridge | Not available |
 
 The Prime Agent and fx integrations do not yet support Windows. On Windows,
