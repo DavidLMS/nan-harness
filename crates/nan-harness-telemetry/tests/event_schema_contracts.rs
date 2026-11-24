@@ -23,6 +23,7 @@ const HARNESS_KINDS: &[(HarnessKind, &str)] = &[
     (HarnessKind::Cline, "cline"),
     (HarnessKind::QwenCode, "qwen-code"),
     (HarnessKind::KimiCode, "kimi-code"),
+    (HarnessKind::MistralVibe, "mistral-vibe"),
     (HarnessKind::Aider, "aider"),
     (HarnessKind::Goose, "goose"),
     (HarnessKind::Fx, "fx"),

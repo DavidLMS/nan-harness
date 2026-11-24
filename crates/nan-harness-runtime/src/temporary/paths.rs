@@ -2,7 +2,7 @@ use super::TemporaryError;
 use super::platform::windows_user_home;
 use nan_harness_core::launch_plan::{
     CODEX_HOME_PLACEHOLDER, HERMES_HOME_PLACEHOLDER, PRIME_HOME_PLACEHOLDER, TemporaryArtifactMode,
-    USER_HOME_PLACEHOLDER,
+    USER_HOME_PLACEHOLDER, VIBE_HOME_PLACEHOLDER,
 };
 use nan_harness_i18n::DiagnosticText;
 use nan_harness_i18n::messages as detail_messages;
@@ -88,6 +88,7 @@ pub(super) fn resolve_overlay_source(
     codex_home: Option<&OsStr>,
     hermes_home: Option<&OsStr>,
     prime_home: Option<&OsStr>,
+    vibe_home: Option<&OsStr>,
 ) -> PathBuf {
     if value == CODEX_HOME_PLACEHOLDER {
         return codex_home
@@ -103,6 +104,11 @@ pub(super) fn resolve_overlay_source(
         return prime_home
             .filter(|value| !value.is_empty())
             .map_or_else(|| user_home.join(".prime/agent"), PathBuf::from);
+    }
+    if value == VIBE_HOME_PLACEHOLDER {
+        return vibe_home
+            .filter(|value| !value.is_empty())
+            .map_or_else(|| user_home.join(".vibe"), PathBuf::from);
     }
     PathBuf::from(render_user_home(value, user_home))
 }

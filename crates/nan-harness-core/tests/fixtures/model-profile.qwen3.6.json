@@ -39,6 +39,11 @@
       "transport": "direct-chat",
       "testedAt": null
     },
+    "mistral-vibe": {
+      "status": "unknown",
+      "transport": "direct-chat",
+      "testedAt": null
+    },
     "hermes": {
       "status": "qualified",
       "transport": "direct-chat",

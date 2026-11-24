@@ -23,21 +23,25 @@ fn check_install_prerequisites_with(
     spec: &InstallSpec,
     probe: impl FnOnce(&str) -> io::Result<std::process::ExitStatus>,
 ) -> Result<(), InstallError> {
-    if let InstallMethod::Command { program: "npm", .. } = spec.method()? {
-        let status = probe("npm").map_err(|source| InstallError::CommandStart {
+    let program = match spec.method()? {
+        InstallMethod::Command { program: "npm", .. } => "npm",
+        InstallMethod::Command { program: "uv", .. } => "uv",
+        _ => return Ok(()),
+    };
+    let status = probe(program).map_err(|source| InstallError::CommandStart {
+        harness: spec.kind(),
+        program,
+        source,
+    })?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(InstallError::CommandFailed {
             harness: spec.kind(),
-            program: "npm",
-            source,
-        })?;
-        if !status.success() {
-            return Err(InstallError::CommandFailed {
-                harness: spec.kind(),
-                program: "npm",
-                exit_code: status.code(),
-            });
-        }
+            program,
+            exit_code: status.code(),
+        })
     }
-    Ok(())
 }
 
 pub(super) fn install(spec: &InstallSpec) -> Result<(), InstallError> {
@@ -318,6 +322,40 @@ mod tests {
             super::check_install_prerequisites_with(spec, |_| Ok(status)),
             Err(super::InstallError::CommandFailed { program: "npm", .. })
         ));
+    }
+
+    #[test]
+    fn uv_preflight_reports_a_missing_uv_as_a_setup_requirement() {
+        let spec = super::InstallSpec {
+            kind: HarnessKind::MistralVibe,
+            display_name: "Mistral Vibe",
+            official_url: "https://mistral.ai/vibe/install.sh",
+            unix: command("uv", &["tool", "install", "mistral-vibe"]),
+            windows: Some(command("uv", &["tool", "install", "mistral-vibe"])),
+        };
+        for kind in [
+            std::io::ErrorKind::NotFound,
+            std::io::ErrorKind::PermissionDenied,
+        ] {
+            let error = super::check_install_prerequisites_with(&spec, |program| {
+                assert_eq!(program, "uv");
+                Err(std::io::Error::from(kind))
+            })
+            .unwrap_err();
+            assert_eq!(
+                error.is_runtime_precondition(),
+                kind == std::io::ErrorKind::NotFound
+            );
+            if kind == std::io::ErrorKind::NotFound {
+                let message = nan_harness_i18n::TerminalMessage::terminal_message(
+                    &error,
+                    nan_harness_i18n::Locale::En,
+                );
+                for step in ["uv was not found on PATH", "uv --version", "nanh vibe"] {
+                    assert!(message.contains(step), "missing step: {step}");
+                }
+            }
+        }
     }
 
     #[test]

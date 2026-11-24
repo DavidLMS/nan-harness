@@ -108,6 +108,12 @@ pub(crate) enum Command {
         about = nan_harness_i18n::messages::help_run_kimi_code_through_its_in_memory_nan_model_configuration(nan_harness_i18n::locale())
     )]
     Kimi(DirectHarnessRunArgs),
+    #[command(
+        name = "vibe",
+        visible_alias = "mistral-vibe",
+        about = nan_harness_i18n::messages::help_run_mistral_vibe_through_a_launch_scoped_nan_configuration(nan_harness_i18n::locale())
+    )]
+    Vibe(DirectHarnessRunArgs),
     #[command(about = nan_harness_i18n::messages::help_run_aider_through_nan_chat_completions(nan_harness_i18n::locale()))]
     Aider(DirectHarnessRunArgs),
     #[command(about = nan_harness_i18n::messages::help_run_goose_through_nan_chat_completions(nan_harness_i18n::locale()))]

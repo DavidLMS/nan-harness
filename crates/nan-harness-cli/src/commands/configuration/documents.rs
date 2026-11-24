@@ -13,6 +13,7 @@ mod kimi;
 mod lifecycle;
 mod paths;
 mod text;
+mod vibe;
 mod yaml;
 
 pub(super) use common::*;
@@ -24,4 +25,5 @@ pub(super) use kimi::*;
 pub(super) use lifecycle::*;
 pub(super) use paths::*;
 pub(super) use text::*;
+pub(super) use vibe::*;
 pub(super) use yaml::*;

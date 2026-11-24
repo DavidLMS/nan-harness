@@ -489,6 +489,7 @@ impl HarnessAdapter for OpenClawAdapter {
                     .chain(search_plugin_files())
                     .chain(media_plugin_files(context.media))
                     .collect(),
+                    persistent_state: Vec::new(),
                     lifecycle: ArtifactLifecycle::Launch,
                 }],
             },

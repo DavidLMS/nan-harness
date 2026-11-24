@@ -137,3 +137,74 @@ fn uninstall_kimi_script_rejects_home_with_a_trailing_slash_as_data_directory() 
     assert!(sentinel.exists());
     assert!(String::from_utf8_lossy(&output.stderr).contains("unsafe Kimi Code home"));
 }
+
+#[cfg(unix)]
+#[test]
+fn uninstall_vibe_script_removes_uv_tool_executables_and_optionally_user_data() {
+    let home = tempfile::tempdir().expect("temporary home should exist");
+    let tool_bin = home.path().join(".local/bin");
+    let vibe_home = home.path().join(".vibe");
+    std::fs::create_dir_all(&tool_bin).expect("uv tool directory should exist");
+    std::fs::create_dir_all(&vibe_home).expect("Vibe home should exist");
+    for name in ["vibe", "vibe-acp", "vibe-app-server", "other-tool"] {
+        std::fs::write(tool_bin.join(name), "fake executable").expect("executable should exist");
+    }
+    std::fs::write(vibe_home.join("config.toml"), "user config").expect("config should exist");
+    let script =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/uninstall-vibe.sh");
+
+    let output = Command::new("bash")
+        .arg(&script)
+        .env("HOME", home.path())
+        .env_remove("VIBE_HOME")
+        .env_remove("UV_TOOL_BIN_DIR")
+        .output()
+        .expect("uninstall helper should run");
+    assert!(output.status.success());
+    for name in ["vibe", "vibe-acp", "vibe-app-server"] {
+        assert!(!tool_bin.join(name).exists(), "{name}");
+    }
+    assert!(tool_bin.join("other-tool").exists());
+    assert!(vibe_home.join("config.toml").exists());
+
+    let output = Command::new("bash")
+        .args([
+            script.to_str().expect("script path should be UTF-8"),
+            "--purge",
+            "--yes",
+        ])
+        .env("HOME", home.path())
+        .env_remove("VIBE_HOME")
+        .env_remove("UV_TOOL_BIN_DIR")
+        .output()
+        .expect("purge helper should run");
+    assert!(output.status.success());
+    assert!(!vibe_home.exists());
+    assert!(tool_bin.join("other-tool").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn uninstall_vibe_script_rejects_home_with_a_trailing_slash_as_data_directory() {
+    let home = tempfile::tempdir().expect("temporary home should exist");
+    let sentinel = home.path().join("keep.txt");
+    std::fs::write(&sentinel, "keep").expect("sentinel should exist");
+    let script =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/uninstall-vibe.sh");
+
+    let output = Command::new("bash")
+        .args([
+            script.to_str().expect("script path should be UTF-8"),
+            "--purge",
+            "--yes",
+        ])
+        .env("HOME", home.path())
+        .env("VIBE_HOME", format!("{}/", home.path().display()))
+        .env_remove("UV_TOOL_BIN_DIR")
+        .output()
+        .expect("uninstall helper should run");
+
+    assert!(!output.status.success());
+    assert!(sentinel.exists());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("unsafe Vibe home"));
+}

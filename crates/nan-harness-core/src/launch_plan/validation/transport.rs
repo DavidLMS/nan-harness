@@ -9,8 +9,8 @@ use crate::secret::SecretRef;
 use nan_harness_i18n::DiagnosticText;
 use nan_harness_i18n::messages as detail_messages;
 
-pub(super) fn validate(plan: &LaunchPlan) -> Result<(), PlanError> {
-    let expected = match plan.harness.kind {
+const fn expected_transport(kind: HarnessKind) -> TransportKind {
+    match kind {
         HarnessKind::ClaudeCode => TransportKind::AnthropicBridge,
         HarnessKind::Codex => TransportKind::ResponsesBridge,
         HarnessKind::Fx => TransportKind::FxGatewayBridge,
@@ -26,9 +26,14 @@ pub(super) fn validate(plan: &LaunchPlan) -> Result<(), PlanError> {
         | HarnessKind::Cline
         | HarnessKind::QwenCode
         | HarnessKind::KimiCode
+        | HarnessKind::MistralVibe
         | HarnessKind::Aider
         | HarnessKind::Goose => TransportKind::DirectChat,
-    };
+    }
+}
+
+pub(super) fn validate(plan: &LaunchPlan) -> Result<(), PlanError> {
+    let expected = expected_transport(plan.harness.kind);
     let actual = plan.transport.kind();
     if actual != expected {
         return Err(PlanError::TransportMismatch {

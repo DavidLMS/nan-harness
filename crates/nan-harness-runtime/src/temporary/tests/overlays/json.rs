@@ -26,6 +26,7 @@ fn overlays_replace_routing_files_and_link_the_remaining_user_state() {
             content_template: "NAN_PROVIDER".to_owned(),
             policy: OverlayFilePolicy::Replace,
         }],
+        persistent_state: Vec::new(),
         lifecycle: ArtifactLifecycle::Launch,
     }];
 
@@ -95,6 +96,7 @@ fn preserve_policy_creates_only_missing_fallback_files() {
                 policy: OverlayFilePolicy::Replace,
             },
         ],
+        persistent_state: Vec::new(),
         lifecycle: ArtifactLifecycle::Launch,
     }];
 
@@ -157,6 +159,7 @@ fn home_overlay_merges_routing_and_copies_mutable_state() {
                 policy: OverlayFilePolicy::Copy,
             },
         ],
+        persistent_state: Vec::new(),
         lifecycle: ArtifactLifecycle::Launch,
     }];
 

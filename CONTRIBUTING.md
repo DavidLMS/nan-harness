@@ -373,8 +373,8 @@ verifies the draft before publication.
       tag's commit, the six Linux/macOS ARM64 and Windows x64 release assets,
       and the trusted workflow
       source rather than executing tag-controlled code.
-- [ ] Keep the draft unpublished until the live hosted gate reports all 52
-      unique CLI cells passed (18 Linux, 18 macOS, 16 Windows), all three independent
+- [ ] Keep the draft unpublished until the live hosted gate reports all 55
+      unique CLI cells passed (19 Linux, 19 macOS, 17 Windows), all three independent
       OpenCode V2 live cells passed, all twelve Desktop
       cells passed against the exact attested release binaries, and emits its complete provenance
       handoff. A deterministic verification-only run is useful evidence but

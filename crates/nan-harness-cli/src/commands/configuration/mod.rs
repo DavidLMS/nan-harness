@@ -18,12 +18,13 @@ pub(crate) use lifecycle::ConfigurationManager;
 use paths::ConfigurationPaths;
 use plans::{
     DocumentPlan, ExactFilePlan, JsonEntryMode, JsonPlan, KimiPlan, PlanRequest, TextBlockPlan,
-    YamlEntryMode, YamlPlan, ensure_supported, for_harness_with_media, preferred_model,
+    VibePlan, YamlEntryMode, YamlPlan, ensure_supported, for_harness_with_media, preferred_model,
 };
 use state::{
     ConfigurationChange, ConfigurationState, DocumentReceipt, ExactFileReceipt, HarnessReceipt,
     JsonEntryReceipt, JsonReceipt, ManagedSearchStatus, PreparedDocument, TextBlockReceipt,
-    TomlReceipt, YamlEntryReceipt, YamlReceipt, receipt_manages_content,
+    TomlReceipt, VibeEntryReceipt, VibeReceipt, YamlEntryReceipt, YamlReceipt,
+    receipt_manages_content,
 };
 
 #[cfg(test)]
@@ -58,7 +59,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs::{self, Permissions};
 use std::path::{Path, PathBuf};
-use toml_edit::{DocumentMut, Item, Table, value};
+use toml_edit::{ArrayOfTables, DocumentMut, Item, Table, value};
 use yaml_serde::Value as YamlValue;
 
 const STATE_SCHEMA_VERSION: u8 = 1;
@@ -67,7 +68,7 @@ const DEFAULT_MODEL_ID: &str = "qwen3.6";
 const SEARCH_MCP_ID: &str = "nan-search";
 const PI_SEARCH_EXTENSION_FILE: &str = "extensions/nan-search.js";
 const OMP_SEARCH_EXTENSION_FILE: &str = "extensions/nan-search.mjs";
-const SUPPORTED_HARNESSES: [HarnessKind; 14] = [
+const SUPPORTED_HARNESSES: [HarnessKind; 15] = [
     HarnessKind::OpenCode,
     HarnessKind::MimoCode,
     HarnessKind::ZCode,
@@ -80,6 +81,7 @@ const SUPPORTED_HARNESSES: [HarnessKind; 14] = [
     HarnessKind::Cline,
     HarnessKind::QwenCode,
     HarnessKind::KimiCode,
+    HarnessKind::MistralVibe,
     HarnessKind::Aider,
     HarnessKind::Goose,
 ];

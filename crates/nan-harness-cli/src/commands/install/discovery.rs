@@ -34,14 +34,32 @@ fn executable_candidates(kind: HarnessKind, home: &Path) -> Vec<PathBuf> {
     let path_extensions = env::var_os("PATHEXT");
     let app_data = env::var_os("APPDATA").map(PathBuf::from);
     let local_app_data = env::var_os("LOCALAPPDATA").map(PathBuf::from);
-    executable_candidates_for_platform(
+    let mut candidates = executable_candidates_for_platform(
         kind,
         home,
         cfg!(windows),
         path_extensions.as_deref(),
         app_data.as_deref(),
         local_app_data.as_deref(),
-    )
+    );
+    if kind == HarnessKind::MistralVibe {
+        // `uv tool install` places executables in the first of these locations.
+        let names = executable_names(
+            kind.binary_name(),
+            cfg!(windows),
+            path_extensions.as_deref(),
+        );
+        let configured = ["UV_TOOL_BIN_DIR", "XDG_BIN_HOME"]
+            .into_iter()
+            .filter_map(env::var_os)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .filter(|directory| directory.is_absolute())
+            .flat_map(|directory| names.iter().map(move |name| directory.join(name)))
+            .collect::<Vec<_>>();
+        candidates.splice(0..0, configured);
+    }
+    candidates
 }
 
 fn executable_candidates_for_platform(
@@ -59,6 +77,7 @@ fn executable_candidates_for_platform(
         | HarnessKind::Aider
         | HarnessKind::Goose
         | HarnessKind::Fx
+        | HarnessKind::MistralVibe
         | HarnessKind::Omp => vec![home.join(".local/bin")],
         HarnessKind::Codex => vec![home.join(".local/bin"), home.join(".codex/bin")],
         HarnessKind::OpenCode => vec![home.join(".opencode/bin"), home.join(".local/bin")],
@@ -193,6 +212,29 @@ mod tests {
         let candidates = executable_candidates(HarnessKind::KimiCode, home);
         assert!(candidates.contains(&home.join(".kimi-code/bin/kimi")));
         assert!(candidates.contains(&home.join(".local/bin/kimi")));
+    }
+
+    #[test]
+    fn vibe_is_found_in_the_uv_tool_directory_on_each_platform() {
+        let home = std::path::Path::new("/tmp/nan-test-home");
+        let unix = executable_candidates_for_platform(
+            HarnessKind::MistralVibe,
+            home,
+            false,
+            None,
+            None,
+            None,
+        );
+        assert_eq!(unix, [home.join(".local/bin/vibe")]);
+        let windows = executable_candidates_for_platform(
+            HarnessKind::MistralVibe,
+            home,
+            true,
+            Some(std::ffi::OsStr::new(".EXE;.CMD")),
+            None,
+            None,
+        );
+        assert!(windows.contains(&home.join(".local/bin/vibe.EXE")));
     }
 
     #[test]

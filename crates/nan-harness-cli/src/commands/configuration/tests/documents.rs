@@ -55,7 +55,9 @@ fn document_health_distinguishes_missing_changed_invalid_and_unreadable_formats(
             assert_eq!(inspect_document(receipt), expected, "{harness}");
             let changed = match receipt {
                 DocumentReceipt::Json(_) | DocumentReceipt::Yaml(_) => "{}",
-                DocumentReceipt::Toml(_) => "# user changed configuration\n",
+                DocumentReceipt::Toml(_) | DocumentReceipt::VibeToml(_) => {
+                    "# user changed configuration\n"
+                }
                 DocumentReceipt::TextBlock(_) | DocumentReceipt::ExactFile(_) => {
                     "user changed configuration\n"
                 }
@@ -112,6 +114,7 @@ fn disabled_document_health_preserves_empty_and_inactive_semantics() {
         end: "end".into(),
         block_sha256: String::new(),
         active: false,
+        separator_added: None,
     });
     for receipt in [&json, &yaml, &exact, &text] {
         assert_eq!(inspect_document(receipt), ConfigurationHealth::Active);
@@ -428,4 +431,36 @@ fn managed_documents_detect_manual_changes() {
         prepare_text_block(&plan, Some(&receipt)),
         Err(ConfigurationError::ManagedDocumentChanged(_))
     ));
+}
+
+#[test]
+fn legacy_text_block_receipts_keep_the_original_removal_behavior() {
+    let root = tempdir().expect("temporary directory");
+    let path = root.path().join(".env");
+    let block = "# begin\nKEY=\"v\"\n# end\n";
+    let legacy = serde_json::json!({
+        "format": "text-block", "path": path, "createdFile": false,
+        "begin": "# begin", "end": "# end", "blockSha256": sha256(block.as_bytes()),
+    });
+    let DocumentReceipt::TextBlock(mut receipt) =
+        serde_json::from_value::<DocumentReceipt>(legacy).expect("legacy receipt")
+    else {
+        panic!("expected a text block receipt");
+    };
+    assert_eq!(receipt.separator_added, None);
+    // Legacy removal always took the break before the block, exactly as before.
+    fs::write(&path, format!("USER=1\n{block}")).unwrap();
+    let removal = prepare_text_block_removal(&receipt).expect("legacy removal");
+    assert_eq!(removal.replacement.as_deref(), Some(&b"USER=1"[..]));
+    // Receipts that record the choice restore the original bytes exactly.
+    receipt.separator_added = Some(false);
+    let removal = prepare_text_block_removal(&receipt).expect("precise removal");
+    assert_eq!(removal.replacement.as_deref(), Some(&b"USER=1\n"[..]));
+    receipt.separator_added = Some(true);
+    let removal = prepare_text_block_removal(&receipt).expect("precise removal");
+    assert_eq!(removal.replacement.as_deref(), Some(&b"USER=1"[..]));
+    // The receipt round-trips without inventing the field.
+    receipt.separator_added = None;
+    let json = serde_json::to_value(DocumentReceipt::TextBlock(receipt)).unwrap();
+    assert!(json.get("separatorAdded").is_none());
 }

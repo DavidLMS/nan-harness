@@ -22,6 +22,7 @@ fn binary_copy_overlay_isolated_from_user_state() {
             content_template: String::new(),
             policy: OverlayFilePolicy::CopyBinary,
         }],
+        persistent_state: Vec::new(),
         lifecycle: ArtifactLifecycle::Launch,
     }];
 

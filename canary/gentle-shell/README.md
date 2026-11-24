@@ -66,7 +66,7 @@ No prompts, responses, credentials or transcripts are published as evidence.
 
 The daily selector checks the launcher capability manifest in the immutable
 release commit; old canary binaries without the independent report identity
-remain unavailable for this cell. New publication requires all 52 CLI cells
+remain unavailable for this cell. New publication requires all 55 CLI cells
 plus the existing twelve Desktop cells. Historical 49-cell receipts remain
 valid for recommending their already-published version, not for new publication.
 

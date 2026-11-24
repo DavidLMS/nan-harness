@@ -116,6 +116,8 @@ pub(crate) enum ConfigurationError {
     SearchPolicy(#[from] SearchPolicyError),
     #[error(transparent)]
     Pen(#[from] PenDesktopError),
+    #[error(transparent)]
+    Prepared(#[from] nan_harness_runtime::PreparedError),
 }
 
 impl ConfigurationError {
@@ -254,6 +256,9 @@ impl nan_harness_i18n::TerminalMessage for ConfigurationError {
                 nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
             }
             Self::Pen(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::Prepared(field_0) => {
                 nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
             }
         }

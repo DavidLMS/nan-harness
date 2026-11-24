@@ -26,7 +26,7 @@ The code also identifies third-party tools and products, including Claude,
 Claude Code, Claude Desktop, and Anthropic; ChatGPT, Codex, and OpenAI; Hermes
 Agent, Hermes Desktop, and Nous Research; MiMo Code and Xiaomi; ZCode and Z.ai; OpenCode,
 Pi, Oh My Pi, OMP, Prime Agent, DeepSeek,
-OpenClaw, Cline, Qwen Code, Kimi Code, Aider, Goose, and fx.
+OpenClaw, Cline, Qwen Code, Kimi Code, Mistral AI and Mistral Vibe, Aider, Goose, and fx.
 These references are descriptive. Their names and trademarks belong to their
 respective rights holders and are not covered by the Apache-2.0 license.
 

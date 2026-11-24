@@ -83,6 +83,7 @@ function nanHarnessContentEs({ harnessLink, nanLink, unixInstallCommand, windows
       ['openclaw.svg', '<a href="https://github.com/openclaw/openclaw/blob/73ff2d2f45b26856882423d9ae87a76a727ac7cd/ui/public/favicon.svg" target="_blank" rel="noreferrer"><code>openclaw/openclaw</code> en <code>73ff2d2</code></a>', 'MIT'],
       ['aider.svg', '<a href="https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/website/assets/logo.svg" target="_blank" rel="noreferrer"><code>Aider-AI/aider</code> en <code>5dc9490</code></a>', 'Apache-2.0'],
       ['goose.svg', '<a href="https://github.com/aaif-goose/goose/blob/384b6cc0d3b52762841e72efe92289a0d55b49/documentation/static/img/goose.svg" target="_blank" rel="noreferrer"><code>aaif-goose/goose</code> en <code>384b6cc</code></a>', 'Apache-2.0'],
+      ['mistral-vibe.svg', '<a href="https://github.com/mistralai/mistral-vibe/blob/e76235b203b8965af584e88e69284bc704c31a1f/distribution/zed/icons/mistral_vibe.svg" target="_blank" rel="noreferrer"><code>mistralai/mistral-vibe</code> en <code>e76235b</code></a>, obtenido el 2026-11-24', 'Apache-2.0; se usa únicamente para identificar el producto. Los nombres y marcas de Mistral AI y Mistral Vibe siguen siendo propiedad de Mistral AI'],
       ['fx.svg', 'La <a href="https://fx.sh/" target="_blank" rel="noreferrer">marca de cabecera oficial de <code>fx.sh</code></a>, asociada a <a href="https://github.com/vercel-labs/fx/tree/580a0c5da9386319741968c09c1cee69e763487a" target="_blank" rel="noreferrer"><code>vercel-labs/fx</code> en <code>580a0c5</code></a>', 'Se usa únicamente para identificar el producto; el repositorio enlazado del proyecto está bajo Apache-2.0; glifo estático extraído sin el efecto de brillo exclusivo de la web'],
     ],
     logosLicenseText: 'El texto de Apache-2.0 está incluido en <a href="logos/licenses/APACHE-2.0.txt">licenses/APACHE-2.0.txt</a>. Los avisos MIT aplicables están incluidos en archivos separados: <a href="logos/licenses/MIT-hermes-agent.txt">MIT-hermes-agent.txt</a>, <a href="logos/licenses/MIT-openclaw.txt">MIT-openclaw.txt</a> y <a href="logos/licenses/MIT-prime-agent.txt">MIT-prime-agent.txt</a>. La marca de Codex se usa únicamente para identificar el producto de OpenAI compatible y sigue sujeta a las directrices de marca de OpenAI.',
@@ -134,6 +135,7 @@ function nanHarnessContentEs({ harnessLink, nanLink, unixInstallCommand, windows
           ['nanh pi', harnessLink('Pi', 'pi'), 'opcional'],
           ['nanh kimi', harnessLink('Kimi Code', 'kimi'), 'opcional'],
           ['nanh openclaw', harnessLink('OpenClaw', 'openclaw'), 'opcional'],
+          ['nanh vibe', harnessLink('Mistral Vibe', 'vibe'), 'opcional'],
           ['nanh hermes', harnessLink('Hermes Agent', 'hermes'), 'opcional'],
           ['nanh omp', harnessLink('Oh My Pi', 'omp'), 'opcional'],
           ['nanh mimo', harnessLink('MiMo Code', 'mimo'), 'opcional'],
@@ -249,7 +251,7 @@ function nanHarnessContentEs({ harnessLink, nanLink, unixInstallCommand, windows
         ['h3', 'Contexto'],
         ['p', '<code>--context</code> fija aproximadamente cuántos tokens usa el agente antes de compactar la conversación. El agente puede compactar un poco antes.'],
         ['table', ['--context', 'Harnesses y apps'], [
-          ['Compatible', 'Claude Code, Codex, OpenCode, Hermes Agent, Pi, Prime Agent, Oh My Pi, Qwen Code, Kimi Code, Aider, Goose, Hermes Desktop, Zed'],
+          ['Compatible', 'Claude Code, Codex, OpenCode, Hermes Agent, Pi, Prime Agent, Oh My Pi, Qwen Code, Kimi Code, Mistral Vibe, Aider, Goose, Hermes Desktop, Zed'],
           ['No compatible', 'DeepSeek Harness, OpenClaw, Cline, fx, ChatGPT, Claude, Pen']
         ]]
       ]],

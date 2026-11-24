@@ -46,6 +46,7 @@ pub(crate) enum DocumentReceipt {
     TextBlock(TextBlockReceipt),
     ExactFile(ExactFileReceipt),
     Toml(TomlReceipt),
+    VibeToml(VibeReceipt),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -100,6 +101,11 @@ pub(crate) struct TextBlockReceipt {
     pub(crate) block_sha256: String,
     #[serde(default = "default_true")]
     pub(crate) active: bool,
+    /// Whether the block was appended after a line break that nan-harness
+    /// added. Absent in receipts written before this was recorded, which keep
+    /// the original removal behaviour of always taking the preceding break.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) separator_added: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -127,6 +133,25 @@ pub(crate) struct TomlReceipt {
     pub(crate) previous_default_model: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct VibeReceipt {
+    pub(crate) path: PathBuf,
+    pub(crate) created_file: bool,
+    pub(crate) entries: Vec<VibeEntryReceipt>,
+    pub(crate) active_model_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) previous_active_model: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct VibeEntryReceipt {
+    pub(crate) array: String,
+    pub(crate) name: String,
+    pub(crate) sha256: String,
+}
+
 pub(crate) struct PreparedDocument {
     pub(crate) path: PathBuf,
     pub(crate) original: Option<Vec<u8>>,
@@ -141,7 +166,7 @@ pub(crate) fn receipt_manages_content(receipt: &DocumentReceipt) -> bool {
         DocumentReceipt::Yaml(receipt) => !receipt.entries.is_empty(),
         DocumentReceipt::TextBlock(receipt) => receipt.active,
         DocumentReceipt::ExactFile(receipt) => receipt.active,
-        DocumentReceipt::Toml(_) => true,
+        DocumentReceipt::Toml(_) | DocumentReceipt::VibeToml(_) => true,
     }
 }
 

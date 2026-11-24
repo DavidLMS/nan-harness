@@ -63,9 +63,9 @@ pub use discovery::{
     locate_harness_executable,
 };
 pub use prepared::{
-    PreparedError, deepseek_provider_catalog, deepseek_provider_for, opencode_model_catalog,
-    opencode_v2_model_catalog, prime_provider_catalog, qwen_code_model_catalog,
-    zcode_provider_config,
+    PreparedError, deepseek_provider_catalog, deepseek_provider_for, mistral_vibe_native_models,
+    opencode_model_catalog, opencode_v2_model_catalog, prime_provider_catalog,
+    qwen_code_model_catalog, zcode_provider_config,
 };
 pub use process::ProcessError;
 pub use search_policy::{

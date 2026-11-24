@@ -283,7 +283,8 @@ pub(super) fn harness_command(
                 .env("XDG_DATA_HOME", isolated_home.join("data"))
                 .env("XDG_CACHE_HOME", isolated_home.join("cache"));
         }
-        "hermes" | "openclaw" | "cline" | "qwen-code" | "kimi-code" | "aider" | "goose" => {
+        "hermes" | "openclaw" | "cline" | "qwen-code" | "kimi-code" | "mistral-vibe" | "aider"
+        | "goose" => {
             std::fs::create_dir_all(&isolated_home).expect("conformance home should exist");
             command = command.env("HOME", &isolated_home);
         }
@@ -309,6 +310,7 @@ fn harness_command_name(harness: &str) -> &str {
         "deepseek-harness" => "dsh",
         "qwen-code" => "qwen",
         "kimi-code" => "kimi",
+        "mistral-vibe" => "vibe",
         _ => harness,
     }
 }

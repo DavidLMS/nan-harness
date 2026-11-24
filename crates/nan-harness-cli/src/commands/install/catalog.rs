@@ -15,6 +15,7 @@ pub(super) const CLINE_INSTALL_URL: &str =
 pub(super) const QWEN_CODE_INSTALL_URL: &str =
     "https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen.sh";
 pub(super) const KIMI_CODE_INSTALL_URL: &str = "https://code.kimi.com/kimi-code/install.sh";
+pub(super) const MISTRAL_VIBE_INSTALL_URL: &str = "https://mistral.ai/vibe/install.sh";
 pub(super) const AIDER_INSTALL_URL: &str = "https://aider.chat/install.sh";
 pub(super) const GOOSE_INSTALL_URL: &str =
     "https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh";
@@ -193,6 +194,16 @@ const INSTALL_SPECS: &[InstallSpec] = &[
         )),
     },
     InstallSpec {
+        kind: HarnessKind::MistralVibe,
+        display_name: "Mistral Vibe",
+        official_url: MISTRAL_VIBE_INSTALL_URL,
+        unix: shell_script(MISTRAL_VIBE_INSTALL_URL, "bash", &[]),
+        windows: Some(command(
+            "uv",
+            &["tool", "install", "--python", "3.14", "mistral-vibe"],
+        )),
+    },
+    InstallSpec {
         kind: HarnessKind::Aider,
         display_name: "Aider",
         official_url: AIDER_INSTALL_URL,
@@ -317,9 +328,9 @@ mod tests {
     use super::{
         AIDER_INSTALL_URL, CLAUDE_CODE_INSTALL_URL, CLINE_INSTALL_URL, CODEX_INSTALL_URL,
         DEEPSEEK_HARNESS_INSTALL_URL, FX_INSTALL_URL, GOOSE_INSTALL_URL, HERMES_INSTALL_URL,
-        KIMI_CODE_INSTALL_URL, OMP_INSTALL_URL, OPENCLAW_INSTALL_URL, OPENCODE_INSTALL_URL,
-        PI_INSTALL_URL, PRIME_AGENT_INSTALL_URL, QWEN_CODE_INSTALL_URL, install_spec,
-        official_install_command,
+        KIMI_CODE_INSTALL_URL, MISTRAL_VIBE_INSTALL_URL, OMP_INSTALL_URL, OPENCLAW_INSTALL_URL,
+        OPENCODE_INSTALL_URL, PI_INSTALL_URL, PRIME_AGENT_INSTALL_URL, QWEN_CODE_INSTALL_URL,
+        install_spec, official_install_command,
     };
     use nan_harness_core::HarnessKind;
 
@@ -341,6 +352,7 @@ mod tests {
             (HarnessKind::Cline, CLINE_INSTALL_URL),
             (HarnessKind::QwenCode, QWEN_CODE_INSTALL_URL),
             (HarnessKind::KimiCode, KIMI_CODE_INSTALL_URL),
+            (HarnessKind::MistralVibe, MISTRAL_VIBE_INSTALL_URL),
             (HarnessKind::Aider, AIDER_INSTALL_URL),
             (HarnessKind::Goose, GOOSE_INSTALL_URL),
             (HarnessKind::DeepSeekHarness, DEEPSEEK_HARNESS_INSTALL_URL),
@@ -364,6 +376,22 @@ mod tests {
         assert_eq!(
             official_install_command(spec).expect("MiMo install command"),
             "npm install --global @mimo-ai/cli@latest"
+        );
+    }
+
+    #[test]
+    fn mistral_vibe_uses_the_official_script_on_unix_and_uv_on_windows() {
+        let spec = install_spec(HarnessKind::MistralVibe).expect("Vibe install spec");
+        assert_eq!(
+            spec.unix,
+            super::shell_script(MISTRAL_VIBE_INSTALL_URL, "bash", &[])
+        );
+        assert_eq!(
+            spec.windows,
+            Some(super::command(
+                "uv",
+                &["tool", "install", "--python", "3.14", "mistral-vibe"]
+            ))
         );
     }
 

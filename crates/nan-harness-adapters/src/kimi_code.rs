@@ -87,6 +87,7 @@ impl HarnessAdapter for KimiCodeAdapter {
                             policy: OverlayFilePolicy::MergeJson,
                         },
                     ],
+                    persistent_state: Vec::new(),
                     lifecycle: ArtifactLifecycle::Launch,
                 }],
             },

@@ -4,7 +4,7 @@ use crate::error::PlanError;
 use crate::launch_plan::{
     ARTIFACT_PLACEHOLDER_PREFIX, CODEX_HOME_PLACEHOLDER, ConfigurationOverlay,
     HERMES_HOME_PLACEHOLDER, LaunchPlan, PRIME_HOME_PLACEHOLDER, TemporaryArtifact,
-    TemporaryArtifactKind, TemporaryArtifactMode, USER_HOME_PLACEHOLDER,
+    TemporaryArtifactKind, TemporaryArtifactMode, USER_HOME_PLACEHOLDER, VIBE_HOME_PLACEHOLDER,
 };
 use nan_harness_i18n::DiagnosticText;
 use nan_harness_i18n::messages as detail_messages;
@@ -160,6 +160,9 @@ fn validate_overlay_files(
         }
         validate_template_placeholders(plan, &overlay.id, Some(&file.content_template))?;
     }
+    for entry in &overlay.persistent_state {
+        validate_overlay_file_path(&mut paths, &overlay.id, &entry.path)?;
+    }
     Ok(())
 }
 
@@ -312,6 +315,7 @@ fn is_safe_user_home_path(value: &str) -> bool {
             | CODEX_HOME_PLACEHOLDER
             | HERMES_HOME_PLACEHOLDER
             | PRIME_HOME_PLACEHOLDER
+            | VIBE_HOME_PLACEHOLDER
     ) {
         return true;
     }

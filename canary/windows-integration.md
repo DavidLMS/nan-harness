@@ -13,8 +13,8 @@ This is an integration candidate, not release qualification.
 
 ## Platform policy
 
-Linux ARM64 and macOS ARM64 retain all 16 CLI harnesses. Windows x64 runs the
-14 available harnesses. Prime Agent and FX are explicitly skipped with
+Linux ARM64 and macOS ARM64 retain all 19 CLI harnesses. Windows x64 runs the
+17 available harnesses. Prime Agent and FX are explicitly skipped with
 official-windows-distribution-unavailable, including when selected directly.
 Neither a skip nor an installation failure counts as successful qualification.
 Remove the exclusions only when official native distributions can be installed

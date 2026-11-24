@@ -51,6 +51,7 @@ fn deepseek_normalized_legacy_credential_receipt_recognizes_and_removes_only_own
         end: end.to_owned(),
         block_sha256: sha256(block.as_bytes()),
         active: true,
+        separator_added: None,
     });
     fs::write(
         &path,

@@ -39,6 +39,7 @@ to use either model for an individual image. See [image generation](#image-gener
 | `nanh pi` | [Pi](https://pi.dev/) | OpenAI Chat Completions | Optional |
 | `nanh kimi` | [Kimi Code](https://www.kimi.com/code) | OpenAI Chat Completions | Optional |
 | `nanh openclaw` | [OpenClaw](https://openclaw.ai/) | OpenAI Chat Completions | Optional |
+| `nanh vibe` | [Mistral Vibe](https://mistral.ai/products/vibe) | OpenAI Chat Completions | Optional |
 | `nanh hermes` | [Hermes Agent](https://hermes-agent.nousresearch.com/) | OpenAI Chat Completions | Optional |
 | `nanh omp` | [Oh My Pi](https://omp.sh/) | OpenAI Chat Completions | Optional |
 | `nanh mimo` | [MiMo Code](https://github.com/XiaomiMiMo/MiMo-Code) | OpenAI Chat Completions | Optional |
@@ -84,6 +85,17 @@ credential in its provider file; nanh writes a launch token there instead of
 the real NaN key. An independently built, unadapted CLI can run through nanh
 with `--no-search`. A native compaction override through `--context` is not
 supported in this version.
+
+`nanh vibe` (alias `nanh mistral-vibe`) launches Mistral Vibe 3.1.4 or newer with the
+selected NaN model. If Mistral Vibe is missing, nan-harness offers to install it with
+the official installer on macOS and Linux, or with
+`uv tool install --python 3.14 mistral-vibe` on Windows, which requires
+[uv](https://docs.astral.sh/uv/). Use `nanh config vibe` to add the NaN provider,
+models and `active_model` to `$VIBE_HOME/config.toml` (default `~/.vibe`) and the
+saved key to `$VIBE_HOME/.env` as `NAN_VIBE_API_KEY`, for direct launches with
+`vibe`. It owns only those nan-harness entries, leaves your other providers,
+models, MCP servers and `.env` lines alone, and supports `--status`, `--refresh`
+and `--remove`.
 
 Harnesses that use OpenAI Chat Completions use an authenticated local gateway by
 default. This enables features such as reporting token usage when a session ends.
@@ -349,8 +361,8 @@ Independent provider and accounting failures remain reportable.
 
 `--context` is an approximate native compaction target, calculated from the
 starting model's effective context window. It is supported by Claude Code,
-Codex, OpenCode, Hermes, Pi, Prime Agent, OMP, Qwen Code, Kimi Code, Aider,
-Goose, Hermes Desktop and Zed. It is not supported by DeepSeek Harness,
+Codex, OpenCode, Hermes, Pi, Prime Agent, OMP, Qwen Code, Kimi Code, Mistral
+Vibe, Aider, Goose, Hermes Desktop and Zed. It is not supported by DeepSeek Harness,
 OpenClaw, Cline, fx, ChatGPT Desktop, Claude Desktop or Pen Desktop; those
 commands reject the option. The native harness may compact earlier to preserve
 its own safety margin, and changing models can change the effective threshold.

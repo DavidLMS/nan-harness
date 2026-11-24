@@ -149,6 +149,7 @@ fn direct_and_bridge_cleanup_must_match_transport_and_remove_resources() {
             content_template: "{}".to_owned(),
             policy: OverlayFilePolicy::Replace,
         }],
+        persistent_state: Vec::new(),
         lifecycle: ArtifactLifecycle::Launch,
     });
     overlay.cleanup.delete_temporary_artifacts = false;

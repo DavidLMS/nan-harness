@@ -195,7 +195,7 @@ chmod 755 "$run_directory"/*
 canary="$verified_macos_canary_binary"
 harnesses=(
   claude-code codex mimo-code opencode hermes pi omp prime-agent deepseek-harness
-  openclaw cline qwen-code kimi-code aider goose fx
+  openclaw cline qwen-code kimi-code mistral-vibe aider goose fx
 )
 if [ -n "$harness_filter" ]; then
   harness_found=false

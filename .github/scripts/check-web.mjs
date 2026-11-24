@@ -233,6 +233,7 @@ const harnessIds = [
   'kimi',
   'aider',
   'goose',
+  'vibe',
   'fx',
 ];
 const logoHarnessIds = harnessIds.filter((harnessId) => harnessId !== 'fx');
@@ -240,6 +241,7 @@ const logoFiles = Object.fromEntries(logoHarnessIds.map((harnessId) => [harnessI
 logoFiles.codex = 'codex.png';
 logoFiles.hermes = 'hermes.png';
 logoFiles.mimo = 'mimo.png';
+logoFiles.vibe = 'mistral-vibe.svg';
 
 function assertUniqueIds(html, page) {
   const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]);

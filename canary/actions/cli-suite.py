@@ -72,10 +72,10 @@ _NPM_PACKAGES = {
     "deepseek-harness": "@deepseek-ai/dsh", "openclaw": "openclaw",
     "cline": "cline", "qwen-code": "@qwen-code/qwen-code",
 }
-_PYPI_PACKAGES = {"aider": "aider-chat"}
-# Aider installs from PyPI on Windows too; every other harness uses the same source on
-# both platforms.
-_WINDOWS_PYPI_PACKAGES = {"aider": "aider-chat"}
+_PYPI_PACKAGES = {"aider": "aider-chat", "mistral-vibe": "mistral-vibe"}
+# Aider and Mistral Vibe install from PyPI on Windows too; every other harness uses the
+# same source on both platforms.
+_WINDOWS_PYPI_PACKAGES = {"aider": "aider-chat", "mistral-vibe": "mistral-vibe"}
 _GITHUB_REPOS = {
     "omp": "can1357/oh-my-pi", "goose": "aaif-goose/goose",
     "hermes": "NousResearch/hermes-agent",

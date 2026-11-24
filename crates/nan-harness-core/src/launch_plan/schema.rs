@@ -41,6 +41,7 @@ pub const PRIME_HOME_PLACEHOLDER: &str = "{runtime:prime_home}";
 pub const PI_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:pi_model_catalog}";
 pub const QWEN_CODE_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:qwen_code_model_catalog}";
 pub const KIMI_CODE_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:kimi_code_model_catalog}";
+pub const MISTRAL_VIBE_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:mistral_vibe_model_catalog}";
 pub const SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER: &str = "{runtime:selected_model_display_name}";
 pub const SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER: &str =
     "{runtime:selected_model_context_window}";
@@ -50,6 +51,7 @@ pub const SELECTED_MODEL_CAPABILITIES_PLACEHOLDER: &str = "{runtime:selected_mod
 pub const USER_HOME_PLACEHOLDER: &str = "{runtime:user_home}";
 pub const CODEX_HOME_PLACEHOLDER: &str = "{runtime:codex_home}";
 pub const HERMES_HOME_PLACEHOLDER: &str = "{runtime:hermes_home}";
+pub const VIBE_HOME_PLACEHOLDER: &str = "{runtime:vibe_home}";
 pub const CODEX_HOME_OVERLAY_ID: &str = "codex-home";
 pub const CODEX_HOME_ARTIFACT_PLACEHOLDER: &str = "{artifact:codex-home}";
 pub const CODEX_PROFILE_ARTIFACT_ID: &str = "codex-profile";
@@ -79,6 +81,7 @@ pub enum NativeContextLimit {
     HermesThreshold { threshold_tokens: u64 },
     PiReserve { reserve_tokens: u64 },
     OmpThreshold { threshold_tokens: u64 },
+    VibeThreshold { threshold_tokens: u64 },
     QwenFraction { fraction_millionths: u64 },
     KimiReserve { reserved_context_size: u64 },
     AiderHistory { max_chat_history_tokens: u64 },
@@ -204,6 +207,20 @@ impl ContextLimit {
                     effective_context_window,
                 ),
             },
+            HarnessKind::MistralVibe => {
+                let (minimum, maximum) = vibe_threshold_bounds(effective_context_window);
+                if !(minimum..=maximum).contains(&requested_tokens) {
+                    return Err(PlanError::InvalidField {
+                        field: "context",
+                        message: nan_harness_i18n::DiagnosticText::new(|locale| {
+                            nan_harness_i18n::messages::detail_must_be_between_minimum_and_maximum_tokens_for_the_vibe_context_window_effective_context_window_tokens(locale, &(effective_context_window), &(maximum), &(minimum))
+                        }),
+                    });
+                }
+                NativeContextLimit::VibeThreshold {
+                    threshold_tokens: requested_tokens,
+                }
+            }
             HarnessKind::ZCode
             | HarnessKind::DeepSeekHarness
             | HarnessKind::OpenClaw
@@ -241,6 +258,19 @@ impl ContextLimit {
             millionths % 1_000_000
         ))
     }
+}
+
+/// Vibe's accepted compaction-threshold range for a context window.
+///
+/// Mirrors `threshold_bounds` in Vibe's completion profile: the floor keeps
+/// compaction useful and the ceiling leaves room for the summary request.
+/// Vibe refuses explicit values outside the range or silently moves them, so
+/// nanh rejects them up front. Windows too small for any value yield an empty
+/// range (`minimum > maximum`).
+fn vibe_threshold_bounds(window: u64) -> (u64, u64) {
+    let minimum = (window / 2).clamp(10_000, 50_000);
+    let headroom = window.div_ceil(4).min(24_000);
+    (minimum, window - headroom)
 }
 
 fn ceil_percent(value: u64, denominator: u64) -> u64 {
@@ -379,6 +409,9 @@ pub enum OverlayFilePolicy {
     CopyBinary,
     MergeJson,
     MergeToml,
+    /// Like `MergeToml`, but the top-level `mcp_servers` array of tables is
+    /// merged by `name` so user-owned servers survive; patch entries win.
+    MergeTomlMcpServers,
     MergeYaml,
 }
 
@@ -398,7 +431,27 @@ pub struct ConfigurationOverlay {
     pub path_hint: String,
     pub source_path: String,
     pub files: Vec<OverlayFile>,
+    /// Harness-owned state that must outlive the temporary overlay. Missing
+    /// entries are created in the real source directory before it is mirrored,
+    /// so the harness writes through the mirror into user-owned storage.
+    /// Existing entries are never modified.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub persistent_state: Vec<PersistentStateEntry>,
     pub lifecycle: ArtifactLifecycle,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersistentStateEntry {
+    pub path: String,
+    pub kind: PersistentStateKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PersistentStateKind {
+    Directory,
+    File,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -8,11 +8,13 @@ mod paths;
 mod plugin_syntax;
 mod recovery;
 mod search_policy;
+mod vibe;
 mod zcode;
 
 use super::documents::{
     get_yaml_path, prepare_exact_file, prepare_exact_file_removal, prepare_json,
-    prepare_json_removal, prepare_text_block, prepare_yaml, prepare_yaml_removal,
+    prepare_json_removal, prepare_text_block, prepare_text_block_removal, prepare_yaml,
+    prepare_yaml_removal,
 };
 use super::*;
 use nan_harness_core::SecretValue;
@@ -63,6 +65,7 @@ fn assert_persistent_search_contract(harness: HarnessKind, home: &Path) {
         }
         HarnessKind::QwenCode => vec![home.join(".qwen/mcp.json")],
         HarnessKind::KimiCode => vec![home.join(".kimi-code/mcp.json")],
+        HarnessKind::MistralVibe => vec![home.join(".vibe/config.toml")],
         HarnessKind::Goose => vec![home.join(".config/goose/config.yaml")],
         HarnessKind::Aider => {
             let config = fs::read_to_string(home.join(".aider.conf.yml"))
@@ -128,6 +131,7 @@ fn receipt_path(receipt: &DocumentReceipt) -> &Path {
         DocumentReceipt::TextBlock(receipt) => &receipt.path,
         DocumentReceipt::ExactFile(receipt) => &receipt.path,
         DocumentReceipt::Toml(receipt) => &receipt.path,
+        DocumentReceipt::VibeToml(receipt) => &receipt.path,
     }
 }
 

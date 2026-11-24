@@ -52,6 +52,7 @@ fn inspect_document_result(
         DocumentReceipt::TextBlock(receipt) => (&receipt.path, false),
         DocumentReceipt::ExactFile(receipt) => (&receipt.path, false),
         DocumentReceipt::Toml(receipt) => (&receipt.path, false),
+        DocumentReceipt::VibeToml(receipt) => (&receipt.path, false),
     };
     let contents = match read_managed_document(path) {
         Err(Missing) if empty => return Ok(Active),
@@ -105,6 +106,11 @@ fn inspect_document_result(
             let source = std::str::from_utf8(&contents).map_err(|_| Invalid)?;
             let document = source.parse::<DocumentMut>().map_err(|_| Invalid)?;
             kimi_receipt_is_active(&document, receipt)
+        }
+        DocumentReceipt::VibeToml(receipt) => {
+            let source = std::str::from_utf8(&contents).map_err(|_| Invalid)?;
+            let document = source.parse::<DocumentMut>().map_err(|_| Invalid)?;
+            vibe_receipt_is_active(&document, receipt)
         }
     };
     Ok(ConfigurationHealth::from_matches(matches))

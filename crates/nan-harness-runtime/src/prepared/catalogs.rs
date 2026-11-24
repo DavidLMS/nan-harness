@@ -5,13 +5,13 @@ use nan_harness_core::launch_plan::{
     CLINE_MODEL_CATALOG_PLACEHOLDER, DEEPSEEK_MODEL_CATALOG_PLACEHOLDER,
     GOOSE_MODEL_CATALOG_PLACEHOLDER, HERMES_MODEL_CATALOG_PLACEHOLDER,
     HERMES_REASONING_CATALOG_PLACEHOLDER, KIMI_CODE_MODEL_CATALOG_PLACEHOLDER,
-    OPENCLAW_MODEL_ALIASES_PLACEHOLDER, OPENCLAW_MODEL_CATALOG_PLACEHOLDER,
-    OPENCODE_MODEL_CATALOG_PLACEHOLDER, OPENCODE_V2_MODEL_CATALOG_PLACEHOLDER,
-    PI_MODEL_CATALOG_PLACEHOLDER, PRIME_PROVIDER_CATALOG_PLACEHOLDER,
-    QWEN_CODE_MODEL_CATALOG_PLACEHOLDER, SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
-    SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER, SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER,
-    SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER, SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER,
-    ZCODE_PROVIDER_CONFIG_PLACEHOLDER,
+    MISTRAL_VIBE_MODEL_CATALOG_PLACEHOLDER, OPENCLAW_MODEL_ALIASES_PLACEHOLDER,
+    OPENCLAW_MODEL_CATALOG_PLACEHOLDER, OPENCODE_MODEL_CATALOG_PLACEHOLDER,
+    OPENCODE_V2_MODEL_CATALOG_PLACEHOLDER, PI_MODEL_CATALOG_PLACEHOLDER,
+    PRIME_PROVIDER_CATALOG_PLACEHOLDER, QWEN_CODE_MODEL_CATALOG_PLACEHOLDER,
+    SELECTED_MODEL_CAPABILITIES_PLACEHOLDER, SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER,
+    SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER, SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER,
+    SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER, ZCODE_PROVIDER_CONFIG_PLACEHOLDER,
 };
 use nan_harness_i18n::DiagnosticText;
 use nan_harness_i18n::messages as detail_messages;
@@ -40,7 +40,9 @@ pub(super) use model::{
     effort_name, model_input, model_reasoning_selection, reasoning_capable,
     render_reasoning_effort, render_selected_model, selected_model_reasoning_effort, unique_models,
 };
-pub(super) use structured::{deepseek_model_catalog, kimi_code_model_catalog};
+pub(super) use structured::{
+    deepseek_model_catalog, kimi_code_model_catalog, mistral_vibe_model_catalog,
+};
 
 pub(super) fn contains_model_catalog_placeholder(value: &str) -> bool {
     [
@@ -60,6 +62,7 @@ pub(super) fn contains_model_catalog_placeholder(value: &str) -> bool {
         PRIME_PROVIDER_CATALOG_PLACEHOLDER,
         QWEN_CODE_MODEL_CATALOG_PLACEHOLDER,
         KIMI_CODE_MODEL_CATALOG_PLACEHOLDER,
+        MISTRAL_VIBE_MODEL_CATALOG_PLACEHOLDER,
         CLAUDE_MODEL_PICKER_PLACEHOLDER,
         CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER,
         SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
@@ -166,6 +169,10 @@ pub(super) fn render_model_catalogs(
     rendered = rendered.replace(
         KIMI_CODE_MODEL_CATALOG_PLACEHOLDER,
         &kimi_code_model_catalog(&models, selected_model_id)?,
+    );
+    rendered = rendered.replace(
+        MISTRAL_VIBE_MODEL_CATALOG_PLACEHOLDER,
+        &mistral_vibe_model_catalog(&models)?,
     );
     rendered = render_claude_model_presentations(&rendered, selected_model_id, &models)?;
     replace_json_placeholder(

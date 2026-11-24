@@ -35,7 +35,7 @@ jobs:
             harnesses: hermes
           - name: Python tools
             node: false
-            harnesses: kimi-code aider
+            harnesses: kimi-code aider mistral-vibe
           - name: Native tools
             node: false
             harnesses: omp prime-agent goose fx

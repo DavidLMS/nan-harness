@@ -77,7 +77,7 @@ pub(crate) fn round_trip_probe(
                 true,
             ),
         ),
-        HarnessKind::Hermes | HarnessKind::Fx => (
+        HarnessKind::Hermes | HarnessKind::Fx | HarnessKind::MistralVibe => (
             "write_file",
             json!({
                 "path": workspace.join("tool-output.txt"),

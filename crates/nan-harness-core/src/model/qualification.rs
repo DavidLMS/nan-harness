@@ -50,6 +50,8 @@ pub struct QualificationMatrix {
     pub qwen_code: ModelQualification,
     #[serde(rename = "kimi-code")]
     pub kimi_code: ModelQualification,
+    #[serde(rename = "mistral-vibe", default = "unknown_direct_qualification")]
+    pub mistral_vibe: ModelQualification,
     pub aider: ModelQualification,
     pub goose: ModelQualification,
     pub fx: ModelQualification,
@@ -73,6 +75,7 @@ impl QualificationMatrix {
             HarnessKind::Cline => &self.cline,
             HarnessKind::QwenCode => &self.qwen_code,
             HarnessKind::KimiCode => &self.kimi_code,
+            HarnessKind::MistralVibe => &self.mistral_vibe,
             HarnessKind::Aider => &self.aider,
             HarnessKind::Goose => &self.goose,
             HarnessKind::Fx => &self.fx,

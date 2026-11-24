@@ -1,0 +1,167 @@
+use crate::direct::{
+    DirectLaunch, PROVIDER_CREDENTIAL_REFERENCE, build_direct_plan, provider_environment,
+    validate_routing_arguments,
+};
+use crate::search::{NAN_SEARCH_MCP_BINARY, NAN_SEARCH_MCP_ID, nan_search_endpoint};
+use nan_harness_core::launch_plan::{
+    ArtifactLifecycle, ConfigurationOverlay, MISTRAL_VIBE_MODEL_CATALOG_PLACEHOLDER,
+    NAN_SEARCH_BLOCK_BEGIN, NAN_SEARCH_BLOCK_END, OverlayFile, OverlayFilePolicy,
+    PROVIDER_BASE_URL_PLACEHOLDER, PersistentStateEntry, PersistentStateKind,
+    TemporaryArtifactMode, VIBE_HOME_PLACEHOLDER,
+};
+use nan_harness_core::{
+    ContextLimit, HarnessAdapter, HarnessKind, LaunchPlan, NativeContextLimit, PlanContext,
+    PlanError,
+};
+use std::collections::BTreeSet;
+
+const CREDENTIAL_TARGET: &str = "NAN_VIBE_API_KEY";
+const CONFIG_OVERLAY_ID: &str = "vibe-home";
+const CONFIG_PATH: &str = "{artifact:vibe-home}";
+
+/// Environment overrides Vibe reads on top of `config.toml`, plus the provider
+/// credentials and endpoints that could route a launch away from NaN.
+const REMOVED_ENVIRONMENT: [&str; 11] = [
+    "MISTRAL_API_KEY",
+    "OPENAI_API_KEY",
+    "OPENAI_BASE_URL",
+    "VIBE_ACTIVE_MODEL",
+    "VIBE_PROVIDERS",
+    "VIBE_MODELS",
+    "VIBE_MCP_SERVERS",
+    "VIBE_ENABLE_TELEMETRY",
+    "VIBE_ENABLE_UPDATE_CHECKS",
+    "VIBE_ENABLE_AUTO_UPDATE",
+    "VIBE_EXPERIMENTAL_ENABLE_MODEL_CATALOG",
+];
+
+#[derive(Debug, Default)]
+pub struct MistralVibeAdapter;
+
+impl HarnessAdapter for MistralVibeAdapter {
+    fn kind(&self) -> HarnessKind {
+        HarnessKind::MistralVibe
+    }
+
+    fn plan(&self, context: &PlanContext) -> Result<LaunchPlan, PlanError> {
+        // Upstream `--model` only applies to headless sessions; routing owns the
+        // model for every launch through `active_model`.
+        validate_routing_arguments(&context.user_arguments, &["--model"])?;
+        let mut public_environment = provider_environment();
+        public_environment.insert("VIBE_HOME".to_owned(), CONFIG_PATH.to_owned());
+
+        build_direct_plan(
+            context,
+            DirectLaunch {
+                arguments: context.user_arguments.clone(),
+                credential_target: CREDENTIAL_TARGET,
+                public_environment,
+                removed_environment: REMOVED_ENVIRONMENT
+                    .iter()
+                    .map(|name| (*name).to_owned())
+                    .collect::<BTreeSet<_>>(),
+                temporary_artifacts: Vec::new(),
+                configuration_overlays: vec![ConfigurationOverlay {
+                    id: CONFIG_OVERLAY_ID.to_owned(),
+                    path_hint: "vibe-home".to_owned(),
+                    source_path: VIBE_HOME_PLACEHOLDER.to_owned(),
+                    files: vec![OverlayFile {
+                        path: "config.toml".to_owned(),
+                        mode: TemporaryArtifactMode::OwnerFile,
+                        content_template: vibe_config(
+                            &context.model.resolved_id,
+                            context.context_limit.as_ref(),
+                        ),
+                        policy: OverlayFilePolicy::MergeTomlMcpServers,
+                    }],
+                    persistent_state: persistent_state(),
+                    lifecycle: ArtifactLifecycle::Launch,
+                }],
+            },
+        )
+    }
+}
+
+fn vibe_config(model_id: &str, context_limit: Option<&ContextLimit>) -> String {
+    // A global threshold applies to every model without its own; the managed
+    // catalog never sets per-model thresholds.
+    let compaction = match context_limit.map(|limit| &limit.native) {
+        Some(NativeContextLimit::VibeThreshold { threshold_tokens }) => {
+            format!("auto_compact_threshold = {threshold_tokens}\n")
+        }
+        _ => String::new(),
+    };
+    let active_model = toml_string(model_id);
+    let search_endpoint = toml_string(&nan_search_endpoint());
+    let search_server = toml_string(NAN_SEARCH_MCP_ID);
+    let search_command = toml_string(NAN_SEARCH_MCP_BINARY);
+    let token_secret = toml_string(&format!("{{secret:{PROVIDER_CREDENTIAL_REFERENCE}}}"));
+    // Vibe starts MCP servers with a reduced environment, so the helper receives
+    // its token through the server's own `env` table rather than inheritance.
+    format!(
+        "active_model = {active_model}\n\
+         enable_telemetry = false\n\
+         enable_update_checks = false\n\
+         enable_auto_update = false\n\
+         experimental_enable_model_catalog = false\n\
+         {compaction}\
+         \n\
+         {provider}\
+         \n\
+         {MISTRAL_VIBE_MODEL_CATALOG_PLACEHOLDER}\
+         {NAN_SEARCH_BLOCK_BEGIN}\n\
+         [[mcp_servers]]\n\
+         name = {search_server}\n\
+         transport = \"stdio\"\n\
+         command = {search_command}\n\
+         args = [\"__search-mcp\", \"--endpoint\", {search_endpoint}, \"--token-env\", \"{CREDENTIAL_TARGET}\"]\n\
+         env = {{ {CREDENTIAL_TARGET} = {token_secret} }}\n\
+         {NAN_SEARCH_BLOCK_END}",
+        provider = mistral_vibe_provider_block(PROVIDER_BASE_URL_PLACEHOLDER, CREDENTIAL_TARGET),
+    )
+}
+
+/// Renders the `[[providers]]` entry that routes Vibe through NaN.
+///
+/// Managed launches and native setup share this projection so both describe
+/// the provider identically; only the credential variable differs.
+#[must_use]
+pub fn mistral_vibe_provider_block(api_base: &str, api_key_env_var: &str) -> String {
+    format!(
+        "[[providers]]\n\
+         name = \"nan\"\n\
+         api_base = {}\n\
+         api_key_env_var = {}\n\
+         api_style = \"openai\"\n\
+         backend = \"generic\"\n\
+         reasoning_field_name = \"reasoning_content\"\n",
+        toml_string(api_base),
+        toml_string(api_key_env_var),
+    )
+}
+
+/// Quotes a value as a TOML basic string. JSON string escapes are a subset of
+/// TOML's, so the JSON encoder also covers quotes, backslashes and controls.
+fn toml_string(value: &str) -> String {
+    serde_json::Value::String(value.to_owned()).to_string()
+}
+
+/// State Vibe creates under its home during a session.
+///
+/// Directories and `trusted_folders.toml` (which Vibe writes through a symlink)
+/// survive the launch. `vibehistory` and `local_projects.toml` are replaced by
+/// rename, which would swap the mirror link for a file inside the temporary
+/// overlay. `projects.toml` is left absent because Vibe treats an empty file as
+/// partially unreadable, unlike a missing one.
+fn persistent_state() -> Vec<PersistentStateEntry> {
+    let directories = ["logs", "worktrees", "skills", "agents"]
+        .map(|path| (path, PersistentStateKind::Directory));
+    directories
+        .into_iter()
+        .chain([("trusted_folders.toml", PersistentStateKind::File)])
+        .map(|(path, kind)| PersistentStateEntry {
+            path: path.to_owned(),
+            kind,
+        })
+        .collect()
+}

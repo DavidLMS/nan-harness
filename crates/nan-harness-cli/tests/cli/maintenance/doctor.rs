@@ -42,6 +42,7 @@ fn missing_installable_harness_is_nonfatal_during_dry_run() {
         "pi",
         "prime-agent",
         "cline",
+        "vibe",
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
             .args([harness, "--dry-run"])
@@ -146,6 +147,58 @@ fn harness_doctor_json_reports_discovery_failures_as_json() {
 
 #[cfg(unix)]
 #[test]
+fn vibe_installed_by_uv_is_found_outside_path_in_the_tool_directory() {
+    let path = tempfile::tempdir().expect("temporary PATH directory should exist");
+    let home = tempfile::tempdir().expect("temporary home directory should exist");
+    let tool_bin = tempfile::tempdir().expect("uv tool directory should exist");
+    let fake = crate::support::fake_harness(tool_bin.path(), "vibe 3.1.4");
+    std::fs::rename(&fake, tool_bin.path().join("vibe")).expect("fake vibe should be placed");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
+        .args(["vibe", "--dry-run"])
+        .env("PATH", path.path())
+        .env("HOME", home.path())
+        .env("UV_TOOL_BIN_DIR", tool_bin.path())
+        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
+        .env_remove("USERPROFILE")
+        .env_remove("NAN_UPDATE_MANIFEST_URL")
+        .env_remove("NAN_HARNESS_GLITCHTIP_DSN")
+        .output()
+        .expect("nanh should start");
+    let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
+
+    assert!(output.status.success(), "{stderr}");
+    assert!(!stderr.contains("was not found"), "{stderr}");
+}
+
+#[cfg(unix)]
+#[test]
+fn missing_vibe_is_a_setup_requirement_without_an_interactive_terminal() {
+    let path = tempfile::tempdir().expect("temporary PATH directory should exist");
+    let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
+        .args(["vibe"])
+        .env("PATH", path.path())
+        .env("HOME", path.path())
+        .env("NAN_HARNESS_CONFIG_DIR", path.path().join("state"))
+        .env("NAN_HARNESS_CREDENTIAL_BACKEND", "file")
+        .env_remove("USERPROFILE")
+        .env_remove("UV_TOOL_BIN_DIR")
+        .env_remove("XDG_BIN_HOME")
+        .env_remove("NAN_API_KEY")
+        .env_remove("NAN_UPDATE_MANIFEST_URL")
+        .env_remove("NAN_HARNESS_GLITCHTIP_DSN")
+        .output()
+        .expect("nanh should start");
+    let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
+
+    assert!(!output.status.success());
+    assert!(stderr.contains("setup required:"), "{stderr}");
+    assert!(stderr.contains("mistral-vibe was not found"), "{stderr}");
+    assert!(stderr.contains("installation requires an interactive terminal"));
+}
+
+#[cfg(unix)]
+#[test]
 fn explicit_missing_executable_remains_a_discovery_error() {
     let output = run(&[
         "kimi",
@@ -188,6 +241,43 @@ fn doctor_checks_a_real_executable_boundary() {
     assert!(stdout.contains("Last live verified: 2.1.263"));
     assert!(stdout.contains("Live verified at: 2026-09-07T02:40:14.144121Z"));
     assert!(stdout.contains("Compatibility: tested"));
+}
+
+#[cfg(unix)]
+#[test]
+fn vibe_doctor_accepts_only_its_own_version_output_shape() {
+    use crate::support::fake_harness;
+
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let executable = fake_harness(directory.path(), "vibe 3.1.5");
+    let output = run_with_embedded_compatibility(&[
+        "doctor",
+        "vibe",
+        "--executable",
+        executable.to_str().expect("path should be UTF-8"),
+    ]);
+    let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
+    assert!(output.status.success(), "{stdout}");
+    assert!(stdout.contains("Harness: mistral-vibe"));
+    assert!(stdout.contains("Minimum supported: 3.1.4"));
+    assert!(stdout.contains("Last compatible: 3.1.5"));
+    assert!(stdout.contains("Last live verified: none"));
+    assert!(stdout.contains("Compatibility: tested"));
+
+    // `vibe` is a generic executable name: a bare version could be any program.
+    for impostor in ["3.1.4", "other 3.1.4", "vibe version 3.1.4"] {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
+        let executable = fake_harness(directory.path(), impostor);
+        let output = run_with_embedded_compatibility(&[
+            "vibe",
+            "--dry-run",
+            "--executable",
+            executable.to_str().expect("path should be UTF-8"),
+        ]);
+        let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
+        assert!(!output.status.success(), "{impostor}");
+        assert!(stderr.contains("error [NH-DISCOVERY-005]"), "{stderr}");
+    }
 }
 
 #[cfg(unix)]

@@ -27,13 +27,14 @@ pub enum HarnessKind {
     Cline,
     QwenCode,
     KimiCode,
+    MistralVibe,
     Aider,
     Goose,
     Fx,
 }
 
 impl HarnessKind {
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 18] = [
         Self::ClaudeCode,
         Self::Codex,
         Self::OpenCode,
@@ -48,6 +49,7 @@ impl HarnessKind {
         Self::Cline,
         Self::QwenCode,
         Self::KimiCode,
+        Self::MistralVibe,
         Self::Aider,
         Self::Goose,
         Self::Fx,
@@ -70,6 +72,7 @@ impl HarnessKind {
             Self::Cline => "cline",
             Self::QwenCode => "qwen",
             Self::KimiCode => "kimi",
+            Self::MistralVibe => "vibe",
             Self::Aider => "aider",
             Self::Goose => "goose",
             Self::Fx => "fx",
@@ -94,6 +97,7 @@ impl fmt::Display for HarnessKind {
             Self::Cline => "cline",
             Self::QwenCode => "qwen-code",
             Self::KimiCode => "kimi-code",
+            Self::MistralVibe => "mistral-vibe",
             Self::Aider => "aider",
             Self::Goose => "goose",
             Self::Fx => "fx",
@@ -121,6 +125,7 @@ impl FromStr for HarnessKind {
             "cline" => Ok(Self::Cline),
             "qwen-code" | "qwen" => Ok(Self::QwenCode),
             "kimi-code" | "kimi" => Ok(Self::KimiCode),
+            "mistral-vibe" | "vibe" => Ok(Self::MistralVibe),
             "aider" => Ok(Self::Aider),
             "goose" => Ok(Self::Goose),
             "fx" => Ok(Self::Fx),

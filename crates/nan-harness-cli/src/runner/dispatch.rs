@@ -122,6 +122,7 @@ pub(super) async fn dispatch(
         | Command::Cline(_)
         | Command::Qwen(_)
         | Command::Kimi(_)
+        | Command::Vibe(_)
         | Command::Aider(_)
         | Command::Goose(_)
         | Command::Fx(_) => unreachable!("simple harness commands are dispatched first"),

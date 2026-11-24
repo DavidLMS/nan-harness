@@ -1,5 +1,7 @@
 #[path = "configuration/mimo.rs"]
 mod mimo;
+#[path = "configuration/vibe.rs"]
+mod vibe;
 
 use crate::support::{
     capture_one_http_request, capture_one_http_request_with_response, config_command,

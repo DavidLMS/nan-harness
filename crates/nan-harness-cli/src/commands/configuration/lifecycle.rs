@@ -316,6 +316,7 @@ impl ConfigurationManager {
                 DocumentPlan::ExactFile(plan) if plan.payload.is_none() => None,
                 DocumentPlan::ExactFile(plan) => Some(plan.path),
                 DocumentPlan::Kimi(plan) => Some(plan.path),
+                DocumentPlan::Vibe(plan) => Some(plan.path),
             })
             .collect::<Vec<_>>();
         if let Some(integration) = catalog_integration(harness) {

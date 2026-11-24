@@ -62,6 +62,11 @@ pub(super) async fn run_simple_harness(
         Command::Cline(arguments) => (HarnessKind::Cline, &arguments.run, &ClineAdapter),
         Command::Qwen(arguments) => (HarnessKind::QwenCode, &arguments.run, &QwenCodeAdapter),
         Command::Kimi(arguments) => (HarnessKind::KimiCode, &arguments.run, &KimiCodeAdapter),
+        Command::Vibe(arguments) => (
+            HarnessKind::MistralVibe,
+            &arguments.run,
+            &MistralVibeAdapter,
+        ),
         Command::Aider(arguments) => (HarnessKind::Aider, &arguments.run, &AiderAdapter),
         Command::Goose(arguments) => (HarnessKind::Goose, &arguments.run, &GooseAdapter),
         Command::Fx(arguments) => (HarnessKind::Fx, &arguments.run, &FxAdapter),

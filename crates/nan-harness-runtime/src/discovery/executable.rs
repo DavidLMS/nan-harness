@@ -191,7 +191,27 @@ pub(super) fn harness_version(kind: HarnessKind, stdout: &[u8], stderr: &[u8]) -
             .unwrap_or("unknown")
             .to_owned();
     }
+    if kind == HarnessKind::MistralVibe {
+        return vibe_identity_version(first);
+    }
     first
+}
+
+/// `vibe` is a generic executable name, so only the exact `vibe <semver>` shape
+/// proves that the program on `PATH` is Mistral Vibe. Anything else is reported
+/// as an unparseable version instead of being trusted as the harness.
+fn vibe_identity_version(first_line: String) -> String {
+    let mut tokens = first_line.split_whitespace();
+    let is_vibe = tokens.next() == Some("vibe")
+        && tokens
+            .next()
+            .is_some_and(|version| semver::Version::parse(version).is_ok())
+        && tokens.next().is_none();
+    if is_vibe {
+        first_line
+    } else {
+        "unknown".to_owned()
+    }
 }
 
 #[cfg(test)]
@@ -212,5 +232,30 @@ mod launcher_tests {
             harness_version(HarnessKind::Codex, stdout, b""),
             "gentle-shell 4.1.0"
         );
+    }
+
+    #[test]
+    fn vibe_requires_its_own_name_and_a_semantic_version() {
+        for accepted in ["vibe 3.1.4", "  vibe 3.1.4-rc.1 "] {
+            assert_eq!(
+                harness_version(HarnessKind::MistralVibe, accepted.as_bytes(), b"").trim(),
+                accepted.trim()
+            );
+        }
+        for rejected in [
+            "3.1.4",
+            "vibe",
+            "vibe version 3.1.4",
+            "vibe 3.1.4 extra",
+            "vibes 3.1.4",
+            "other 3.1.4",
+            "vibe latest",
+        ] {
+            assert_eq!(
+                harness_version(HarnessKind::MistralVibe, rejected.as_bytes(), b""),
+                "unknown",
+                "{rejected}"
+            );
+        }
     }
 }

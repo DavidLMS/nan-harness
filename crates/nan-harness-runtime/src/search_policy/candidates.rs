@@ -50,6 +50,7 @@ pub(super) fn add_harness_candidates(
         HarnessKind::Cline => add_cline_candidates(home, working, paths),
         HarnessKind::QwenCode => add_qwen_candidates(home, working, paths),
         HarnessKind::KimiCode => add_kimi_candidates(home, paths),
+        HarnessKind::MistralVibe => add_vibe_candidates(home, working, paths),
         HarnessKind::Goose => add_goose_candidates(home, paths),
         HarnessKind::Fx => add_fx_candidates(home, paths),
         HarnessKind::Aider => {}
@@ -143,6 +144,14 @@ fn add_kimi_candidates(home: &Path, paths: &mut BTreeSet<PathBuf>) {
     let kimi_home =
         env::var_os("KIMI_CODE_HOME").map_or_else(|| home.join(".kimi-code"), PathBuf::from);
     paths.extend([kimi_home.join("config.toml"), kimi_home.join("mcp.json")]);
+}
+
+fn add_vibe_candidates(home: &Path, working: &Path, paths: &mut BTreeSet<PathBuf>) {
+    let vibe_home = env::var_os("VIBE_HOME").map_or_else(|| home.join(".vibe"), PathBuf::from);
+    paths.extend([
+        vibe_home.join("config.toml"),
+        working.join(".vibe/config.toml"),
+    ]);
 }
 
 fn add_goose_candidates(home: &Path, paths: &mut BTreeSet<PathBuf>) {

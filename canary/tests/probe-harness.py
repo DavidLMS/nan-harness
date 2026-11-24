@@ -20,7 +20,7 @@ CELL = importlib.util.module_from_spec(CELL_SPEC)
 CELL_SPEC.loader.exec_module(CELL)
 HARNESSES = (
     "claude-code", "codex", "mimo-code", "zcode", "opencode", "hermes", "pi", "omp", "prime-agent",
-    "deepseek-harness", "openclaw", "cline", "qwen-code", "kimi-code", "aider",
+    "deepseek-harness", "openclaw", "cline", "qwen-code", "kimi-code", "mistral-vibe", "aider",
     "goose", "fx",
 )
 
@@ -84,7 +84,7 @@ elif os.environ.get("NAN_CANARY_FAKE_MODE") not in ("toolfailure", "mimopersiste
         "claude": '{"name":"Read"}', "opencode": '{"tool":"read"}', "mimo": '{"tool":"read"}',
         "pi": '{"toolName":"read"}', "omp": '{"toolName":"read"}',
         "cline": "read_files", "qwen": '{"name":"read_file"}',
-        "kimi": "Read", "goose": '{"name":"shell"}',
+        "kimi": "Read", "vibe": '{"toolName":"file_system.read_file"}', "goose": '{"name":"shell"}',
     }
     if subcommand in outputs:
         print(outputs[subcommand])

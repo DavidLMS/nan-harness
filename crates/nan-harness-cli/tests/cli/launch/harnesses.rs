@@ -54,6 +54,12 @@ fn direct_harness_dry_runs_build_safe_native_overlays() {
             "KIMI_MODEL_DISPLAY_NAME",
         ),
         (
+            "vibe",
+            "vibe 3.1.4",
+            "NAN_VIBE_API_KEY",
+            "{artifact:vibe-home}",
+        ),
+        (
             "aider",
             "aider 0.86.2",
             "AIDER_OPENAI_API_KEY",
@@ -100,6 +106,140 @@ fn direct_harness_dry_runs_build_safe_native_overlays() {
 
 #[cfg(unix)]
 #[test]
+fn vibe_dry_run_rejects_a_native_model_and_keeps_other_arguments() {
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let executable = fake_harness(directory.path(), "vibe 3.1.4");
+    let executable = executable.to_str().expect("path should be UTF-8");
+
+    let rejected = run_with_embedded_compatibility(&[
+        "vibe",
+        "--executable",
+        executable,
+        "--dry-run",
+        "--",
+        "--model",
+        "other",
+    ]);
+    assert!(!rejected.status.success());
+    assert!(
+        String::from_utf8_lossy(&rejected.stderr).contains("conflicts with nan-harness routing")
+    );
+
+    let accepted = run_with_embedded_compatibility(&[
+        "vibe",
+        "--executable",
+        executable,
+        "--dry-run",
+        "--",
+        "--trust",
+        "-p",
+        "inspect",
+        "--max-turns",
+        "3",
+    ]);
+    let plan: serde_json::Value =
+        serde_json::from_slice(&accepted.stdout).expect("dry run should print a JSON plan");
+    assert!(accepted.status.success());
+    assert_eq!(
+        plan["process"]["arguments"],
+        serde_json::json!(["--trust", "-p", "inspect", "--max-turns", "3"])
+    );
+    assert_eq!(
+        plan["environment"]["public"]["VIBE_HOME"],
+        "{artifact:vibe-home}"
+    );
+    assert!(
+        plan["environment"]["remove"]
+            .as_array()
+            .expect("removed environment")
+            .iter()
+            .any(|name| name == "MISTRAL_API_KEY")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn vibe_context_sets_a_native_threshold_and_rejects_invalid_values() {
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let executable = fake_harness(directory.path(), "vibe 3.1.4");
+    let executable = executable.to_str().expect("path should be UTF-8");
+
+    let accepted = run_with_embedded_compatibility(&[
+        "vibe",
+        "--executable",
+        executable,
+        "--dry-run",
+        "--context",
+        "50000",
+    ]);
+    let stdout = String::from_utf8(accepted.stdout).expect("output should be UTF-8");
+    assert!(
+        accepted.status.success(),
+        "{}",
+        String::from_utf8_lossy(&accepted.stderr)
+    );
+    assert!(
+        stdout.contains("auto_compact_threshold = 50000"),
+        "{stdout}"
+    );
+
+    for value in ["0", "99999999"] {
+        let rejected = run_with_embedded_compatibility(&[
+            "vibe",
+            "--executable",
+            executable,
+            "--dry-run",
+            "--context",
+            value,
+        ]);
+        assert!(!rejected.status.success(), "{value}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn vibe_dry_run_lists_persistent_state_without_creating_it() {
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let executable = fake_harness(directory.path(), "vibe 3.1.4");
+    let vibe_home = directory.path().join("never-created");
+    let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
+        .args([
+            "vibe",
+            "--executable",
+            executable.to_str().expect("path should be UTF-8"),
+            "--dry-run",
+        ])
+        .env("VIBE_HOME", &vibe_home)
+        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
+        .env("NAN_HARNESS_CONFIG_DIR", directory.path().join("state"))
+        .env_remove("NAN_API_KEY")
+        .output()
+        .expect("nanh should start");
+    let plan: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("dry run should print a JSON plan");
+
+    assert!(output.status.success());
+    let state = plan["configurationOverlays"][0]["persistentState"]
+        .as_array()
+        .expect("persistent state should be declared");
+    assert!(
+        state
+            .iter()
+            .any(|entry| entry["path"] == "logs" && entry["kind"] == "directory")
+    );
+    assert!(
+        state
+            .iter()
+            .any(|entry| entry["path"] == "trusted_folders.toml" && entry["kind"] == "file")
+    );
+    assert!(
+        !vibe_home.exists(),
+        "a dry run must not create the Vibe home"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn gateway_escape_hatch_dry_run_explains_its_effect() {
     let directory = tempfile::tempdir().expect("temporary directory should be created");
     let executable = fake_harness(directory.path(), "0.84.2");
@@ -131,6 +271,8 @@ fn harness_aliases_remain_executable() {
         ("deepseek-harness", "0.2.0-rc.2", "deepseek-harness"),
         ("qwen-code", "0.25.0", "qwen-code"),
         ("kimi-code", "0.36.1", "kimi-code"),
+        ("vibe", "vibe 3.1.4", "mistral-vibe"),
+        ("mistral-vibe", "vibe 3.1.4", "mistral-vibe"),
     ];
 
     for (command, version, harness_kind) in cases {

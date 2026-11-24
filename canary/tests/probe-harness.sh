@@ -50,6 +50,17 @@ if [ "${1:-}" = omp ]; then
   exit 0
 fi
 
+if [ -n "${FAKE_READONLY_TREE:-}" ]; then
+  # Mirrors Vibe's plugin cache: read-only directories holding read-only files,
+  # plus a symlink that must never be followed out of the workspace.
+  mkdir -p "$HOME/.vibe/logs/session/plugins/packages/pkg/nested"
+  printf '%s\n' cached >"$HOME/.vibe/logs/session/plugins/packages/pkg/nested/file"
+  ln -s "$FAKE_READONLY_TREE" "$HOME/.vibe/logs/session/plugins/outside-link"
+  chmod 400 "$HOME/.vibe/logs/session/plugins/packages/pkg/nested/file"
+  chmod -R a-w "$HOME/.vibe/logs/session/plugins/packages"
+  chmod 500 "$HOME/.vibe/logs/session/plugins/packages/pkg/nested"
+fi
+
 target=''
 for argument in "$@"; do
   if [[ "$argument" =~ create\ \'([^\']+)\'\ with\ exactly\ NAN_HERMES_TOOL_OK ]]; then
@@ -90,6 +101,23 @@ FAKE_USAGE_SUMMARY='🔥 Tokens burned — this session (partial)' \
   run_probe
 FAKE_USAGE_SUMMARY='NaN usage (legacy)' \
   run_probe
+
+# Read-only trees written by a harness must not fail the workspace cleanup, and
+# cleanup must not follow a symlink to change permissions outside the workspace.
+outside_directory="$temporary_directory/outside"
+mkdir "$outside_directory"
+printf '%s\n' keep >"$outside_directory/file"
+chmod 400 "$outside_directory/file"
+chmod 500 "$outside_directory"
+readonly_marker="$temporary_directory/readonly-marker.json"
+FAKE_READONLY_TREE="$outside_directory" NAN_CANARY_PROBE_RESULT="$readonly_marker" run_probe
+grep -F '"stage":"complete","status":"passed"' "$readonly_marker" >/dev/null
+if [ -w "$outside_directory" ] || [ -w "$outside_directory/file" ]; then
+  printf 'probe cleanup changed permissions outside its workspace\n' >&2
+  exit 1
+fi
+test -f "$outside_directory/file"
+chmod 700 "$outside_directory"
 
 stdout_failure="$temporary_directory/stdout-failure.txt"
 if FAKE_USAGE_STREAM=stdout run_probe >"$stdout_failure" 2>&1; then

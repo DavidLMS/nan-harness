@@ -5,7 +5,7 @@ use nan_harness_core::model::{
 use serde_json::Value;
 use std::collections::BTreeSet;
 
-const WIRE_FIELDS: [&str; 17] = [
+const WIRE_FIELDS: [&str; 18] = [
     "claude-code",
     "codex",
     "opencode",
@@ -20,6 +20,7 @@ const WIRE_FIELDS: [&str; 17] = [
     "cline",
     "qwen-code",
     "kimi-code",
+    "mistral-vibe",
     "aider",
     "goose",
     "fx",
@@ -32,7 +33,7 @@ type ExpectedQualification = (
     &'static str,
 );
 
-const EXPECTED_QUALIFICATIONS: [ExpectedQualification; 17] = [
+const EXPECTED_QUALIFICATIONS: [ExpectedQualification; 18] = [
     (
         HarnessKind::ClaudeCode,
         QualificationStatus::Qualified,
@@ -118,6 +119,12 @@ const EXPECTED_QUALIFICATIONS: [ExpectedQualification; 17] = [
         "2026-09-06/kimi-code",
     ),
     (
+        HarnessKind::MistralVibe,
+        QualificationStatus::Unknown,
+        QualificationTransport::DirectChat,
+        "2026-11-24/mistral-vibe",
+    ),
+    (
         HarnessKind::Aider,
         QualificationStatus::Unknown,
         QualificationTransport::DirectChat,
@@ -180,6 +187,7 @@ fn distinct_matrix() -> QualificationMatrix {
         cline,
         qwen_code,
         kimi_code,
+        mistral_vibe,
         aider,
         goose,
         fx,
@@ -200,6 +208,7 @@ fn distinct_matrix() -> QualificationMatrix {
         cline,
         qwen_code,
         kimi_code,
+        mistral_vibe,
         aider,
         goose,
         fx,
@@ -275,4 +284,17 @@ fn old_qualification_matrices_default_mimo_to_unknown() {
         QualificationTransport::DirectChat
     );
     assert_eq!(matrix.mimo_code.tested_at, None);
+}
+
+#[test]
+fn old_qualification_matrices_default_mistral_vibe_to_unknown() {
+    let mut wire = serde_json::to_value(distinct_matrix()).expect("serialize");
+    wire.as_object_mut().expect("object").remove("mistral-vibe");
+    let matrix: QualificationMatrix = serde_json::from_value(wire).expect("legacy matrix");
+    assert_eq!(matrix.mistral_vibe.status, QualificationStatus::Unknown);
+    assert_eq!(
+        matrix.mistral_vibe.transport,
+        QualificationTransport::DirectChat
+    );
+    assert_eq!(matrix.mistral_vibe.tested_at, None);
 }

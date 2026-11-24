@@ -117,6 +117,7 @@ pub(crate) fn for_harness_with_media(
             default_model,
             search.managed,
         )?,
+        HarnessKind::MistralVibe => super::vibe::vibe_plans(paths, request)?,
         HarnessKind::ClaudeCode | HarnessKind::Codex | HarnessKind::Fx => {
             return Err(ConfigurationError::BridgeOnly(harness));
         }

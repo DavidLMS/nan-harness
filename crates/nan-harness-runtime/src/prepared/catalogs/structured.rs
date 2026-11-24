@@ -1,4 +1,5 @@
 use nan_harness_core::CodingModelProfile;
+use nan_harness_core::model::ReasoningPolicy;
 use nan_harness_i18n::DiagnosticText;
 use nan_harness_i18n::messages as detail_messages;
 
@@ -108,4 +109,67 @@ pub(in crate::prepared) fn render_kimi_model_catalog(
             detail_messages::detail_render_the_kimi_code_model_catalog_failed(locale, &(error))
         })
     })
+}
+
+/// Renders Vibe's `[[models]]` array for every discovered model.
+///
+/// Vibe offers `thinking_levels` and, when it is narrowed from its default
+/// five, always sends an explicit `reasoning_effort` (the lowest level, or
+/// `none`). Models with an adjustable control therefore keep Vibe's
+/// uncurated defaults so an untouched session omits the field. Every other
+/// model declares an empty level set, which Vibe treats as "no control".
+pub(in crate::prepared) fn mistral_vibe_model_catalog(
+    models: &[CodingModelProfile],
+) -> Result<String, DiagnosticText> {
+    let tables = models
+        .iter()
+        .map(mistral_vibe_model_table)
+        .collect::<Result<Vec<_>, _>>()?;
+    toml::to_string(&toml::Value::Table(toml::Table::from_iter([(
+        "models".to_owned(),
+        toml::Value::Array(tables),
+    )])))
+    .map_err(|error| {
+        DiagnosticText::new(|locale| {
+            detail_messages::detail_render_the_mistral_vibe_model_catalog_failed(locale, &(error))
+        })
+    })
+}
+
+fn mistral_vibe_model_table(model: &CodingModelProfile) -> Result<toml::Value, DiagnosticText> {
+    let (context_window, max_output_tokens) = kimi_model_limits(model)?;
+    // Vibe refuses a model whose max output does not fit inside its window
+    // (`max_output_tokens < max_context_length`). A profile may advertise an
+    // output equal to the window, so keep one token of input room. Vibe still
+    // caps each request to the room its window leaves.
+    let max_output_tokens = max_output_tokens.min(context_window.saturating_sub(1));
+    let mut table = toml::Table::from_iter([
+        ("name".to_owned(), toml::Value::String(model.id.clone())),
+        ("provider".to_owned(), toml::Value::String("nan".to_owned())),
+        ("alias".to_owned(), toml::Value::String(model.id.clone())),
+        (
+            "display_name".to_owned(),
+            toml::Value::String(model.display_name.clone()),
+        ),
+        (
+            "max_context_length".to_owned(),
+            toml::Value::Integer(context_window),
+        ),
+        (
+            "max_output_tokens".to_owned(),
+            toml::Value::Integer(max_output_tokens),
+        ),
+        (
+            "supports_images".to_owned(),
+            toml::Value::Boolean(model.image_input),
+        ),
+    ]);
+    if !matches!(
+        model.reasoning,
+        ReasoningPolicy::Toggle { .. } | ReasoningPolicy::Effort { .. }
+    ) {
+        table.insert("thinking".to_owned(), toml::Value::String("off".to_owned()));
+        table.insert("thinking_levels".to_owned(), toml::Value::Array(Vec::new()));
+    }
+    Ok(toml::Value::Table(table))
 }

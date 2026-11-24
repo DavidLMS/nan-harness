@@ -90,6 +90,7 @@ fn whole_system_doctor_is_safe_and_nonfatal_without_optional_tools() {
         "cline",
         "qwen-code",
         "kimi-code",
+        "mistral-vibe",
         "aider",
         "goose",
         "fx",

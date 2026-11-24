@@ -10,7 +10,7 @@ from cell import CODEX_REASONING_EVIDENCE, CODEX_REASONING_DETAILS, HERMES_INSTA
 from selection import WINDOWS_UNAVAILABLE, WINDOWS_SKIP_REASON
 
 HARNESSES = ("claude-code", "codex", "mimo-code", "zcode", "opencode", "hermes", "pi", "omp", "prime-agent",
-             "deepseek-harness", "openclaw", "cline", "qwen-code", "kimi-code", "aider", "goose", "fx")
+             "deepseek-harness", "openclaw", "cline", "qwen-code", "kimi-code", "mistral-vibe", "aider", "goose", "fx")
 PYTHON_VERSION = "3.12"
 PHASES = ("metadata", "prerequisites", "install", "version-doctor", "deterministic-contract", "live-tool")
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")

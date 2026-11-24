@@ -9,7 +9,7 @@ import re
 
 CLI_HARNESSES = (
     "claude-code", "codex", "mimo-code", "zcode", "opencode", "hermes", "pi", "gentle-shell", "omp", "prime-agent",
-    "deepseek-harness", "openclaw", "cline", "qwen-code", "kimi-code", "aider",
+    "deepseek-harness", "openclaw", "cline", "qwen-code", "kimi-code", "mistral-vibe", "aider",
     "goose", "fx",
 )
 # One entry per hosted platform: the runner label that provides it, the architecture

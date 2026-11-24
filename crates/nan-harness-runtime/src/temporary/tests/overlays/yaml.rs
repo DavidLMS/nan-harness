@@ -26,6 +26,7 @@ fn yaml_overlay_merges_maps_and_unions_plugin_lists() {
                 .to_owned(),
             policy: OverlayFilePolicy::MergeYaml,
         }],
+        persistent_state: Vec::new(),
         lifecycle: ArtifactLifecycle::Launch,
     }];
 

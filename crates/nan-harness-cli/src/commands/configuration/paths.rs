@@ -9,6 +9,7 @@ pub(crate) struct ConfigurationPaths {
     pub(crate) qwen_directory: PathBuf,
     pub(crate) deepseek_directory: PathBuf,
     pub(crate) kimi_directory: PathBuf,
+    pub(crate) vibe_directory: PathBuf,
     pub(crate) goose_directory: PathBuf,
     pub(crate) mimo_config_directory: PathBuf,
     pub(crate) mimo_auth_path: PathBuf,
@@ -36,6 +37,9 @@ impl ConfigurationPaths {
             env::var_os("DSH_HOME").map_or_else(|| home_directory.join(".dsh"), PathBuf::from);
         let kimi_directory = env::var_os("KIMI_CODE_HOME")
             .map_or_else(|| home_directory.join(".kimi-code"), PathBuf::from);
+        let vibe_directory = env::var_os("VIBE_HOME")
+            .filter(|value| !value.is_empty())
+            .map_or_else(|| home_directory.join(".vibe"), PathBuf::from);
         let goose_directory = goose_config_directory(&home_directory);
         let (mimo_config_directory, mimo_auth_path) = mimo_paths(&home_directory);
         Ok(Self {
@@ -45,6 +49,7 @@ impl ConfigurationPaths {
             qwen_directory,
             deepseek_directory,
             kimi_directory,
+            vibe_directory,
             goose_directory,
             mimo_config_directory,
             mimo_auth_path,
@@ -63,6 +68,7 @@ impl ConfigurationPaths {
             qwen_directory: home_directory.join(".qwen"),
             deepseek_directory: home_directory.join(".dsh"),
             kimi_directory: home_directory.join(".kimi-code"),
+            vibe_directory: home_directory.join(".vibe"),
             goose_directory: home_directory.join(".config/goose"),
             mimo_config_directory: home_directory.join(".config/mimocode"),
             mimo_auth_path: home_directory.join(".local/share/mimocode/auth.json"),

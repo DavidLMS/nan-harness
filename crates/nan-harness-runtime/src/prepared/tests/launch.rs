@@ -32,6 +32,7 @@ fn prepared_search_overlay_resolves_to_valid_enabled_or_disabled_json() {
                 .to_owned(),
                 policy: OverlayFilePolicy::MergeJson,
             }],
+            persistent_state: Vec::new(),
             lifecycle: ArtifactLifecycle::Launch,
         });
         let token_ref = SecretRef::new("nan_api_key").expect("secret reference");

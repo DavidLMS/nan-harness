@@ -1,7 +1,8 @@
 use super::support::context;
 use nan_harness_adapters::{
     AiderAdapter, ClineAdapter, DeepSeekHarnessAdapter, GooseAdapter, HermesAdapter,
-    KimiCodeAdapter, OmpAdapter, OpenClawAdapter, OpenCodeAdapter, PiAdapter, QwenCodeAdapter,
+    KimiCodeAdapter, MistralVibeAdapter, OmpAdapter, OpenClawAdapter, OpenCodeAdapter, PiAdapter,
+    QwenCodeAdapter,
 };
 use nan_harness_core::{HarnessAdapter, HarnessKind, PlanError, build_validated_plan};
 
@@ -51,6 +52,11 @@ fn direct_adapters_reject_arguments_that_can_bypass_nan_routing() {
         (
             &KimiCodeAdapter as &dyn HarnessAdapter,
             HarnessKind::KimiCode,
+            "--model=other",
+        ),
+        (
+            &MistralVibeAdapter as &dyn HarnessAdapter,
+            HarnessKind::MistralVibe,
             "--model=other",
         ),
         (

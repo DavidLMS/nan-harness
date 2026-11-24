@@ -1,7 +1,8 @@
 use crate::prepared::catalogs::{
     aider_model_settings, cline_model_catalog, deepseek_model_catalog, goose_model_catalog,
-    hermes_model_catalog, kimi_code_model_catalog, openclaw_model_catalog, opencode_model_catalog,
-    pi_model_catalog, qwen_code_model_catalog, render_model_catalogs,
+    hermes_model_catalog, kimi_code_model_catalog, mistral_vibe_model_catalog,
+    openclaw_model_catalog, opencode_model_catalog, pi_model_catalog, qwen_code_model_catalog,
+    render_model_catalogs,
 };
 use nan_harness_core::coding_model_profile;
 use nan_harness_core::launch_plan::{
@@ -286,5 +287,96 @@ fn aider_declares_reasoning_effort_for_effort_capable_models() {
         by_name("openai/mimo-v2.6-flash")
             .get("reasoning_effort")
             .is_none()
+    );
+}
+
+#[test]
+fn vibe_catalog_lists_every_model_and_keeps_reasoning_omission_unless_unadjustable() {
+    let mut models = known_models();
+    models.push(model("synthetic-unknown"));
+    let rendered = mistral_vibe_model_catalog(&models).expect("Vibe catalog");
+    let table: toml::Table = toml::from_str(&rendered).expect("Vibe catalog should be TOML");
+    let entries = table["models"].as_array().expect("models array");
+    assert_eq!(entries.len(), models.len());
+    let by_alias = |alias: &str| {
+        entries
+            .iter()
+            .find(|entry| entry["alias"].as_str() == Some(alias))
+            .unwrap_or_else(|| panic!("missing {alias}"))
+    };
+
+    for entry in entries {
+        assert_eq!(entry["provider"].as_str(), Some("nan"));
+        assert_eq!(entry["name"], entry["alias"]);
+        assert!(entry["max_context_length"].as_integer().unwrap() > 0);
+        assert!(entry["max_output_tokens"].as_integer().unwrap() > 0);
+    }
+    // Adjustable controls keep Vibe's defaults: a narrowed level set would make
+    // Vibe send an explicit effort for an untouched session.
+    for adjustable in ["qwen3.6", "gemma4", "glm5.2", "mimo-v2.6-flash"] {
+        let entry = by_alias(adjustable);
+        assert!(entry.get("thinking").is_none(), "{adjustable}");
+        assert!(entry.get("thinking_levels").is_none(), "{adjustable}");
+    }
+    // Always-on and unknown models never receive a reasoning_effort field.
+    for fixed in ["deepseek-v4-flash", "synthetic-unknown"] {
+        let entry = by_alias(fixed);
+        assert_eq!(entry["thinking"].as_str(), Some("off"), "{fixed}");
+        assert_eq!(
+            entry["thinking_levels"].as_array().map(Vec::len),
+            Some(0),
+            "{fixed}"
+        );
+    }
+    assert_eq!(by_alias("qwen3.6")["supports_images"].as_bool(), Some(true));
+    assert_eq!(
+        by_alias("synthetic-unknown")["supports_images"].as_bool(),
+        Some(false)
+    );
+}
+
+#[test]
+fn vibe_catalog_keeps_max_output_below_the_context_window() {
+    let mut equal = model("equal-window");
+    equal.context_window = 1_000_000;
+    equal.max_output_tokens = 1_000_000;
+    let mut oversized = model("oversized");
+    oversized.context_window = 128_000;
+    oversized.max_output_tokens = 500_000;
+    let mut fits = model("fits");
+    fits.max_output_tokens = 65_536;
+    let rendered = mistral_vibe_model_catalog(&[equal, oversized, fits]).expect("Vibe catalog");
+    let table: toml::Table = toml::from_str(&rendered).expect("Vibe catalog should be TOML");
+    let limits: Vec<(i64, i64)> = table["models"]
+        .as_array()
+        .expect("models array")
+        .iter()
+        .map(|entry| {
+            (
+                entry["max_context_length"].as_integer().unwrap(),
+                entry["max_output_tokens"].as_integer().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        limits,
+        [(1_000_000, 999_999), (128_000, 127_999), (262_144, 65_536)]
+    );
+}
+
+#[test]
+fn vibe_catalog_placeholder_renders_through_the_shared_facade() {
+    use nan_harness_core::launch_plan::MISTRAL_VIBE_MODEL_CATALOG_PLACEHOLDER;
+    let models = known_models();
+    let rendered = render_model_catalogs(
+        MISTRAL_VIBE_MODEL_CATALOG_PLACEHOLDER,
+        "https://nan.invalid/v1",
+        "qwen3.6",
+        Some(&models),
+    )
+    .expect("Vibe catalog placeholder should render");
+    assert_eq!(
+        rendered,
+        mistral_vibe_model_catalog(&models).expect("Vibe catalog")
     );
 }

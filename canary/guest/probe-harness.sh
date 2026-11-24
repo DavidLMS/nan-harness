@@ -75,6 +75,10 @@ cleanup() {
   fi
   cleanup_attempt=0
   while [ -e "$workspace" ] && [ "$cleanup_attempt" -lt 10 ]; do
+    # Harnesses may leave read-only files and directories (Vibe's plugin cache
+    # is mode 0500/0400), which rm cannot delete. chmod -R does not follow
+    # symlinks, so nothing outside the workspace is touched.
+    chmod -R u+rwX "$workspace" 2>/dev/null || true
     rm -rf "$workspace" 2>/dev/null || true
     cleanup_attempt="$((cleanup_attempt + 1))"
     if [ -e "$workspace" ]; then
@@ -262,6 +266,13 @@ case "$harness" in
       --prompt "$prompt" --output-format stream-json >"$output" 2>"$stderr_output"
     probe_stage='tool-evidence'
     grep -F 'Read' "$output" "$stderr_output" >/dev/null
+    ;;
+  mistral-vibe)
+    "$nan_command" vibe --model "$model" -- \
+      --trust --auto-approve --max-turns 12 --output streaming --prompt "$prompt" \
+      >"$output" 2>"$stderr_output"
+    probe_stage='tool-evidence'
+    grep -F '"toolName":"file_system.read_file"' "$output" "$stderr_output" >/dev/null
     ;;
   aider)
     verify_read_marker=false

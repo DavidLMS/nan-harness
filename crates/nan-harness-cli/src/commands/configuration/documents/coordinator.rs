@@ -46,6 +46,10 @@ pub(crate) fn prepare_documents(
                 (DocumentPlan::Kimi(plan), Some(DocumentReceipt::Toml(receipt))) => {
                     prepare_kimi(plan, Some(receipt))
                 }
+                (DocumentPlan::Vibe(plan), None) => prepare_vibe(plan, None),
+                (DocumentPlan::Vibe(plan), Some(DocumentReceipt::VibeToml(receipt))) => {
+                    prepare_vibe(plan, Some(receipt))
+                }
                 _ => Err(ConfigurationError::ReceiptMismatch),
             }
         })
@@ -75,6 +79,7 @@ pub(crate) fn plan_matches_receipt(plan: &DocumentPlan, receipt: &DocumentReceip
             plan.path == receipt.path
         }
         (DocumentPlan::Kimi(plan), DocumentReceipt::Toml(receipt)) => plan.path == receipt.path,
+        (DocumentPlan::Vibe(plan), DocumentReceipt::VibeToml(receipt)) => plan.path == receipt.path,
         _ => false,
     }
 }
@@ -105,6 +110,7 @@ pub(crate) fn prepare_removals(
             }
             DocumentReceipt::ExactFile(receipt) => prepare_exact_file_removal(receipt),
             DocumentReceipt::Toml(receipt) => prepare_kimi_removal(receipt),
+            DocumentReceipt::VibeToml(receipt) => prepare_vibe_removal(receipt),
         })
         .collect()
 }

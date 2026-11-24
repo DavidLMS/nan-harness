@@ -1,7 +1,7 @@
 use super::{assert_unsafe, base_plan, validate};
 use nan_harness_core::launch_plan::{
-    ArtifactLifecycle, ConfigurationOverlay, OverlayFile, OverlayFilePolicy, TemporaryArtifactMode,
-    USER_HOME_PLACEHOLDER,
+    ArtifactLifecycle, ConfigurationOverlay, OverlayFile, OverlayFilePolicy, PersistentStateEntry,
+    PersistentStateKind, TemporaryArtifactMode, USER_HOME_PLACEHOLDER,
 };
 
 fn overlay() -> ConfigurationOverlay {
@@ -15,6 +15,7 @@ fn overlay() -> ConfigurationOverlay {
             content_template: "model = \"qwen3.6\"".to_owned(),
             policy: OverlayFilePolicy::Replace,
         }],
+        persistent_state: Vec::new(),
         lifecycle: ArtifactLifecycle::Launch,
     }
 }
@@ -109,4 +110,37 @@ fn overlay_templates_accept_artifact_text_and_reject_unknown_runtime_placeholder
 
     plan.configuration_overlays[0].files[0].content_template = "{runtime:missing}".to_owned();
     assert_unsafe(&plan);
+}
+
+#[test]
+fn persistent_state_must_be_safe_unique_and_distinct_from_overlay_files() {
+    let entry = |path: &str, kind| PersistentStateEntry {
+        path: path.to_owned(),
+        kind,
+    };
+    let mut plan = base_plan();
+    let mut valid = overlay();
+    valid.persistent_state = vec![
+        entry("logs", PersistentStateKind::Directory),
+        entry("trusted.toml", PersistentStateKind::File),
+    ];
+    plan.configuration_overlays.push(valid);
+    validate(&plan).expect("distinct safe state entries should be valid");
+
+    for paths in [
+        vec!["../escape"],
+        vec!["/absolute"],
+        vec!["logs", "logs"],
+        vec!["config"],
+        vec!["config/settings.toml"],
+    ] {
+        let mut plan = base_plan();
+        let mut candidate = overlay();
+        candidate.persistent_state = paths
+            .into_iter()
+            .map(|path| entry(path, PersistentStateKind::Directory))
+            .collect();
+        plan.configuration_overlays.push(candidate);
+        assert_unsafe(&plan);
+    }
 }

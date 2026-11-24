@@ -822,6 +822,13 @@
       "crates/nan-harness-core/src/launch_plan/validation/transport.rs"
     ]
   },
+  "detail_must_be_between_minimum_and_maximum_tokens_for_the_vibe_context_window_effective_context_window_tokens": {
+    "description": "Launch planning and session execution. Preserve command names, paths, provider identifiers and diagnostic codes.",
+    "section": "launch",
+    "sources": [
+      "crates/nan-harness-core/src/launch_plan/schema.rs"
+    ]
+  },
   "detail_must_be_greater_than_requestedtokens": {
     "description": "Launch planning and session execution. Preserve command names, paths, provider identifiers and diagnostic codes.",
     "section": "launch",
@@ -971,6 +978,13 @@
     ]
   },
   "detail_render_the_kimi_code_model_catalog_failed": {
+    "description": "Launch planning and session execution. Preserve command names, paths, provider identifiers and diagnostic codes.",
+    "section": "launch",
+    "sources": [
+      "crates/nan-harness-runtime/src/prepared/catalogs/structured.rs"
+    ]
+  },
+  "detail_render_the_mistral_vibe_model_catalog_failed": {
     "description": "Launch planning and session execution. Preserve command names, paths, provider identifiers and diagnostic codes.",
     "section": "launch",
     "sources": [
@@ -6388,6 +6402,13 @@
       "crates/nan-harness-cli/src/app/commands.rs"
     ]
   },
+  "help_run_mistral_vibe_through_a_launch_scoped_nan_configuration": {
+    "description": "Command help and argument validation. Preserve command names, paths, provider identifiers and diagnostic codes.",
+    "section": "help",
+    "sources": [
+      "crates/nan-harness-cli/src/app/commands.rs"
+    ]
+  },
   "help_run_oh_my_pi_through_a_nan_provider_extension": {
     "description": "Command help and argument validation. Preserve command names, paths, provider identifiers and diagnostic codes.",
     "section": "help",
@@ -6591,6 +6612,13 @@
   },
   "install_npm_windows": {
     "description": "Missing npm setup guidance. Preserve URLs, command names, file extensions and PATH. The command parameter is the harness subcommand.",
+    "section": "install",
+    "sources": [
+      "crates/nan-harness-cli/src/commands/install/runtime.rs"
+    ]
+  },
+  "install_uv": {
+    "description": "Missing uv setup guidance. Preserve URLs, command names, file extensions and PATH. The command parameter is the harness subcommand.",
     "section": "install",
     "sources": [
       "crates/nan-harness-cli/src/commands/install/runtime.rs"

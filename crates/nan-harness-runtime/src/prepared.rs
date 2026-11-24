@@ -39,6 +39,17 @@ pub(crate) struct PreparedLaunch {
     hermes: Option<ManagedProfile>,
 }
 
+/// Renders Vibe's `[[models]]` array exactly as managed launches do, for
+/// native setup that writes the same projection into Vibe's own configuration.
+///
+/// # Errors
+///
+/// Returns an error when a model limit cannot be represented as a TOML integer.
+pub fn mistral_vibe_native_models(models: &[CodingModelProfile]) -> Result<String, PreparedError> {
+    let models = catalogs::unique_models(models);
+    catalogs::mistral_vibe_model_catalog(&models).map_err(PreparedError::ModelCatalog)
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum PreparedError {
     #[error(transparent)]

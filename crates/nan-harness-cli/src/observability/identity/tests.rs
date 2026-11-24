@@ -7,7 +7,7 @@ use nan_harness_telemetry::event::{
 };
 use std::collections::BTreeSet;
 
-const STABLE_TARGETS: [(&str, TelemetryHarnessKind); 16] = [
+const STABLE_TARGETS: [(&str, TelemetryHarnessKind); 17] = [
     ("claude", TelemetryHarnessKind::ClaudeCode),
     ("codex", TelemetryHarnessKind::Codex),
     ("opencode", TelemetryHarnessKind::OpenCode),
@@ -21,6 +21,7 @@ const STABLE_TARGETS: [(&str, TelemetryHarnessKind); 16] = [
     ("cline", TelemetryHarnessKind::Cline),
     ("qwen", TelemetryHarnessKind::QwenCode),
     ("kimi", TelemetryHarnessKind::KimiCode),
+    ("vibe", TelemetryHarnessKind::MistralVibe),
     ("aider", TelemetryHarnessKind::Aider),
     ("goose", TelemetryHarnessKind::Goose),
     ("fx", TelemetryHarnessKind::Fx),
