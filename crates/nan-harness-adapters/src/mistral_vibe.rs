@@ -6,7 +6,8 @@ use crate::search::{NAN_SEARCH_MCP_BINARY, NAN_SEARCH_MCP_ID, nan_search_endpoin
 use nan_harness_core::launch_plan::{
     ArtifactLifecycle, ConfigurationOverlay, MISTRAL_VIBE_MODEL_CATALOG_PLACEHOLDER,
     NAN_SEARCH_BLOCK_BEGIN, NAN_SEARCH_BLOCK_END, OverlayFile, OverlayFilePolicy,
-    PROVIDER_BASE_URL_PLACEHOLDER, TemporaryArtifactMode, VIBE_HOME_PLACEHOLDER,
+    PROVIDER_BASE_URL_PLACEHOLDER, PersistentStateEntry, PersistentStateKind,
+    TemporaryArtifactMode, VIBE_HOME_PLACEHOLDER,
 };
 use nan_harness_core::{
     ContextLimit, HarnessAdapter, HarnessKind, LaunchPlan, NativeContextLimit, PlanContext,
@@ -73,6 +74,7 @@ impl HarnessAdapter for MistralVibeAdapter {
                         ),
                         policy: OverlayFilePolicy::MergeTomlMcpServers,
                     }],
+                    persistent_state: persistent_state(),
                     lifecycle: ArtifactLifecycle::Launch,
                 }],
             },
@@ -129,4 +131,24 @@ fn vibe_config(model_id: &str, context_limit: Option<&ContextLimit>) -> String {
 /// TOML's, so the JSON encoder also covers quotes, backslashes and controls.
 fn toml_string(value: &str) -> String {
     serde_json::Value::String(value.to_owned()).to_string()
+}
+
+/// State Vibe creates under its home during a session.
+///
+/// Directories and `trusted_folders.toml` (which Vibe writes through a symlink)
+/// survive the launch. `vibehistory` and `local_projects.toml` are replaced by
+/// rename, which would swap the mirror link for a file inside the temporary
+/// overlay. `projects.toml` is left absent because Vibe treats an empty file as
+/// partially unreadable, unlike a missing one.
+fn persistent_state() -> Vec<PersistentStateEntry> {
+    let directories = ["logs", "worktrees", "skills", "agents"]
+        .map(|path| (path, PersistentStateKind::Directory));
+    directories
+        .into_iter()
+        .chain([("trusted_folders.toml", PersistentStateKind::File)])
+        .map(|(path, kind)| PersistentStateEntry {
+            path: path.to_owned(),
+            kind,
+        })
+        .collect()
 }

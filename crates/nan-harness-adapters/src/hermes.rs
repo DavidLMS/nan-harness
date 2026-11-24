@@ -746,6 +746,7 @@ impl HarnessAdapter for HermesAdapter {
                             policy: OverlayFilePolicy::Replace,
                         }))
                         .collect(),
+                    persistent_state: Vec::new(),
                     lifecycle: ArtifactLifecycle::Launch,
                 }],
             },

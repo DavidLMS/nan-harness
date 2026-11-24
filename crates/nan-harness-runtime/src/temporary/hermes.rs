@@ -56,6 +56,7 @@ mod tests {
             id: "hermes-home".into(),
             path_hint: "hermes".into(),
             source_path: HERMES_HOME_PLACEHOLDER.into(),
+            persistent_state: Vec::new(),
             lifecycle: ArtifactLifecycle::Launch,
             files: vec![],
         };

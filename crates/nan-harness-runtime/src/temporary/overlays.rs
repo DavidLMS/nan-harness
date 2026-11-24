@@ -24,6 +24,7 @@ pub(super) fn materialize_overlay(
     render: &impl Fn(&str, &str) -> Result<String, TemporaryError>,
     user_home: &Path,
 ) -> Result<(), TemporaryError> {
+    super::persistent::ensure_persistent_state(overlay, source)?;
     let dependency_files = super::hermes::dependency_files(overlay, source)
         .map_err(|error| overlay_error(&overlay.id, error))?;
     let replacements = overlay

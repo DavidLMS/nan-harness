@@ -92,6 +92,7 @@ fn pi_family_plan(context: &PlanContext) -> Result<LaunchPlan, PlanError> {
                         ),
                         policy: OverlayFilePolicy::MergeJson,
                     }],
+                    persistent_state: Vec::new(),
                     lifecycle: ArtifactLifecycle::Launch,
                 })
             }

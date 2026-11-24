@@ -106,6 +106,7 @@ fn configuration_overlay(provider_settings: String, model_catalog: String) -> Co
                 policy: OverlayFilePolicy::MergeJson,
             },
         ],
+        persistent_state: Vec::new(),
         lifecycle: ArtifactLifecycle::Launch,
     }
 }

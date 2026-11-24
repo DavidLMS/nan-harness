@@ -230,3 +230,44 @@ fn vibe_uses_its_native_compaction_threshold_and_rejects_invalid_limits() {
         assert!(ContextLimit::for_harness(HarnessKind::MistralVibe, requested, 128_000).is_err());
     }
 }
+
+#[test]
+fn vibe_declares_the_state_that_must_outlive_a_launch() {
+    use nan_harness_core::launch_plan::PersistentStateKind;
+
+    let plan = plan(
+        &MistralVibeAdapter,
+        &context(HarnessKind::MistralVibe, Vec::new()),
+    );
+    let state = &plan.configuration_overlays[0].persistent_state;
+    let paths = state
+        .iter()
+        .map(|entry| entry.path.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        paths,
+        [
+            "logs",
+            "worktrees",
+            "skills",
+            "agents",
+            "trusted_folders.toml"
+        ]
+    );
+    assert!(
+        state
+            .iter()
+            .all(|entry| (entry.path == "trusted_folders.toml")
+                == (entry.kind == PersistentStateKind::File))
+    );
+    // Files Vibe replaces by rename or reads differently when empty stay temporary.
+    for excluded in [
+        "vibehistory",
+        "local_projects.toml",
+        "projects.toml",
+        "config.toml",
+        ".env",
+    ] {
+        assert!(!paths.contains(&excluded), "{excluded}");
+    }
+}

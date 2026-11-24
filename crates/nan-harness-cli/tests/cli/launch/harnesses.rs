@@ -198,6 +198,48 @@ fn vibe_context_sets_a_native_threshold_and_rejects_invalid_values() {
 
 #[cfg(unix)]
 #[test]
+fn vibe_dry_run_lists_persistent_state_without_creating_it() {
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let executable = fake_harness(directory.path(), "vibe 3.1.4");
+    let vibe_home = directory.path().join("never-created");
+    let output = Command::new(env!("CARGO_BIN_EXE_nanh"))
+        .args([
+            "vibe",
+            "--executable",
+            executable.to_str().expect("path should be UTF-8"),
+            "--dry-run",
+        ])
+        .env("VIBE_HOME", &vibe_home)
+        .env("NAN_NO_COMPATIBILITY_CHECK", "1")
+        .env("NAN_HARNESS_CONFIG_DIR", directory.path().join("state"))
+        .env_remove("NAN_API_KEY")
+        .output()
+        .expect("nanh should start");
+    let plan: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("dry run should print a JSON plan");
+
+    assert!(output.status.success());
+    let state = plan["configurationOverlays"][0]["persistentState"]
+        .as_array()
+        .expect("persistent state should be declared");
+    assert!(
+        state
+            .iter()
+            .any(|entry| entry["path"] == "logs" && entry["kind"] == "directory")
+    );
+    assert!(
+        state
+            .iter()
+            .any(|entry| entry["path"] == "trusted_folders.toml" && entry["kind"] == "file")
+    );
+    assert!(
+        !vibe_home.exists(),
+        "a dry run must not create the Vibe home"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn gateway_escape_hatch_dry_run_explains_its_effect() {
     let directory = tempfile::tempdir().expect("temporary directory should be created");
     let executable = fake_harness(directory.path(), "0.84.2");

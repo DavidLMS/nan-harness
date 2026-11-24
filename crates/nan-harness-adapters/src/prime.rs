@@ -71,6 +71,7 @@ pub(crate) fn native_plan(context: &PlanContext) -> Result<LaunchPlan, PlanError
                 id: "prime-home".into(),
                 path_hint: "prime-agent".into(),
                 source_path: PRIME_HOME_PLACEHOLDER.into(),
+                persistent_state: Vec::new(),
                 lifecycle: ArtifactLifecycle::Launch,
                 files: vec![
                     OverlayFile {

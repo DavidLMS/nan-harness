@@ -407,7 +407,27 @@ pub struct ConfigurationOverlay {
     pub path_hint: String,
     pub source_path: String,
     pub files: Vec<OverlayFile>,
+    /// Harness-owned state that must outlive the temporary overlay. Missing
+    /// entries are created in the real source directory before it is mirrored,
+    /// so the harness writes through the mirror into user-owned storage.
+    /// Existing entries are never modified.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub persistent_state: Vec<PersistentStateEntry>,
     pub lifecycle: ArtifactLifecycle,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersistentStateEntry {
+    pub path: String,
+    pub kind: PersistentStateKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PersistentStateKind {
+    Directory,
+    File,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

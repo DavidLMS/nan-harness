@@ -95,6 +95,7 @@ impl HarnessAdapter for QwenCodeAdapter {
                             policy: OverlayFilePolicy::MergeJson,
                         },
                     ],
+                    persistent_state: Vec::new(),
                     lifecycle: ArtifactLifecycle::Launch,
                 }],
             },

@@ -4,6 +4,7 @@ mod hermes;
 mod lifecycle;
 mod overlays;
 mod paths;
+mod persistent;
 mod platform;
 #[cfg(test)]
 mod tests;

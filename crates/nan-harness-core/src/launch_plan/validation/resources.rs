@@ -160,6 +160,9 @@ fn validate_overlay_files(
         }
         validate_template_placeholders(plan, &overlay.id, Some(&file.content_template))?;
     }
+    for entry in &overlay.persistent_state {
+        validate_overlay_file_path(&mut paths, &overlay.id, &entry.path)?;
+    }
     Ok(())
 }
 

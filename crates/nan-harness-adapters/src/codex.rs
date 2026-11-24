@@ -188,6 +188,7 @@ fn launch_configuration(context: &PlanContext, model_config: &str) -> CodexLaunc
                 content_template: profile_content,
                 policy: OverlayFilePolicy::MergeToml,
             }],
+            persistent_state: Vec::new(),
             lifecycle: ArtifactLifecycle::Launch,
         }],
         scoped_files: Vec::new(),
