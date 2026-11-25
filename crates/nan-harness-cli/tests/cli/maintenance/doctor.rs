@@ -261,7 +261,7 @@ fn vibe_doctor_accepts_only_its_own_version_output_shape() {
     assert!(stdout.contains("Harness: mistral-vibe"));
     assert!(stdout.contains("Minimum supported: 3.1.4"));
     assert!(stdout.contains("Last compatible: 3.1.5"));
-    assert!(stdout.contains("Last live verified: none"));
+    assert!(stdout.contains("Last live verified: 3.1.5"));
     assert!(stdout.contains("Compatibility: tested"));
 
     // `vibe` is a generic executable name: a bare version could be any program.
