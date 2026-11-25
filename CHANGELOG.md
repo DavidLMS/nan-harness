@@ -7,6 +7,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.34] - 2026-11-25
+
 ### Added
 
 - Launch Mistral Vibe 3.1.4 or newer through NaN with `nanh vibe` (alias
@@ -1210,7 +1212,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.33...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.34...HEAD
+[0.1.34]: https://github.com/DavidLMS/nan-harness/compare/v0.1.33...v0.1.34
 [0.1.33]: https://github.com/DavidLMS/nan-harness/compare/v0.1.32...v0.1.33
 [0.1.32]: https://github.com/DavidLMS/nan-harness/compare/v0.1.31...v0.1.32
 [0.1.31]: https://github.com/DavidLMS/nan-harness/compare/v0.1.30...v0.1.31
