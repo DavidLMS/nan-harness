@@ -7,6 +7,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.35] - 2026-11-28
+
 ### Fixed
 
 - Keep managed Hermes 0.23.5 launches from treating the borrowed dependency
@@ -1218,7 +1220,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.34...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.35...HEAD
+[0.1.35]: https://github.com/DavidLMS/nan-harness/compare/v0.1.34...v0.1.35
 [0.1.34]: https://github.com/DavidLMS/nan-harness/compare/v0.1.33...v0.1.34
 [0.1.33]: https://github.com/DavidLMS/nan-harness/compare/v0.1.32...v0.1.33
 [0.1.32]: https://github.com/DavidLMS/nan-harness/compare/v0.1.31...v0.1.32
