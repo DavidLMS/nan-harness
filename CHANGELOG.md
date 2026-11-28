@@ -7,6 +7,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep managed Hermes 0.23.5 launches from treating the borrowed dependency
+  environment as stale. Hermes no longer pauses the gateway for a dependency
+  update or builds new environments inside the native Hermes installation.
+
 ## [0.1.34] - 2026-11-25
 
 ### Added

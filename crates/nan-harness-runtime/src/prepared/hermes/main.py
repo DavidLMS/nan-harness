@@ -219,6 +219,15 @@ def main(arguments):
         trace_control_namespace(home, action)
     if os.name != "nt":
         os.umask(0o077)
+    # Every action already runs on the interpreter Rust resolved. The managed
+    # plugin selection differs from the native one, so Hermes 0.23.5+ would
+    # otherwise judge the borrowed venv stale, fence the gateway for an update
+    # and build into the native environments. A launcher-named state folder
+    # keeps PM from selecting, repairing or building dependencies; cleanup
+    # removes it with the staged installs. Older releases ignore it.
+    state = home / "installs" / "launcher-state"
+    state.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.environ["HERMES_INSTALL_STATE_DIR"] = str(state)
     if action == "absent":
         require_absent(home)
     elif action == "stage":

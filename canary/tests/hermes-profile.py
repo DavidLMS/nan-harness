@@ -504,6 +504,25 @@ class PrivateFiles(unittest.TestCase):
                     self.assertNotIn("NAN_HARNESS_HERMES_LAZY_INSTALLS", os.environ)
                 self.assertEqual(observed, [original])
 
+    def test_native_actions_keep_dependency_state_inside_removable_staged_installs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory).resolve()
+            environment = {"NAN_HARNESS_HERMES_MANAGED_HOME": directory,
+                           "NAN_HARNESS_HERMES_OVERLAY": directory,
+                           "HERMES_INSTALL_STATE_DIR": str(home / "native-install")}
+            observed = []
+            with patch.dict(os.environ, environment, clear=True), \
+                    patch.object(runtime, "require_absent", lambda _home: observed.append(
+                        os.environ.get("HERMES_INSTALL_STATE_DIR"))):
+                runtime.main(["absent"])
+                state = home / "installs" / "launcher-state"
+                self.assertEqual(observed, [str(state)])
+                self.assertTrue(state.is_dir())
+                if os.name != "nt":
+                    self.assertEqual(state.stat().st_mode & 0o777, 0o700)
+                runtime.main(["cleanup"])
+            self.assertFalse((home / "installs").exists())
+
     def test_native_owner_stdin_is_eof_while_host_lifetime_remains_open(self):
         script = """
 import importlib.util, os, sys, threading, types

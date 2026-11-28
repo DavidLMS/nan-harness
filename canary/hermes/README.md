@@ -41,3 +41,12 @@ runtime generations alongside application dependencies. Missing PM state must no
 be confused with stale application dependencies: that starts an update during
 chat startup. A native `update_paused` refusal is retained as the closed
 `NH-HERMES-FRONTEND-UPDATE-PAUSED` diagnostic.
+
+Hermes 0.23.5 and newer also include enabled plugins in the dependency
+environment stamp. The managed profile intentionally enables different plugins
+from the native home, so every native action names a private
+`installs/launcher-state` folder through `HERMES_INSTALL_STATE_DIR`. Hermes then
+uses the interpreter Rust resolved, and never selects, repairs or builds a
+dependency environment. Lazy dependency installs are therefore refused during
+managed launches instead of writing into the native installation. Cleanup
+removes the folder with the staged installs; older releases ignore it.
